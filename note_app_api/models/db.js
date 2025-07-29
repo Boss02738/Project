@@ -1,5 +1,5 @@
 const { Pool } = require('pg');
-
+//แก้ตรงนี้ db_name กับ password 
 const pool = new Pool({
   user: 'postgres',
   host: 'localhost',
