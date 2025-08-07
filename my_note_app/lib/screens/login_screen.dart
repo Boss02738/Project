@@ -3,6 +3,7 @@ import 'register_screen.dart';
 import 'home_screen.dart';
 import '../api/api_service.dart';
 import 'dart:convert';
+import 'package:my_note_app/screens/NewPost.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
