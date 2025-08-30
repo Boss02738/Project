@@ -9,7 +9,7 @@ exports.register = async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash(password, 10);
     const result = await pool.query(
-      'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id, username',
+      'INSERT INTO users (username, password) VALUES ($1, $2) RETURNING id_user, username',
       [username, hashedPassword]
     );
     res.status(201).json({ message: 'ลงทะเบียนสำเร็จ', user: result.rows[0] });
@@ -30,10 +30,10 @@ exports.login = async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
     const user = result.rows[0];
-    if (!user) return res.status(401).json({ message: 'ไม่พบผู้ใช้' });
+    if (!user) return res.status(401).json({ message: 'ผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ message: 'รหัสผ่านไม่ถูกต้อง' });
+    if (!isMatch) return res.status(401).json({ message: 'ผู้ใช้หรือรหัสผ่านไม่ถูกต้อง' });
 
     res.status(200).json({ message: 'เข้าสู่ระบบสำเร็จ', user: { id: user.id, username: user.username } });
   } catch (err) {
@@ -45,7 +45,7 @@ exports.login = async (req, res) => {
 // เพิ่มฟังก์ชันสำหรับดึง users ทั้งหมด
 exports.getAllUsers = async (req, res) => {
   try {
-    const result = await pool.query('SELECT id, username FROM users');
+    const result = await pool.query('SELECT id_user, username FROM users');
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ message: 'เกิดข้อผิดพลาด', error: err.message });

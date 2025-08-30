@@ -62,14 +62,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: Column(
               children: [
                 const Text(
-                  'สมัครสมาชิก',
-                  style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+                  'CREATE YOUR ACCOUNT',
+                  style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 40),
                 TextField(
                   controller: emailController,
                   decoration: const InputDecoration(
-                    labelText: 'อีเมล',
+                    labelText: 'email',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -78,7 +78,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   controller: passwordController,
                   obscureText: true,
                   decoration: const InputDecoration(
-                    labelText: 'รหัสผ่าน',
+                    labelText: 'password',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -87,7 +87,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   controller: confirmPasswordController,
                   obscureText: true,
                   decoration: const InputDecoration(
-                    labelText: 'ยืนยันรหัสผ่าน',
+                    labelText: 'confirm password',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -96,13 +96,13 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: _handleRegister,
-                    child: const Text('สมัครสมาชิก'),
+                    child: const Text('sign up'),
                   ),
                 ),
                 const SizedBox(height: 10),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text('มีบัญชีอยู่แล้ว? เข้าสู่ระบบ'),
+                  child: const Text('Already have an account? Sign in'),
                 ),
               ],
             ),
