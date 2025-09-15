@@ -14,12 +14,12 @@ static const String baseUrl = 'http://10.40.150.148:3000/api/auth';
     );
   }
 //login
-  static Future<http.Response> login(String username, String password) async {
-    final url = Uri.parse('$baseUrl/login');
+  static Future<http.Response> login(String email, String password) async {
     return await http.post(
-      url,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'username': username, 'password': password}),
+      Uri.parse("$baseUrl/login"),
+      headers: {"Content-Type": "application/json"},
+      body: jsonEncode({"email": email, "password": password}),
     );
   }
+  
 }

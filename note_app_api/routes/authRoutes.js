@@ -1,11 +1,17 @@
+// routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
-const authController = require('../controllers/authController');
 
-// ตัวอย่าง route
-router.post('/register', authController.register);
-router.post('/login', authController.login);
+const {
+  startRegister,
+  verifyRegister,
+  resendOtp,
+  login,
+} = require('../controllers/authController');
 
-router.get('/all', authController.getAllUsers);
+router.post('/register/request-otp', startRegister);
+router.post('/register/verify', verifyRegister);
+router.post('/register/resend-otp', resendOtp);
+router.post('/login', login);   
 
 module.exports = router;

@@ -18,7 +18,7 @@ class MyApp extends StatelessWidget {
       title: 'Note App',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(primarySwatch: Colors.blue),
-      home: homescreen(), // ใช้ชื่อคลาสที่ถูกต้อง
+      home: LoginScreen(), // ใช้ชื่อคลาสที่ถูกต้อง
     );
   }
 }

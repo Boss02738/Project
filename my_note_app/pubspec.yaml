@@ -32,6 +32,7 @@ dependencies:
   flutter:
     sdk: flutter
   scribble: ^0.10.0+1
+  path_provider: ^2.1.4
   cupertino_icons: ^1.0.8
   http: ^1.4.0
   image_picker: ^1.0.7
@@ -40,6 +41,7 @@ dependencies:
 
 dev_dependencies:
   flutter_test:
+  
     sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to

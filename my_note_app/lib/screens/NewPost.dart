@@ -218,7 +218,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                         ),
                       ),
                     ),
-                  ),
+                  ), 
                   const SizedBox(width: 8),
 
                   // ===== ปุ่มโพสต์ =====
@@ -288,7 +288,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   onPressed: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => NoteDrawingPage()),
+                      MaterialPageRoute(builder: (_) => NoteScribblePage()),
                     );
                   },
                   child: const Text('เขียนโน้ตด้วยลายมือ'),

@@ -1,15 +1,3 @@
-// const { Pool } = require('pg');
-// //แก้ตรงนี้ db_name กับ password 
-// const pool = new Pool({
-//   user: 'postgres',
-//   host: 'localhost',
-//   database: 'note_app',
-//   password: 'Bossboss_02738',  // เปลี่ยนเป็นรหัสของคุณ
-//   port: 5432,
-// });
-
-// module.exports = pool;
-// models/db.js
 require('dotenv').config();
 const { Pool } = require('pg');
 
