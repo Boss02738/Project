@@ -28,24 +28,27 @@ class ApiService {
   }
 
   //update profile
-  static Future<http.Response> updateProfile({
-    required String email,
-    String? bio,
-    String? gender,
-  }) => http.post(
-    Uri.parse('$baseUrl/profile/update'),
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({'email': email, 'bio': bio, 'gender': gender}),
-  );
-   // 🔹 อัปโหลด avatar (multipart/form-data; field: avatar)
-  static Future<http.StreamedResponse> uploadAvatar({
+ static Future<http.Response> uploadAvatar({
     required String email,
     required File file,
   }) async {
     final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/profile/avatar'));
-    req.fields['email'] = email;
-    req.files.add(await http.MultipartFile.fromPath('avatar', file.path));
-    return req.send();
+    req.fields['email'] = email; // ต้องชื่อ email
+    req.files.add(await http.MultipartFile.fromPath('avatar', file.path)); // ต้องชื่อ avatar
+    final streamed = await req.send();
+    return http.Response.fromStream(streamed); // ✅ คืน http.Response
+  }
+
+  static Future<http.Response> updateProfile({
+    required String email,
+    String? bio,
+    String? gender,
+  }) {
+    return http.post(
+      Uri.parse('$baseUrl/profile/update'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'email': email, 'bio': bio, 'gender': gender}),
+    );
   }
 }
 
