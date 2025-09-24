@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
-const String apiBase = 'http://10.0.2.2:3000/api/auth';
+const String apiBase = 'http://10.40.150.148:3000/api/auth';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});

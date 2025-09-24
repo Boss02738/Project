@@ -4,6 +4,7 @@ import 'home_screen.dart';
 import '../api/api_service.dart';
 import 'dart:convert';
 import 'package:my_note_app/screens/NewPost.dart';
+import 'package:my_note_app/screens/create_profile_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -19,26 +20,42 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _handleLogin() async {
     final email = emailController.text.trim();
     final password = passwordController.text.trim();
-
     if (email.isEmpty || password.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("กรุณากรอกอีเมลและรหัสผ่าน")),
       );
       return;
     }
+
     try {
       final response = await ApiService.login(email, password);
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
+        final needProfile = (data['needProfile'] == true);
+
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("เข้าสู่ระบบสำเร็จ")));
-        // ไปหน้า homescreen
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const homescreen()),
-        );
+
+        if (needProfile) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CreateProfileScreen(
+                username: data['user']['username'],
+                email: data['user']['email'],
+                avatarUrl: data['user']['avatar_url'], // <- เพิ่ม
+              ),
+            ),
+          );
+        } else {
+          // เคยทำโปรไฟล์แล้ว → ไป Home
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const homescreen()),
+          );
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(data['message'] ?? "เข้าสู่ระบบไม่สำเร็จ")),
@@ -115,9 +132,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   onPressed: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(
-                        builder: (context) => RegisterScreen(),
-                      ),
+                      MaterialPageRoute(builder: (context) => RegisterScreen()),
                     );
                   },
                   child: const Text('Don’t have an account? Sign up'),
