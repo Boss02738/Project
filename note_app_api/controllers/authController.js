@@ -196,14 +196,16 @@ const login = async (req, res) => {
     const ok = await bcrypt.compare(password, u.password);
     if (!ok) return res.status(401).json({ message: 'รหัสผ่านไม่ถูกต้อง' });
 
-    // เช็คว่าต้องไปหน้า CreateProfile ไหม
-    const needProfile = (u.profile_completed !== undefined)
-      ? !u.profile_completed
-      : (!u.bio || !u.gender);
+    const needProfile = (u.profile_completed !== undefined) ? !u.profile_completed : (!u.bio || !u.gender);
+
+    // ✅ ส่ง avatar_url พร้อม fallback
+    const avatarUrl = (u.avatar_url && u.avatar_url.trim() !== '')
+      ? u.avatar_url
+      : '/uploads/avatars/default.png';
 
     return res.json({
       message: 'เข้าสู่ระบบสำเร็จ',
-      user: { id: u.id_user, username: u.username, email: u.email },
+      user: { id: u.id_user, username: u.username, email: u.email, avatar_url: avatarUrl },
       needProfile,
     });
   } catch (err) {
@@ -219,7 +221,6 @@ const updateProfile = async (req, res) => {
   const { email, bio, gender } = req.body;
   if (!email) return res.status(400).json({ message: 'ต้องมี email' });
 
-  // validate gender แบบง่าย
   const allow = new Set(['male','female','other']);
   if (gender && !allow.has(String(gender).toLowerCase())) {
     return res.status(400).json({ message: 'ค่า gender ไม่ถูกต้อง' });
@@ -245,5 +246,29 @@ const updateProfile = async (req, res) => {
   }
 };
 
-module.exports = { startRegister, verifyRegister, resendOtp, login, updateProfile };
+// ✅ อัปโหลดรูป + อัปเดต users.avatar_url
+const uploadAvatar = async (req, res) => {
+  try {
+    const email = req.body.email;
+    if (!email) return res.status(400).json({ message: 'ต้องส่ง email มาด้วย' });
+    if (!req.file) return res.status(400).json({ message: 'ไม่พบไฟล์รูป (avatar)' });
+
+    // ตรวจ user
+    const u = await pool.query('SELECT id_user FROM public.users WHERE email=$1', [email]);
+    if (u.rowCount === 0) return res.status(404).json({ message: 'ไม่พบบัญชีนี้' });
+
+    // path ที่ client เรียกได้
+    const fileUrl = `/uploads/avatars/${req.file.filename}`;
+
+    await pool.query('UPDATE public.users SET avatar_url=$2 WHERE email=$1', [email, fileUrl]);
+
+    console.log('[uploadAvatar] saved:', email, fileUrl);
+    return res.json({ message: 'อัปโหลดรูปสำเร็จ', avatar_url: fileUrl });
+  } catch (err) {
+    console.error('uploadAvatar error:', err);
+    return res.status(500).json({ message: 'อัปโหลดรูปไม่สำเร็จ' });
+  }
+};
+
+module.exports = { startRegister, verifyRegister, resendOtp, login, updateProfile, uploadAvatar };
 

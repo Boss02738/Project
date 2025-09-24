@@ -37,7 +37,10 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
   }
 
   Future<void> _pickImage() async {
-    final x = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
+    final x = await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
     if (x != null) {
       setState(() => _pickedFile = File(x.path));
     }
@@ -45,14 +48,17 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
 
   Future<String?> _uploadIfAny() async {
     if (_pickedFile == null) return null;
-    final resp = await ApiService.uploadAvatar(email: widget.email, file: _pickedFile!);
-    final body = await http.Response.fromStream(resp);
-    if (body.statusCode == 200) {
-      final data = jsonDecode(body.body);
+
+    final res = await ApiService.uploadAvatar(
+      email: widget.email,
+      file: _pickedFile!,
+    );
+    if (res.statusCode == 200) {
+      final data = jsonDecode(res.body);
       return data['avatar_url'] as String?;
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('อัปโหลดรูปไม่สำเร็จ')),
+        SnackBar(content: Text('อัปโหลดรูปไม่สำเร็จ (${res.statusCode})')),
       );
       return null;
     }
@@ -76,9 +82,9 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
 
       if (res.statusCode == 200) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('บันทึกโปรไฟล์สำเร็จ')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('บันทึกโปรไฟล์สำเร็จ')));
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (_) => const homescreen()),
@@ -121,17 +127,29 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('CREATE YOUR\nPROFILE',
-                      style: TextStyle(fontSize: 32, fontWeight: FontWeight.w800, height: 1.1)),
+                  const Text(
+                    'CREATE YOUR\nPROFILE',
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.w800,
+                      height: 1.1,
+                    ),
+                  ),
                   const SizedBox(height: 8),
-                  const Text('What would you like me to call you?', style: TextStyle(color: Colors.black54)),
+                  const Text(
+                    'What would you like me to call you?',
+                    style: TextStyle(color: Colors.black54),
+                  ),
 
                   const SizedBox(height: 20),
                   Center(
                     child: Stack(
                       alignment: Alignment.bottomRight,
                       children: [
-                        CircleAvatar(radius: 56, backgroundImage: _avatarProvider()),
+                        CircleAvatar(
+                          radius: 56,
+                          backgroundImage: _avatarProvider(),
+                        ),
                         InkWell(
                           onTap: _pickImage,
                           borderRadius: BorderRadius.circular(16),
@@ -141,9 +159,13 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                               color: Colors.indigo,
                               borderRadius: BorderRadius.circular(8),
                             ),
-                            child: const Icon(Icons.edit, color: Colors.white, size: 16),
+                            child: const Icon(
+                              Icons.edit,
+                              color: Colors.white,
+                              size: 16,
+                            ),
                           ),
-                        )
+                        ),
                       ],
                     ),
                   ),
@@ -161,7 +183,9 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                             labelText: 'Username',
                             prefixIcon: Icon(Icons.person_outline),
                             border: OutlineInputBorder(
-                              borderRadius: BorderRadius.all(Radius.circular(12)),
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(12),
+                              ),
                             ),
                             filled: true,
                           ),
@@ -175,7 +199,9 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                             labelText: 'Bio',
                             prefixIcon: Icon(Icons.info_outline),
                             border: OutlineInputBorder(
-                              borderRadius: BorderRadius.all(Radius.circular(12)),
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(12),
+                              ),
                             ),
                             filled: true,
                           ),
@@ -188,17 +214,29 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                             labelText: 'Gender',
                             prefixIcon: Icon(Icons.wc_outlined),
                             border: OutlineInputBorder(
-                              borderRadius: BorderRadius.all(Radius.circular(12)),
+                              borderRadius: BorderRadius.all(
+                                Radius.circular(12),
+                              ),
                             ),
                             filled: true,
                           ),
                           items: const [
-                            DropdownMenuItem(value: 'male', child: Text('male')),
-                            DropdownMenuItem(value: 'female', child: Text('female')),
-                            DropdownMenuItem(value: 'other', child: Text('other')),
+                            DropdownMenuItem(
+                              value: 'male',
+                              child: Text('male'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'female',
+                              child: Text('female'),
+                            ),
+                            DropdownMenuItem(
+                              value: 'other',
+                              child: Text('other'),
+                            ),
                           ],
                           onChanged: (v) => setState(() => _gender = v),
-                          validator: (v) => (v == null || v.isEmpty) ? 'เลือกเพศ' : null,
+                          validator: (v) =>
+                              (v == null || v.isEmpty) ? 'เลือกเพศ' : null,
                         ),
                         const SizedBox(height: 20),
 
@@ -208,7 +246,9 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                             onPressed: _loading ? null : _save,
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
                             ),
                             child: Text(_loading ? 'Saving...' : 'Confirm'),
                           ),
