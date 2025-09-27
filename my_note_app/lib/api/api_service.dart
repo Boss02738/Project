@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 class ApiService {
   //เปลี่ยนเป็น IP V4 ของเครื่องตัวเอง
   static const String baseUrl = 'http://10.40.150.148:3000/api/auth';
+  static const String host = 'http://10.40.150.148:3000';
   //register
   static Future<http.Response> register(
     String username,
@@ -50,5 +51,14 @@ class ApiService {
       body: jsonEncode({'email': email, 'bio': bio, 'gender': gender}),
     );
   }
+    static Future<Map<String, dynamic>> getUserBrief(int userId) async {
+    final resp = await http.get(Uri.parse('$baseUrl/user/$userId'));
+    if (resp.statusCode == 200) {
+      return jsonDecode(resp.body) as Map<String, dynamic>;
+    } else {
+      throw Exception('โหลดข้อมูลผู้ใช้ล้มเหลว: ${resp.statusCode}');
+    }
+  }
 }
+
 

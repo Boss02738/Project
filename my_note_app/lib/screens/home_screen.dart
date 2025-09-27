@@ -44,10 +44,13 @@ class _CmState extends State<homescreen> {
         onTap: (index) async {
           if (index == 2) {
             // ไปหน้า NewPostScreen แล้วรอผลลัพธ์
-            final result = await Navigator.pushReplacement(
+            final result = await Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => NewPostScreen(username: "test"),
+                builder: (context) => NewPostScreen(
+                  userId: 1, // 🔹 mock ไว้ก่อน
+                  username: "test", // 🔹 mock username
+                ),
               ),
             );
             // TODO: ถ้าต้องการ refresh หรือเพิ่มโพสต์ใหม่ใน Home ให้จัดการที่นี่

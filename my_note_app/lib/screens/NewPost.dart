@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
+import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/Drawing_Screen.dart';
 
 class NewPostScreen extends StatefulWidget {
-  final String username;
-  const NewPostScreen({super.key, required this.username});
+  final int userId;         // ✅ เพิ่ม: ใช้ดึงข้อมูลจาก API
+  final String username;    // ใช้เป็นค่าเริ่มต้นระหว่างรอโหลด
+  const NewPostScreen({
+    super.key,
+    required this.userId,
+    required this.username,
+  });
 
   @override
   State<NewPostScreen> createState() => _NewPostScreenState();
@@ -15,8 +21,14 @@ class NewPostScreen extends StatefulWidget {
 class _NewPostScreenState extends State<NewPostScreen> {
   final TextEditingController _detailController = TextEditingController();
 
+  // ----- header user state -----
+  String _username = '';
+  String? _avatarUrl; // path จาก server เช่น /uploads/avatars/xxx.jpg
+  bool _loadingUser = true;
+
+  // ----- post form state -----
   String selectedYear = 'ปี 1';
-  String? selectedSubject; // ค่าอาจเป็น null ตอนที่ลิสต์ยังไม่พร้อม
+  String? selectedSubject; 
   File? _image;
   File? _file;
 
@@ -36,7 +48,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
     '01418233 สถาปัตยกรรมคอมพิวเตอร์',
     '01418221 ระบบฐานข้อมูลเบื้องต้น',
     '01418232 การออกแบบและการวิเคราะห์ขั้นตอนวิธี',
-    '01418236 ระบบปฏิบัติการ',
+    '01418236 ระบบปฏิบัติงาน',
     '01418261 หลักพื้นฐานของปัญญาประดิษฐ์',
   ];
   final List<String> subjects3 = [
@@ -65,7 +77,33 @@ class _NewPostScreenState extends State<NewPostScreen> {
   @override
   void initState() {
     super.initState();
+    // ค่าเริ่มต้นระหว่างรอโหลดจาก API
+    _username = widget.username;
     selectedSubject = subjects.isNotEmpty ? subjects.first : null;
+    _loadUserHeader();
+  }
+
+  Future<void> _loadUserHeader() async {
+    try {
+      final data = await ApiService.getUserBrief(widget.userId);
+      if (!mounted) return;
+      setState(() {
+        _username = (data['username'] as String?)?.trim().isNotEmpty == true
+            ? data['username'] as String
+            : widget.username;
+        _avatarUrl = data['avatar_url'] as String?;
+        _loadingUser = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingUser = false; // ใช้ค่าจาก constructor ไปก่อน
+      });
+      // จะโชว์ snackBar ก็ได้ แต่ไม่บังคับ
+      // ScaffoldMessenger.of(context).showSnackBar(
+      //   const SnackBar(content: Text('โหลดข้อมูลผู้ใช้ไม่สำเร็จ')),
+      // );
+    }
   }
 
   @override
@@ -77,26 +115,21 @@ class _NewPostScreenState extends State<NewPostScreen> {
   Future<void> _pickImage() async {
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      setState(() => _image = File(pickedFile.path));
-    }
+    if (pickedFile != null) setState(() => _image = File(pickedFile.path));
   }
 
   Future<void> _pickFile() async {
-    // ตอนนี้เดโมใช้ ImagePicker; ถ้าจะรองรับทุกไฟล์ให้เปลี่ยนเป็น package file_picker
+    // เดโมยังใช้ image picker; ถ้าจะรองรับเอกสารให้เปลี่ยนเป็น file_picker
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) {
-      setState(() => _file = File(pickedFile.path));
-    }
+    if (pickedFile != null) setState(() => _file = File(pickedFile.path));
   }
 
   void _handlePost() {
-    // validate เล็กน้อย
     if (selectedSubject == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('กรุณาเลือกรายวิชา')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('กรุณาเลือกรายวิชา')),
+      );
       return;
     }
 
@@ -109,6 +142,14 @@ class _NewPostScreenState extends State<NewPostScreen> {
     });
   }
 
+  ImageProvider _avatarProvider() {
+    if (_avatarUrl != null && _avatarUrl!.isNotEmpty) {
+      // รวม host + path จาก server
+      return NetworkImage('${ApiService.host}${_avatarUrl!}');
+    }
+    return const AssetImage('assets/default_avatar.png');
+  }
+
   @override
   Widget build(BuildContext context) {
     final subjectItems = subjects
@@ -117,13 +158,13 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Newpost'),
+        title: Text('NewPost'),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
             child: CircleAvatar(
               radius: 18,
-              backgroundImage: const AssetImage('assets/profile.png'),
+              backgroundImage: _avatarProvider(),
             ),
           ),
         ],
@@ -134,20 +175,24 @@ class _NewPostScreenState extends State<NewPostScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // แถวบน: username + dropdown ปี/วิชา + ปุ่มโพสต์
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(
-                    widget.username,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                  // ชื่อผู้ใช้ (ซ้ำกับ appbar ได้ แต่เผื่อ Boss อยากโชว์ตรง body ด้วย)
+                  Flexible(
+                    child: Text(
+                      _username,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                      overflow: TextOverflow.ellipsis,
                     ),
-                    // overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(width: 8),
 
-                  // ===== Dropdown ปี =====
+                  // Dropdown ปี
                   Flexible(
                     flex: 1,
                     child: Container(
@@ -155,7 +200,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
                       decoration: BoxDecoration(
                         border: Border.all(color: Colors.grey.shade400),
                         borderRadius: BorderRadius.circular(12),
-                        // color: const Color.fromARGB(255, 241, 241, 241),
                         color: const Color(0xFFFBFBFB),
                       ),
                       child: DropdownButtonHideUnderline(
@@ -163,18 +207,15 @@ class _NewPostScreenState extends State<NewPostScreen> {
                           isExpanded: true,
                           value: selectedYear,
                           items: years
-                              .map(
-                                (e) =>
-                                    DropdownMenuItem(value: e, child: Text(e)),
-                              )
+                              .map((e) =>
+                                  DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
                           onChanged: (val) {
                             if (val == null) return;
                             setState(() {
                               selectedYear = val;
-                              selectedSubject = subjects.isNotEmpty
-                                  ? subjects.first
-                                  : null;
+                              selectedSubject =
+                                  subjects.isNotEmpty ? subjects.first : null;
                             });
                           },
                         ),
@@ -183,9 +224,9 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   ),
                   const SizedBox(width: 8),
 
-                  // ===== Dropdown วิชา =====
+                  // Dropdown วิชา
                   Flexible(
-                    flex: 2, // ให้กว้างกว่าปี
+                    flex: 2,
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
@@ -200,12 +241,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                               ? selectedSubject
                               : null,
                           hint: const Text('รายวิชา'),
-                          items: subjects
-                              .map(
-                                (e) =>
-                                    DropdownMenuItem(value: e, child: Text(e)),
-                              )
-                              .toList(),
+                          items: subjectItems,
                           selectedItemBuilder: (context) => subjects.map((e) {
                             return Text(
                               e,
@@ -213,15 +249,14 @@ class _NewPostScreenState extends State<NewPostScreen> {
                               overflow: TextOverflow.ellipsis,
                             );
                           }).toList(),
-                          onChanged: (val) =>
-                              setState(() => selectedSubject = val),
+                          onChanged: (val) => setState(() => selectedSubject = val),
                         ),
                       ),
                     ),
-                  ), 
+                  ),
                   const SizedBox(width: 8),
 
-                  // ===== ปุ่มโพสต์ =====
+                  // ปุ่มโพสต์
                   ElevatedButton(
                     onPressed: _handlePost,
                     style: ElevatedButton.styleFrom(
@@ -239,6 +274,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
               ),
 
               const SizedBox(height: 16),
+
+              // ปุ่มแนบรูป/ไฟล์
               Row(
                 children: [
                   IconButton(
@@ -254,6 +291,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 ],
               ),
               const SizedBox(height: 8),
+
+              // เนื้อหาโพสต์
               TextField(
                 controller: _detailController,
                 maxLines: 5,
@@ -265,6 +304,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 ),
               ),
               const SizedBox(height: 16),
+
+              // Preview รูป/ไฟล์ที่แนบ
               if (_image != null)
                 Container(
                   margin: const EdgeInsets.only(bottom: 8),
@@ -278,11 +319,18 @@ class _NewPostScreenState extends State<NewPostScreen> {
                     children: [
                       const Icon(Icons.insert_drive_file),
                       const SizedBox(width: 8),
-                      Text(_file!.path.split('/').last),
+                      Expanded(
+                        child: Text(
+                          _file!.path.split(Platform.pathSeparator).last,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
                   ),
                 ),
+
               const SizedBox(height: 24),
+
               Center(
                 child: ElevatedButton(
                   onPressed: () {

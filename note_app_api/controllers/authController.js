@@ -270,5 +270,32 @@ const uploadAvatar = async (req, res) => {
   }
 };
 
-module.exports = { startRegister, verifyRegister, resendOtp, login, updateProfile, uploadAvatar };
+// ดึงข้อมูลสั้นๆ ของผู้ใช้สำหรับ header
+const getUserBrief = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ message: 'ต้องมี user id' });
+
+    const r = await pool.query(
+      `SELECT id_user, username, COALESCE(avatar_url, '/uploads/avatars/default.png') AS avatar_url
+       FROM public.users
+       WHERE id_user = $1
+       LIMIT 1`,
+      [id]
+    );
+
+    if (r.rowCount === 0) return res.status(404).json({ message: 'ไม่พบผู้ใช้' });
+
+    const u = r.rows[0];
+    res.json({
+      id: u.id_user,
+      username: u.username,
+      avatar_url: u.avatar_url,
+    });
+  } catch (err) {
+    console.error('getUserBrief error:', err);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
+  }
+}
+module.exports = { startRegister, verifyRegister, resendOtp, login, updateProfile, uploadAvatar, getUserBrief };
 

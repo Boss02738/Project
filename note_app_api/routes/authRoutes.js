@@ -13,6 +13,7 @@ const {
   login,
   updateProfile,
   uploadAvatar,
+  getUserBrief
 } = require('../controllers/authController');
 
 // ====== Multer upload config ======
@@ -57,5 +58,8 @@ router.post('/login', login);
 // ====== Profile ======
 router.post('/profile/update',  updateProfile);
 router.post('/profile/avatar',  upload.single('avatar'), uploadAvatar); // field ชื่อ "avatar"
+
+//ดึงข้อมูลผู้ใช้ 
+router.get('/user/:id', getUserBrief);  // << เพิ่ม: ดึง user brief
 
 module.exports = router;
