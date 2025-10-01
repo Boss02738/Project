@@ -22,6 +22,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // DB test
 pool.query('SELECT NOW()', (err, r) => {
   if (err) console.error('❌ DB failed:', err);

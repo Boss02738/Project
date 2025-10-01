@@ -6,8 +6,9 @@ import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/Drawing_Screen.dart';
 
 class NewPostScreen extends StatefulWidget {
-  final int userId;         // ✅ เพิ่ม: ใช้ดึงข้อมูลจาก API
-  final String username;    // ใช้เป็นค่าเริ่มต้นระหว่างรอโหลด
+  final int userId;         // id_user จริงจาก login
+  final String username;
+
   const NewPostScreen({
     super.key,
     required this.userId,
@@ -21,14 +22,14 @@ class NewPostScreen extends StatefulWidget {
 class _NewPostScreenState extends State<NewPostScreen> {
   final TextEditingController _detailController = TextEditingController();
 
-  // ----- header user state -----
+  // header user
   String _username = '';
-  String? _avatarUrl; // path จาก server เช่น /uploads/avatars/xxx.jpg
+  String? _avatarUrl;
   bool _loadingUser = true;
 
-  // ----- post form state -----
+  // form state
   String selectedYear = 'ปี 1';
-  String? selectedSubject; 
+  String? selectedSubject;
   File? _image;
   File? _file;
 
@@ -77,8 +78,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
   @override
   void initState() {
     super.initState();
-    // ค่าเริ่มต้นระหว่างรอโหลดจาก API
-    _username = widget.username;
+    _username = widget.username; // ค่าเริ่มต้นระหว่างรอโหลด
     selectedSubject = subjects.isNotEmpty ? subjects.first : null;
     _loadUserHeader();
   }
@@ -94,15 +94,9 @@ class _NewPostScreenState extends State<NewPostScreen> {
         _avatarUrl = data['avatar_url'] as String?;
         _loadingUser = false;
       });
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _loadingUser = false; // ใช้ค่าจาก constructor ไปก่อน
-      });
-      // จะโชว์ snackBar ก็ได้ แต่ไม่บังคับ
-      // ScaffoldMessenger.of(context).showSnackBar(
-      //   const SnackBar(content: Text('โหลดข้อมูลผู้ใช้ไม่สำเร็จ')),
-      // );
+      setState(() => _loadingUser = false);
     }
   }
 
@@ -114,37 +108,80 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
   Future<void> _pickImage() async {
     final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+    final pickedFile = await picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 85,
+    );
     if (pickedFile != null) setState(() => _image = File(pickedFile.path));
   }
 
   Future<void> _pickFile() async {
-    // เดโมยังใช้ image picker; ถ้าจะรองรับเอกสารให้เปลี่ยนเป็น file_picker
+    // เดโม่ใช้ image_picker; ถ้าจะรองรับ pdf/doc ให้เปลี่ยนเป็น package: file_picker
     final picker = ImagePicker();
     final pickedFile = await picker.pickImage(source: ImageSource.gallery);
     if (pickedFile != null) setState(() => _file = File(pickedFile.path));
   }
 
-  void _handlePost() {
-    if (selectedSubject == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรุณาเลือกรายวิชา')),
-      );
-      return;
-    }
-
-    Navigator.pop(context, {
-      'detail': _detailController.text,
-      'year': selectedYear,
-      'subject': selectedSubject,
-      'image': _image,
-      'file': _file,
-    });
+Future<void> _handlePost() async {
+  if (selectedSubject == null) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('กรุณาเลือกรายวิชา')),
+    );
+    return;
   }
+
+  // loading
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const Center(child: CircularProgressIndicator()),
+  );
+
+  try {
+    final res = await ApiService.createPost(
+      userId: widget.userId,
+      text: _detailController.text.trim(),
+      yearLabel: selectedYear,
+      subject: selectedSubject,
+      image: _image,
+      file: _file,
+    );
+
+    if (!mounted) return;
+    Navigator.pop(context); // ปิด loading
+
+    if (res.statusCode == 200) {
+      // ✅ เคาะระฆังให้ Home รีโหลด
+
+      // ✅ แจ้งเตือน แต่ 'ไม่' เด้งกลับ Home
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('โพสต์สำเร็จ')),
+      );
+
+      // เคลียร์ฟอร์ม (ถ้าต้องการ)
+      setState(() {
+        _detailController.clear();
+        _image = null;
+        _file = null;
+        selectedYear = 'ปี 1';
+        selectedSubject = subjects.isNotEmpty ? subjects.first : null;
+      });
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('โพสต์ไม่สำเร็จ (${res.statusCode})')),
+      );
+    }
+  } catch (e) {
+    if (!mounted) return;
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')),
+    );
+  }
+}
 
   ImageProvider _avatarProvider() {
     if (_avatarUrl != null && _avatarUrl!.isNotEmpty) {
-      // รวม host + path จาก server
       return NetworkImage('${ApiService.host}${_avatarUrl!}');
     }
     return const AssetImage('assets/default_avatar.png');
@@ -158,7 +195,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('NewPost'),
+        title: const Text('NewPost'),
+          automaticallyImplyLeading: false, // ❌ เอาลูกศรออก
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
@@ -175,11 +213,9 @@ class _NewPostScreenState extends State<NewPostScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // แถวบน: username + dropdown ปี/วิชา + ปุ่มโพสต์
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // ชื่อผู้ใช้ (ซ้ำกับ appbar ได้ แต่เผื่อ Boss อยากโชว์ตรง body ด้วย)
                   Flexible(
                     child: Text(
                       _username,
@@ -192,7 +228,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   ),
                   const SizedBox(width: 8),
 
-                  // Dropdown ปี
+                  // ปี
                   Flexible(
                     flex: 1,
                     child: Container(
@@ -224,7 +260,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   ),
                   const SizedBox(width: 8),
 
-                  // Dropdown วิชา
+                  // วิชา
                   Flexible(
                     flex: 2,
                     child: Container(
@@ -249,14 +285,14 @@ class _NewPostScreenState extends State<NewPostScreen> {
                               overflow: TextOverflow.ellipsis,
                             );
                           }).toList(),
-                          onChanged: (val) => setState(() => selectedSubject = val),
+                          onChanged: (val) =>
+                              setState(() => selectedSubject = val),
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
 
-                  // ปุ่มโพสต์
                   ElevatedButton(
                     onPressed: _handlePost,
                     style: ElevatedButton.styleFrom(
@@ -275,7 +311,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
               const SizedBox(height: 16),
 
-              // ปุ่มแนบรูป/ไฟล์
               Row(
                 children: [
                   IconButton(
@@ -286,13 +321,13 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   IconButton(
                     icon: const Icon(Icons.attach_file),
                     onPressed: _pickFile,
-                    tooltip: 'แนบไฟล์',
+                    tooltip: 'แนบไฟล์'
                   ),
+                  
                 ],
               ),
               const SizedBox(height: 8),
 
-              // เนื้อหาโพสต์
               TextField(
                 controller: _detailController,
                 maxLines: 5,
@@ -305,7 +340,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Preview รูป/ไฟล์ที่แนบ
               if (_image != null)
                 Container(
                   margin: const EdgeInsets.only(bottom: 8),
@@ -351,14 +385,15 @@ class _NewPostScreenState extends State<NewPostScreen> {
         selectedItemColor: const Color.fromARGB(255, 31, 102, 160),
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
-        onTap: (index) {
+        onTap: (index) async{
           if (index == 0) {
-            Navigator.pushReplacement(
+            Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const homescreen()),
             );
           }
         },
+        // 
         items: const [
           BottomNavigationBarItem(
             icon: Icon(Icons.home_outlined),

@@ -5,6 +5,7 @@ import '../api/api_service.dart';
 import 'dart:convert';
 import 'package:my_note_app/screens/NewPost.dart';
 import 'package:my_note_app/screens/create_profile_screen.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -17,57 +18,48 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController emailController = TextEditingController();
   final TextEditingController passwordController = TextEditingController();
 
-  Future<void> _handleLogin() async {
-    final email = emailController.text.trim();
-    final password = passwordController.text.trim();
-    if (email.isEmpty || password.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("กรุณากรอกอีเมลและรหัสผ่าน")),
-      );
-      return;
-    }
-
-    try {
-      final response = await ApiService.login(email, password);
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        final needProfile = (data['needProfile'] == true);
-
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text("เข้าสู่ระบบสำเร็จ")));
-
-        if (needProfile) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => CreateProfileScreen(
-                username: data['user']['username'],
-                email: data['user']['email'],
-                avatarUrl: data['user']['avatar_url'], // <- เพิ่ม
-              ),
-            ),
-          );
-        } else {
-          // เคยทำโปรไฟล์แล้ว → ไป Home
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const homescreen()),
-          );
-        }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'] ?? "เข้าสู่ระบบไม่สำเร็จ")),
-        );
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้")),
-      );
-    }
+ Future<void> _handleLogin() async {
+  final email = emailController.text.trim();
+  final password = passwordController.text.trim();
+  if (email.isEmpty || password.isEmpty) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("กรุณากรอกอีเมลและรหัสผ่าน")),
+    );
+    return;
   }
 
+  try {
+    final response = await ApiService.login(email, password);
+    final data = jsonDecode(response.body);
+
+    if (response.statusCode == 200) {
+      // ✅ เซฟ user เข้า SharedPreferences
+      final user = data['user'];
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('user_id', user['id'] as int);
+      await prefs.setString('username', user['username'] as String);
+      await prefs.setString('email', user['email'] as String);
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("เข้าสู่ระบบสำเร็จ")),
+      );
+
+      // ไปหน้า Home (หรือจะเช็ค needProfile เพื่อเด้งไป createProfile ก็ได้ตาม flow เดิมของคุณ)
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (context) => const homescreen()),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(data['message'] ?? "เข้าสู่ระบบไม่สำเร็จ")),
+      );
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("เชื่อมต่อเซิร์ฟเวอร์ไม่ได้")),
+    );
+  }
+}
   @override
   Widget build(BuildContext context) {
     return Scaffold(

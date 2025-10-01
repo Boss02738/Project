@@ -6,6 +6,7 @@ class ApiService {
   //เปลี่ยนเป็น IP V4 ของเครื่องตัวเอง
   static const String baseUrl = 'http://10.40.150.148:3000/api/auth';
   static const String host = 'http://10.40.150.148:3000';
+  
   //register
   static Future<http.Response> register(
     String username,
@@ -58,6 +59,36 @@ class ApiService {
     } else {
       throw Exception('โหลดข้อมูลผู้ใช้ล้มเหลว: ${resp.statusCode}');
     }
+  }
+    static Future<http.Response> createPost({
+    required int userId,
+    String? text,
+    String? yearLabel,
+    String? subject,
+    File? image,
+    File? file,
+  }) async {
+    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/posts'));
+    req.fields['user_id'] = userId.toString();
+    if (text != null)      req.fields['text'] = text;
+    if (yearLabel != null) req.fields['year_label'] = yearLabel;
+    if (subject != null)   req.fields['subject'] = subject;
+    if (image != null) {
+      req.files.add(await http.MultipartFile.fromPath('image', image.path));
+    }
+    if (file != null) {
+      req.files.add(await http.MultipartFile.fromPath('file', file.path));
+    }
+    final streamed = await req.send();
+    return http.Response.fromStream(streamed);
+  }
+
+  static Future<List<dynamic>> getFeed() async {
+    final resp = await http.get(Uri.parse('$baseUrl/posts'));
+    if (resp.statusCode == 200) {
+      return jsonDecode(resp.body) as List<dynamic>;
+    }
+    throw Exception('โหลดฟีดล้มเหลว: ${resp.statusCode}');
   }
 }
 
