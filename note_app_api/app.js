@@ -8,7 +8,7 @@ const fs = require('fs');
 
 const authRoutes = require('./routes/authRoutes');
 const searchRoutes = require('./routes/searchRoutes');
-
+const postRoutes = require('./routes/postRoutes');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -27,6 +27,7 @@ app.use('/api/auth', authRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // search
 app.use('/api/search', searchRoutes);
+app.use('/api/posts', postRoutes); // ✅ path ต้องตรงกับที่ฝั่ง Flutter เรียก
 
 // DB test
 pool.query('SELECT NOW()', (err, r) => {

@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/NewPost.dart';
+import 'package:my_note_app/screens/subject_feed_screen.dart'; // ✅ เพิ่ม import
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -128,13 +129,10 @@ class _SearchScreenState extends State<SearchScreen> {
             setState(() => _filter = v);
             _search(_controller.text);
           },
-          itemBuilder: (_) => [
-            const PopupMenuItem(value: SearchFilter.all, child: Text('All')),
-            const PopupMenuItem(
-              value: SearchFilter.users,
-              child: Text('Users'),
-            ),
-            const PopupMenuItem(
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: SearchFilter.all, child: Text('All')),
+            PopupMenuItem(value: SearchFilter.users, child: Text('Users')),
+            PopupMenuItem(
               value: SearchFilter.subjects,
               child: Text('Subjects'),
             ),
@@ -237,7 +235,12 @@ class _SearchScreenState extends State<SearchScreen> {
                 title: Text(s),
                 trailing: const Icon(Icons.north_east, size: 18),
                 onTap: () {
-                  // TODO: ไปหน้า feed กรองเฉพาะ subject นี้
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => SubjectFeedScreen(subjectName: s),
+                    ),
+                  );
                 },
               ),
             ),
@@ -275,6 +278,7 @@ class _SearchScreenState extends State<SearchScreen> {
             final username = prefs.getString('username');
 
             if (userId == null || username == null) {
+              if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('กรุณาเข้าสู่ระบบใหม่')),
               );

@@ -48,5 +48,35 @@ const getFeed = async (req, res) => {
     res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
   }
 };
+const getPostsBySubject = async (req, res) => {
+  try {
+    // ชื่อวิชามีอักษรไทย/เว้นวรรค => decode มาก่อน
+    const subjectRaw = req.params.subject || '';
+    const subject = decodeURIComponent(subjectRaw);
 
-module.exports = { createPost, getFeed };
+    const q = `
+      SELECT 
+        p.id,
+        p.text,
+        p.image_url,
+        p.file_url,
+        p.subject,
+        p.year_label,
+        u.username,
+        COALESCE(u.avatar_url, '/uploads/avatars/default.png') AS avatar_url,
+        p.created_at
+      FROM public.posts p
+      JOIN public.users u ON u.id_user = p.user_id
+      WHERE p.subject ILIKE $1
+      ORDER BY p.created_at DESC
+    `;
+    const r = await pool.query(q, [`%${subject}%`]);
+
+    return res.json(r.rows);
+  } catch (err) {
+    console.error('getPostsBySubject error:', err);
+    return res.status(500).json({ message: 'internal error' });
+  }
+};
+
+module.exports = { createPost, getFeed, getPostsBySubject };

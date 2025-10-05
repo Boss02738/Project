@@ -67,8 +67,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
     '01418499 โครงงานวิทยาการคอมพิวเตอร์',
   ];
   final List<String> subjects5 = [
-    '01418490 สหกิจศึกษา',
-    '01418499 โครงงานวิทยาการคอมพิวเตอร์',
+    '01418490 เว็บ',
+    '01418499 ธนาคาร',
   ];
 
   late final Map<String, List<String>> subjectsByYear = {

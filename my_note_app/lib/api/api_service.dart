@@ -116,4 +116,15 @@ class ApiService {
     }
     throw Exception('search subjects failed');
   }
+// lib/api/api_service.dart
+static Future<List<dynamic>> getFeedBySubject(String subject) async {
+  final encoded = Uri.encodeComponent(subject); // ✅ สำคัญ!
+  final url = Uri.parse('$host/api/posts/subject/$encoded');
+  final res = await http.get(url);
+  if (res.statusCode == 200) {
+    return List<Map<String, dynamic>>.from(jsonDecode(res.body));
+  }
+  throw Exception('HTTP ${res.statusCode}');
+}
+
 }
