@@ -90,6 +90,30 @@ class ApiService {
     }
     throw Exception('โหลดฟีดล้มเหลว: ${resp.statusCode}');
   }
+  static Future<List<dynamic>> searchUsers(String query) async {
+    final uri = Uri.parse('$host/api/search/users').replace(queryParameters: {
+      'q': query,
+    });
+    final resp = await http.get(uri);
+    if (resp.statusCode == 200) {
+      final data = jsonDecode(resp.body);
+      // expect: [{id_user, username, avatar_url}, ...]
+      return (data as List).cast<dynamic>();
+    }
+    throw Exception('search users failed');
+  }
+
+  // GET /api/search/subjects?q=...
+  static Future<List<String>> searchSubjects(String query) async {
+    final uri = Uri.parse('$host/api/search/subjects').replace(queryParameters: {
+      'q': query,
+    });
+    final resp = await http.get(uri);
+    if (resp.statusCode == 200) {
+      final data = jsonDecode(resp.body);
+      // expect: ["subject A", "subject B", ...]
+      return (data as List).map((e) => e.toString()).toList();
+    }
+    throw Exception('search subjects failed');
+  }
 }
-
-

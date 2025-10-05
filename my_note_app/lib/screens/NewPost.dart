@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/Drawing_Screen.dart';
+import 'package:my_note_app/screens/search_screen.dart';
 
 class NewPostScreen extends StatefulWidget {
   final int userId;         // id_user จริงจาก login
@@ -33,7 +34,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
   File? _image;
   File? _file;
 
-  final List<String> years = ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4'];
+  final List<String> years = ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4','วิชาเฉพาะเลือก'];
 
   final List<String> subjects1 = [
     '01418111 วิทยาการคอมพิวเตอร์เบื้องต้น',
@@ -65,12 +66,17 @@ class _NewPostScreenState extends State<NewPostScreen> {
     '01418490 สหกิจศึกษา',
     '01418499 โครงงานวิทยาการคอมพิวเตอร์',
   ];
+  final List<String> subjects5 = [
+    '01418490 สหกิจศึกษา',
+    '01418499 โครงงานวิทยาการคอมพิวเตอร์',
+  ];
 
   late final Map<String, List<String>> subjectsByYear = {
     'ปี 1': subjects1,
     'ปี 2': subjects2,
     'ปี 3': subjects3,
     'ปี 4': subjects4,
+    'วิชาเฉพาะเลือก': subjects5,
   };
 
   List<String> get subjects => subjectsByYear[selectedYear] ?? const [];
@@ -390,6 +396,13 @@ Future<void> _handlePost() async {
             Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const homescreen()),
+            );
+          } else if (index == 1) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const SearchScreen(),
+              ),
             );
           }
         },

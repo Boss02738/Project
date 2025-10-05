@@ -3,9 +3,11 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const pool = require('./models/db');
-const authRoutes = require('./routes/authRoutes');
 const path = require('path');
 const fs = require('fs');
+
+const authRoutes = require('./routes/authRoutes');
+const searchRoutes = require('./routes/searchRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -19,9 +21,12 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// Routes
+// Routes 
+// auth upload 
 app.use('/api/auth', authRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// search
+app.use('/api/search', searchRoutes);
 
 // DB test
 pool.query('SELECT NOW()', (err, r) => {
