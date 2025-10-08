@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:my_note_app/api/api_service.dart';
+import 'package:my_note_app/widgets/post_card.dart';
 
 class SubjectFeedScreen extends StatefulWidget {
   final String subjectName;
@@ -41,68 +42,15 @@ class _SubjectFeedScreenState extends State<SubjectFeedScreen> {
           if (feed.isEmpty) {
             return const Center(child: Text('ยังไม่มีโพสต์ในรายวิชานี้'));
           }
-          return RefreshIndicator(
+            return RefreshIndicator(
             onRefresh: _reload,
-            child: ListView.builder(
+            child: ListView.separated(
               padding: const EdgeInsets.only(bottom: 88),
+              separatorBuilder: (_, __) => const Divider(height: 1),
               itemCount: feed.length,
               itemBuilder: (_, i) {
                 final p = feed[i];
-                final avatar = (p['avatar_url'] as String?) ?? '';
-                final img    = (p['image_url']  as String?) ?? '';
-                final file   = (p['file_url']   as String?) ?? '';
-                final name   = p['username'] as String? ?? '';
-                final text   = p['text'] as String? ?? '';
-                final subject= p['subject'] as String? ?? '';
-                final year   = p['year_label'] as String? ?? '';
-
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    ListTile(
-                      leading: CircleAvatar(
-                        backgroundImage: avatar.isNotEmpty
-                          ? NetworkImage('${ApiService.host}$avatar')
-                          : const AssetImage('assets/default_avatar.png')
-                              as ImageProvider,
-                      ),
-                      title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(subject.isNotEmpty ? subject : 'No subject'),
-                      trailing: const Icon(Icons.more_horiz),
-                    ),
-                    if (img.isNotEmpty)
-                      AspectRatio(
-                        aspectRatio: 16/9,
-                        child: Image.network(
-                          '${ApiService.host}$img',
-                          fit: BoxFit.cover,
-                        ),
-                      ),
-                    if (file.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.all(12.0),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.insert_drive_file, size: 18),
-                            const SizedBox(width: 8),
-                            Flexible(child: Text(file.split('/').last, overflow: TextOverflow.ellipsis)),
-                          ],
-                        ),
-                      ),
-                    if (text.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        child: Text(text),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      child: Text(year, style: const TextStyle(color: Colors.grey)),
-                    ),
-                    const SizedBox(height: 8),
-                    const Divider(height: 1),
-                  ],
-                );
+                return PostCard(post: p);
               },
             ),
           );
