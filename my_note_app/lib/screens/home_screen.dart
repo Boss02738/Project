@@ -48,12 +48,12 @@ class _HomeState extends State<homescreen> {
       _userId = id;
       _username = name;
       _loadingUser = false;
-      _futureFeed = ApiService.getFeed();
+      _futureFeed = ApiService.getFeed(_userId!);
     });
   }
 
   Future<void> _reload() async {
-    setState(() => _futureFeed = ApiService.getFeed());
+    setState(() => _futureFeed = ApiService.getFeed(_userId!));
   }
 
   // เวลาแบบย่อ

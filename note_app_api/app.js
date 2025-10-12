@@ -20,10 +20,13 @@ if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());                // ✅ ต้องมีสำหรับ body JSON (like/comment)
 
 // Routes 
 // auth upload 
 app.use('/api/auth', authRoutes);
+app.use('/api/auth', postRoutes);
+
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // search
 app.use('/api/search', searchRoutes);

@@ -60,7 +60,7 @@ class ApiService {
       throw Exception('โหลดข้อมูลผู้ใช้ล้มเหลว: ${resp.statusCode}');
     }
   }
-    static Future<http.Response> createPost({
+    static Future<http.Response> createPost( {
     required int userId,
     String? text,
     String? yearLabel,
@@ -83,13 +83,16 @@ class ApiService {
     return http.Response.fromStream(streamed);
   }
 
-  static Future<List<dynamic>> getFeed() async {
-    final resp = await http.get(Uri.parse('$baseUrl/posts'));
-    if (resp.statusCode == 200) {
-      return jsonDecode(resp.body) as List<dynamic>;
-    }
-    throw Exception('โหลดฟีดล้มเหลว: ${resp.statusCode}');
+static Future<List<dynamic>> getFeed(int userId) async {
+  final resp = await http.get(
+    Uri.parse('$baseUrl/posts').replace(queryParameters: {'user_id': '$userId'}),
+  );
+  if (resp.statusCode == 200) {
+    return jsonDecode(resp.body) as List<dynamic>;
   }
+  throw Exception('โหลดฟีดล้มเหลว: ${resp.statusCode}');
+}
+
   static Future<List<dynamic>> searchUsers(String query) async {
     final uri = Uri.parse('$host/api/search/users').replace(queryParameters: {
       'q': query,
@@ -116,15 +119,52 @@ class ApiService {
     }
     throw Exception('search subjects failed');
   }
-// lib/api/api_service.dart
-static Future<List<dynamic>> getFeedBySubject(String subject) async {
-  final encoded = Uri.encodeComponent(subject); // ✅ สำคัญ!
-  final url = Uri.parse('$host/api/posts/subject/$encoded');
+
+static Future<List<dynamic>> getFeedBySubject(String subject, int userId) async {
+  final encoded = Uri.encodeComponent(subject);
+  final url = Uri.parse('$host/api/posts/subject/$encoded')
+      .replace(queryParameters: {'user_id': '$userId'});
   final res = await http.get(url);
   if (res.statusCode == 200) {
-    return List<Map<String, dynamic>>.from(jsonDecode(res.body));
+    return jsonDecode(res.body) as List<dynamic>;
   }
   throw Exception('HTTP ${res.statusCode}');
 }
 
+static Future<Map<String, dynamic>> getCounts(int postId) async {
+  final r = await http.get(Uri.parse('$baseUrl/posts/$postId/counts')); // <<<<<
+  if (r.statusCode != 200) throw Exception('counts fail');
+  return jsonDecode(r.body) as Map<String, dynamic>;
 }
+
+static Future<bool> toggleLike({required int postId, required int userId}) async {
+  final r = await http.post(
+    Uri.parse('$baseUrl/posts/$postId/like'),     // <<<<<
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'user_id': userId}),
+  );
+  if (r.statusCode != 200) throw Exception('like fail');
+  final m = jsonDecode(r.body) as Map<String, dynamic>;
+  return m['liked'] == true;
+}
+
+static Future<List<dynamic>> getComments(int postId) async {
+  final r = await http.get(Uri.parse('$baseUrl/posts/$postId/comments')); // <<<<<
+  if (r.statusCode != 200) throw Exception('comments fail');
+  return jsonDecode(r.body) as List<dynamic>;
+}
+
+ static Future<void> addComment({
+    required int postId,
+    required int userId,
+    required String text,
+  }) async {
+    final r = await http.post(
+      Uri.parse('$baseUrl/posts/$postId/comments'),                   // ✅
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': userId, 'text': text}),
+    );
+    if (r.statusCode != 200) throw Exception('add comment fail');
+  }
+}
+

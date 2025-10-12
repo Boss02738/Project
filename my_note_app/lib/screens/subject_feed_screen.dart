@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/widgets/post_card.dart';
 
@@ -12,19 +13,39 @@ class SubjectFeedScreen extends StatefulWidget {
 
 class _SubjectFeedScreenState extends State<SubjectFeedScreen> {
   late Future<List<dynamic>> _futureFeed;
+  int? _userId;
+  bool _loadingUser = true;
 
   @override
   void initState() {
     super.initState();
-    _futureFeed = ApiService.getFeedBySubject(widget.subjectName);
+    _initAndLoad();
+  }
+
+  Future<void> _initAndLoad() async {
+    final sp = await SharedPreferences.getInstance();
+    _userId = sp.getInt('user_id') ?? 0; // ถ้าไม่มีให้เป็น 0
+    setState(() {
+      _loadingUser = false;
+      _futureFeed = ApiService.getFeedBySubject(widget.subjectName, _userId!);
+    });
   }
 
   Future<void> _reload() async {
-    setState(() => _futureFeed = ApiService.getFeedBySubject(widget.subjectName));
+    if (_userId == null) return;
+    setState(() {
+      _futureFeed = ApiService.getFeedBySubject(widget.subjectName, _userId!);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_loadingUser) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.subjectName, overflow: TextOverflow.ellipsis),
@@ -36,22 +57,19 @@ class _SubjectFeedScreenState extends State<SubjectFeedScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snap.hasError) {
-            return Center(child: Text('โหลดโพสต์ไม่สำเร็จ'));
+            return const Center(child: Text('โหลดโพสต์ไม่สำเร็จ'));
           }
           final feed = snap.data ?? [];
           if (feed.isEmpty) {
             return const Center(child: Text('ยังไม่มีโพสต์ในรายวิชานี้'));
           }
-            return RefreshIndicator(
+          return RefreshIndicator(
             onRefresh: _reload,
             child: ListView.separated(
               padding: const EdgeInsets.only(bottom: 88),
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemCount: feed.length,
-              itemBuilder: (_, i) {
-                final p = feed[i];
-                return PostCard(post: p);
-              },
+              itemBuilder: (_, i) => PostCard(post: feed[i]),
             ),
           );
         },
