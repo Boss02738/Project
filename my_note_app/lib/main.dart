@@ -1,12 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:my_note_app/screens/login_screen.dart';
 import 'package:my_note_app/screens/register_screen.dart';
-import 'package:my_note_app/screens/home_screen.dart';
-import 'package:my_note_app/screens/Drawing_Screen.dart';
-import 'package:my_note_app/screens/NewPost.dart';
-import 'package:my_note_app/screens/create_profile_screen.dart';
-import 'package:my_note_app/screens/search_screen.dart';
-
 void main() {
   runApp(const MyApp());
 }

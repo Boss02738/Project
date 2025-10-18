@@ -18,12 +18,15 @@ class _PostCardState extends State<PostCard> {
   int _commentCount = 0;
   bool _likedByMe = false;
 
+  // ✅ สำหรับ “บันทึกโพสต์”
+  bool _savedByMe = false;
+
   @override
   void initState() {
     super.initState();
     _loadUser();
 
-    // ดึงสถานะจาก payload ที่ backend ส่งมา (ถ้ามี)
+    // init like/comment จาก payload ถ้ามี
     final m = widget.post;
     final liked = m['liked_by_me'];
     final lc = m['like_count'];
@@ -33,10 +36,12 @@ class _PostCardState extends State<PostCard> {
     if (lc is int) _likeCount = lc;
     if (cc is int) _commentCount = cc;
 
-    // เผื่อ payload เก่ายังไม่มี count/liked_by_me -> โหลดซ้ำแบบปลอดภัย
     if (lc == null || cc == null) {
-      _loadCounts();
+      _loadCounts(); // ปลอดภัยเผื่อ payload เก่า
     }
+
+    // โหลดสถานะ save (ถ้า payload ไม่มี saved_by_me)
+    _initSaved();
   }
 
   Future<void> _loadUser() async {
@@ -45,10 +50,11 @@ class _PostCardState extends State<PostCard> {
   }
 
   Future<void> _loadCounts() async {
-    final postId = widget.post['id'] as int?; // ต้องมี id ใน feed
+    final postId = widget.post['id'] as int?;
     if (postId == null) return;
     try {
       final m = await ApiService.getCounts(postId);
+      if (!mounted) return;
       setState(() {
         _likeCount = (m['like_count'] as int?) ?? 0;
         _commentCount = (m['comment_count'] as int?) ?? 0;
@@ -56,14 +62,13 @@ class _PostCardState extends State<PostCard> {
     } catch (_) {}
   }
 
+  // ---------- Like ----------
   Future<void> _toggleLike() async {
     final postId = widget.post['id'] as int?;
     if (postId == null || _userId == null) return;
     try {
-      final liked = await ApiService.toggleLike(
-        postId: postId,
-        userId: _userId!,
-      );
+      final liked = await ApiService.toggleLike(postId: postId, userId: _userId!);
+      if (!mounted) return;
       setState(() {
         _likedByMe = liked;
         _likeCount += liked ? 1 : -1;
@@ -71,12 +76,59 @@ class _PostCardState extends State<PostCard> {
       });
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('กดไลก์ไม่สำเร็จ')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('กดไลก์ไม่สำเร็จ')),
+      );
     }
   }
 
+  // ---------- Save ----------
+  Future<void> _initSaved() async {
+    final postId = widget.post['id'] as int?;
+    if (postId == null) return;
+    // ต้องมี userId ก่อน
+    final sp = await SharedPreferences.getInstance();
+    final uid = sp.getInt('user_id');
+    if (uid == null) return;
+    try {
+      final saved = await ApiService.getSavedStatus(postId: postId, userId: uid);
+      if (!mounted) return;
+      setState(() => _savedByMe = saved);
+    } catch (_) {}
+  }
+
+  Future<void> _toggleSave() async {
+    final postId = widget.post['id'] as int?;
+    if (postId == null) return;
+
+    // ensure we have user id (may not be ready yet due to async init)
+    int? uid = _userId;
+    if (uid == null) {
+      final sp = await SharedPreferences.getInstance();
+      uid = sp.getInt('user_id');
+      if (uid == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ต้องล็อกอินก่อนเพื่อบันทึกโพสต์')),
+        );
+        return;
+      }
+      if (mounted) setState(() => _userId = uid);
+    }
+
+    try {
+  final saved = await ApiService.toggleSave(postId: postId, userId: uid);
+      if (!mounted) return;
+      setState(() => _savedByMe = saved);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('บันทึกโพสต์ล้มเหลว')),
+      );
+    }
+  }
+
+  // ---------- Comments ----------
   Future<void> _openComments() async {
     final postId = widget.post['id'] as int?;
     if (postId == null) return;
@@ -138,8 +190,7 @@ class _PostCardState extends State<PostCard> {
               radius: 22,
               backgroundImage: avatar.isNotEmpty
                   ? NetworkImage('${ApiService.host}$avatar')
-                  : const AssetImage('assets/default_avatar.png')
-                        as ImageProvider,
+                  : const AssetImage('assets/default_avatar.png') as ImageProvider,
             ),
             title: Row(
               children: [
@@ -153,20 +204,14 @@ class _PostCardState extends State<PostCard> {
                 const SizedBox(width: 6),
                 if (year.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
                       color: const Color(0xFFEFF4FF),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
                       year,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Color(0xFF335CFF),
-                      ),
+                      style: const TextStyle(fontSize: 11.5, color: Color(0xFF335CFF)),
                     ),
                   ),
               ],
@@ -189,10 +234,7 @@ class _PostCardState extends State<PostCard> {
                   width: double.infinity,
                   height: 220,
                   color: const Color(0xFFEFEFEF),
-                  child: Image.network(
-                    '${ApiService.host}$img',
-                    fit: BoxFit.cover,
-                  ),
+                  child: Image.network('${ApiService.host}$img', fit: BoxFit.cover),
                 ),
               ),
             ),
@@ -202,10 +244,7 @@ class _PostCardState extends State<PostCard> {
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.grey.shade300),
                   borderRadius: BorderRadius.circular(12),
@@ -235,9 +274,7 @@ class _PostCardState extends State<PostCard> {
             child: Row(
               children: [
                 IconButton(
-                  icon: Icon(
-                    _likedByMe ? Icons.favorite : Icons.favorite_border,
-                  ),
+                  icon: Icon(_likedByMe ? Icons.favorite : Icons.favorite_border),
                   onPressed: _toggleLike,
                 ),
                 Text('$_likeCount'),
@@ -247,6 +284,12 @@ class _PostCardState extends State<PostCard> {
                   onPressed: _openComments,
                 ),
                 Text('$_commentCount'),
+                const Spacer(),
+                IconButton(
+                  tooltip: _savedByMe ? 'ยกเลิกบันทึก' : 'บันทึกโพสต์',
+                  icon: Icon(_savedByMe ? Icons.bookmark : Icons.bookmark_border),
+                  onPressed: _toggleSave,
+                ),
               ],
             ),
           ),
@@ -263,21 +306,13 @@ class _PostCardState extends State<PostCard> {
                       children: [
                         TextSpan(
                           text: '$name ',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black,
-                          ),
+                          style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black),
                         ),
-                        TextSpan(
-                          text: text,
-                          style: const TextStyle(color: Colors.black87),
-                        ),
+                        TextSpan(text: text, style: const TextStyle(color: Colors.black87)),
                       ],
                     ),
                     maxLines: isExpanded ? null : 2,
-                    overflow: isExpanded
-                        ? TextOverflow.visible
-                        : TextOverflow.ellipsis,
+                    overflow: isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
                   ),
                   if (showSeeMore)
                     TextButton(
@@ -296,10 +331,7 @@ class _PostCardState extends State<PostCard> {
           // ---------- Time ----------
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child: Text(
-              _timeAgo(created),
-              style: const TextStyle(color: Colors.grey, fontSize: 12),
-            ),
+            child: Text(_timeAgo(created), style: const TextStyle(color: Colors.grey, fontSize: 12)),
           ),
         ],
       ),
@@ -307,6 +339,7 @@ class _PostCardState extends State<PostCard> {
   }
 }
 
+// ====================== BottomSheet: Comments ======================
 class _CommentsSheet extends StatefulWidget {
   final int postId;
   final VoidCallback onCommentAdded;
@@ -347,19 +380,15 @@ class _CommentsSheetState extends State<_CommentsSheet> {
     final t = _controller.text.trim();
     if (t.isEmpty || _userId == null) return;
     try {
-      await ApiService.addComment(
-        postId: widget.postId,
-        userId: _userId!,
-        text: t,
-      );
+      await ApiService.addComment(postId: widget.postId, userId: _userId!, text: t);
       _controller.clear();
       widget.onCommentAdded();
       await _refresh();
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('ส่งคอมเมนต์ไม่สำเร็จ')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ส่งคอมเมนต์ไม่สำเร็จ')),
+      );
     }
   }
 
@@ -367,18 +396,13 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
         child: SizedBox(
           height: MediaQuery.of(context).size.height * 0.6,
           child: Column(
             children: [
               const SizedBox(height: 8),
-              const Text(
-                'ความคิดเห็น',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+              const Text('ความคิดเห็น', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Expanded(
                 child: _loading
@@ -388,57 +412,54 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                         itemCount: _items.length,
                         separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (_, i) {
-  final c = _items[i];
-  final name = c['username'] ?? '';
-  final avatar = c['avatar_url'] ?? '';
-  final text = c['text'] ?? '';
-  final createdAt = c['created_at'] ?? '';
+                          final c = _items[i];
+                          final name = c['username'] ?? '';
+                          final avatar = c['avatar_url'] ?? '';
+                          final text = c['text'] ?? '';
+                          final createdAt = c['created_at'] ?? '';
 
-  // แปลงเวลาให้เป็น readable format
-  String timeLabel = '';
-  if (createdAt.isNotEmpty) {
-    try {
-      final dt = DateTime.parse(createdAt).toLocal();
-      final diff = DateTime.now().difference(dt);
-      if (diff.inSeconds < 60) {
-        timeLabel = '${diff.inSeconds} วิ.';
-      } else if (diff.inMinutes < 60) {
-        timeLabel = '${diff.inMinutes} นาที';
-      } else if (diff.inHours < 24) {
-        timeLabel = '${diff.inHours} ชม.';
-      } else if (diff.inDays < 7) {
-        timeLabel = '${diff.inDays} วัน';
-      } else {
-        timeLabel = '${dt.day}/${dt.month}/${dt.year}';
-      }
-    } catch (_) {}
-  }
+                          // เวลาแบบย่อด้านขวาหลังชื่อ
+                          String timeLabel = '';
+                          if (createdAt.toString().isNotEmpty) {
+                            try {
+                              final dt = DateTime.parse(createdAt).toLocal();
+                              final diff = DateTime.now().difference(dt);
+                              if (diff.inSeconds < 60) {
+                                timeLabel = '${diff.inSeconds} วิ.';
+                              } else if (diff.inMinutes < 60) {
+                                timeLabel = '${diff.inMinutes} นาที';
+                              } else if (diff.inHours < 24) {
+                                timeLabel = '${diff.inHours} ชม.';
+                              } else if (diff.inDays < 7) {
+                                timeLabel = '${diff.inDays} วัน';
+                              } else {
+                                timeLabel = '${dt.day}/${dt.month}/${dt.year}';
+                              }
+                            } catch (_) {}
+                          }
 
-  return ListTile(
-    leading: CircleAvatar(
-      backgroundImage: avatar.toString().isNotEmpty
-          ? NetworkImage('${ApiService.host}$avatar')
-          : const AssetImage('assets/default_avatar.png') as ImageProvider,
-    ),
-    title: Row(
-      children: [
-        Expanded(
-          child: Text(
-            name,
-            style: const TextStyle(fontWeight: FontWeight.w600),
-            overflow: TextOverflow.ellipsis,
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          timeLabel,
-          style: const TextStyle(color: Colors.grey, fontSize: 12),
-        ),
-      ],
-    ),
-    subtitle: Text(text),
-  );
-},
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundImage: avatar.toString().isNotEmpty
+                                  ? NetworkImage('${ApiService.host}$avatar')
+                                  : const AssetImage('assets/default_avatar.png') as ImageProvider,
+                            ),
+                            title: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    name,
+                                    style: const TextStyle(fontWeight: FontWeight.w600),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(timeLabel, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                              ],
+                            ),
+                            subtitle: Text(text),
+                          );
+                        },
                       ),
               ),
               Padding(

@@ -166,5 +166,32 @@ static Future<List<dynamic>> getComments(int postId) async {
     );
     if (r.statusCode != 200) throw Exception('add comment fail');
   }
+// === Save / Unsave ===
+static Future<bool> toggleSave({required int postId, required int userId}) async {
+  final r = await http.post(
+    Uri.parse('$baseUrl/posts/$postId/save'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'user_id': userId}),
+  );
+  if (r.statusCode != 200) throw Exception('save fail');
+  final m = jsonDecode(r.body) as Map<String, dynamic>;
+  return m['saved'] == true;
+}
+
+static Future<bool> getSavedStatus({required int postId, required int userId}) async {
+  final r = await http.get(Uri.parse('$baseUrl/posts/$postId/save/status?user_id=$userId'));
+  if (r.statusCode != 200) throw Exception('save status fail');
+  final m = jsonDecode(r.body) as Map<String, dynamic>;
+  return m['saved'] == true;
+}
+
+// (ตัวเลือก) ดึงโพสต์ที่บันทึกไว้
+static Future<List<dynamic>> getSavedFeed(int userId) async {
+  // postRoutes exports '/saved' and is mounted at /api/posts, so call that path on host
+  final r = await http.get(Uri.parse('$host/api/posts/saved?user_id=$userId'));
+  if (r.statusCode != 200) throw Exception('saved feed fail');
+  return jsonDecode(r.body) as List<dynamic>;
+}
+
 }
 

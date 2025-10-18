@@ -174,5 +174,72 @@ const addComment = async (req, res) => {
     res.status(500).json({ message: 'internal error' });
   }
 };
+// === Save / Unsave (toggle) ===
+const toggleSave = async (req, res) => {
+  const postId = Number(req.params.id);
+  const userId = Number(req.body.user_id);
+  if (!postId || !userId) return res.status(400).json({ message: 'missing post_id/user_id' });
 
-module.exports = { createPost, getFeed, getPostsBySubject, toggleLike, addComment, getComments, getPostCounts };
+  try {
+    const existing = await pool.query(
+      'SELECT id FROM public.saves WHERE post_id=$1 AND user_id=$2',
+      [postId, userId]
+    );
+    if (existing.rowCount > 0) {
+      await pool.query('DELETE FROM public.saves WHERE id=$1', [existing.rows[0].id]);
+      return res.json({ saved: false });
+    } else {
+      await pool.query(
+        'INSERT INTO public.saves(post_id, user_id) VALUES ($1,$2)',
+        [postId, userId]
+      );
+      return res.json({ saved: true });
+    }
+  } catch (e) {
+    console.error('toggleSave error:', e);
+    res.status(500).json({ message: 'internal error' });
+  }
+};
+
+// === เช็คสถานะบันทึกของโพสต์นี้สำหรับ user นี้ ===
+const getSavedStatus = async (req, res) => {
+  const postId = Number(req.params.id);
+  const userId = Number(req.query.user_id);
+  if (!postId || !userId) return res.status(400).json({ message: 'missing post_id/user_id' });
+
+  try {
+    const r = await pool.query(
+      'SELECT 1 FROM public.saves WHERE post_id=$1 AND user_id=$2 LIMIT 1',
+      [postId, userId]
+    );
+    res.json({ saved: r.rowCount > 0 });
+  } catch (e) {
+    console.error('getSavedStatus error:', e);
+    res.status(500).json({ message: 'internal error' });
+  }
+};
+
+// === ดึงฟีดโพสต์ที่ user นี้บันทึกไว้ ===
+const getSavedPosts = async (req, res) => {
+  const userId = Number(req.query.user_id);
+  if (!userId) return res.status(400).json({ message: 'missing user_id' });
+
+  try {
+    const q = `
+      SELECT p.id, p.text, p.year_label, p.subject, p.image_url, p.file_url, p.created_at,
+             u.id_user AS user_id, u.username, COALESCE(u.avatar_url,'') AS avatar_url
+      FROM public.saves s
+      JOIN public.posts p ON p.id = s.post_id
+      JOIN public.users u ON u.id_user = p.user_id
+      WHERE s.user_id=$1
+      ORDER BY s.created_at DESC
+    `;
+    const r = await pool.query(q, [userId]);
+    res.json(r.rows);
+  } catch (e) {
+    console.error('getSavedPosts error:', e);
+    res.status(500).json({ message: 'internal error' });
+  }
+};
+
+module.exports = { createPost, getFeed, getPostsBySubject, toggleLike, addComment, getComments, getPostCounts,toggleSave, getSavedStatus, getSavedPosts };

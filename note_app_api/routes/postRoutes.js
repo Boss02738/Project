@@ -11,4 +11,9 @@ router.get('/posts/:id/counts', post.getPostCounts);
 router.get('/posts/:id/comments', post.getComments);
 router.post('/posts/:id/comments', post.addComment);
 
+router.post('/posts/:id/save', post.toggleSave);
+router.get('/posts/:id/save/status', post.getSavedStatus);
+router.get('/saved', post.getSavedPosts);
+
+
 module.exports = router;
