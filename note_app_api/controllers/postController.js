@@ -136,22 +136,24 @@ const getPostCounts = async (req, res) => {
 
 /** GET /posts/:id/comments */
 const getComments = async (req, res) => {
+  const postId = Number(req.params.id);
+  if (!postId) return res.status(400).json({ message: 'missing post id' });
+
   try {
-    const postId = req.params.post_id;
-    const q = `
-      SELECT 
-        c.id, c.text, c.created_at,
-        u.username, COALESCE(u.avatar_url, '/uploads/avatars/default.png') AS avatar_url
-      FROM public.comments c
-      JOIN public.users u ON u.id_user = c.user_id
-      WHERE c.post_id = $1
-      ORDER BY c.created_at ASC
-    `;
-    const r = await pool.query(q, [postId]);
+    const r = await pool.query(
+      `SELECT c.id, c.text, c.created_at,
+              c.user_id,
+              u.username,
+              COALESCE(u.avatar_url, '/uploads/avatars/default.png') AS avatar_url
+       FROM public.comments c
+       LEFT JOIN public.users u ON u.id_user = c.user_id
+       WHERE c.post_id = $1
+       ORDER BY c.created_at ASC`,
+      [postId]
+    );
     return res.json(r.rows);
   } catch (err) {
-    console.error('getComments error:', err);
-    return res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
+    return res.status(500).json({ message: 'server error' });
   }
 };
 
