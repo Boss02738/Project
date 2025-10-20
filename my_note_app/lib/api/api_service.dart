@@ -85,8 +85,9 @@ class ApiService {
 
 static Future<List<dynamic>> getFeed(int userId) async {
   final resp = await http.get(
-    Uri.parse('$baseUrl/posts').replace(queryParameters: {'user_id': '$userId'}),
+    Uri.parse('$host/api/posts/feed').replace(queryParameters: {'user_id': '$userId'}),
   );
+
   if (resp.statusCode == 200) {
     return jsonDecode(resp.body) as List<dynamic>;
   }
