@@ -31,7 +31,6 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // search
 app.use('/api/search', searchRoutes);
 app.use('/api/posts', postRoutes); // ✅ path ต้องตรงกับที่ฝั่ง Flutter เรียก
-
 // DB test
 pool.query('SELECT NOW()', (err, r) => {
   if (err) console.error('❌ DB failed:', err);
