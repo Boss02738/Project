@@ -37,6 +37,7 @@ dependencies:
   http: ^1.4.0
   image_picker: ^1.0.7
   shared_preferences: ^2.5.3
+  photo_view: ^0.15.0
   # file_picker: ^5.2.11
 
 

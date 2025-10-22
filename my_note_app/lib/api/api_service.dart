@@ -3,42 +3,42 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  //เปลี่ยนเป็น IP V4 ของเครื่องตัวเอง
-  static const String baseUrl = 'http://10.40.150.148:3000/api/auth';
+  // เปลี่ยนเป็น IP เครื่องตัวเอง
   static const String host = 'http://10.40.150.148:3000';
-  
-  //register
-  static Future<http.Response> register(
-    String username,
-    String password,
-  ) async {
-    final url = Uri.parse('$baseUrl/register');
-    return await http.post(
+
+  // แยก base ตามกลุ่ม API ชัด ๆ
+  static const String _auth = '$host/api/auth';
+  static const String _posts = '$host/api/posts';
+  static const String _search = '$host/api/search';
+
+  // ---------------- Auth ----------------
+  static Future<http.Response> register(String username, String password) async {
+    final url = Uri.parse('$_auth/register');
+    return http.post(
       url,
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'username': username, 'password': password}),
     );
   }
 
-  //login
   static Future<http.Response> login(String email, String password) async {
-    return await http.post(
-      Uri.parse("$baseUrl/login"),
+    return http.post(
+      Uri.parse("$_auth/login"),
       headers: {"Content-Type": "application/json"},
       body: jsonEncode({"email": email, "password": password}),
     );
   }
 
-  //update profile
- static Future<http.Response> uploadAvatar({
+  // --------------- Profile ---------------
+  static Future<http.Response> uploadAvatar({
     required String email,
     required File file,
   }) async {
-    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/profile/avatar'));
+    final req = http.MultipartRequest('POST', Uri.parse('$_auth/profile/avatar'));
     req.fields['email'] = email; // ต้องชื่อ email
     req.files.add(await http.MultipartFile.fromPath('avatar', file.path)); // ต้องชื่อ avatar
     final streamed = await req.send();
-    return http.Response.fromStream(streamed); // ✅ คืน http.Response
+    return http.Response.fromStream(streamed);
   }
 
   static Future<http.Response> updateProfile({
@@ -47,152 +47,153 @@ class ApiService {
     String? gender,
   }) {
     return http.post(
-      Uri.parse('$baseUrl/profile/update'),
+      Uri.parse('$_auth/profile/update'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'email': email, 'bio': bio, 'gender': gender}),
     );
   }
-    static Future<Map<String, dynamic>> getUserBrief(int userId) async {
-    final resp = await http.get(Uri.parse('$baseUrl/user/$userId'));
+
+  static Future<Map<String, dynamic>> getUserBrief(int userId) async {
+    final resp = await http.get(Uri.parse('$_auth/user/$userId'));
     if (resp.statusCode == 200) {
       return jsonDecode(resp.body) as Map<String, dynamic>;
     } else {
       throw Exception('โหลดข้อมูลผู้ใช้ล้มเหลว: ${resp.statusCode}');
     }
   }
-    static Future<http.Response> createPost( {
+
+  // ---------------- Posts ----------------
+  /// สร้างโพสต์: แนบรูปหลายรูปผ่านฟิลด์ "images" (สูงสุด 10) + แนบไฟล์ "file" ได้ 1 ชิ้น
+  static Future<http.Response> createPost({
     required int userId,
     String? text,
     String? yearLabel,
     String? subject,
-    File? image,
+    List<File>? images,
     File? file,
   }) async {
-    final req = http.MultipartRequest('POST', Uri.parse('$baseUrl/posts'));
+    final req = http.MultipartRequest('POST', Uri.parse('$_posts'));
     req.fields['user_id'] = userId.toString();
-    if (text != null)      req.fields['text'] = text;
+    if (text != null) req.fields['text'] = text;
     if (yearLabel != null) req.fields['year_label'] = yearLabel;
-    if (subject != null)   req.fields['subject'] = subject;
-    if (image != null) {
-      req.files.add(await http.MultipartFile.fromPath('image', image.path));
+    if (subject != null) req.fields['subject'] = subject;
+
+    // แนบรูปหลายไฟล์: field name ต้องเป็น 'images'
+    final imgList = (images ?? []).take(10);
+    for (final img in imgList) {
+      req.files.add(await http.MultipartFile.fromPath('images', img.path));
     }
+
+    // แนบไฟล์เอกสาร (ถ้ามี)
     if (file != null) {
       req.files.add(await http.MultipartFile.fromPath('file', file.path));
     }
+
     final streamed = await req.send();
     return http.Response.fromStream(streamed);
   }
 
-static Future<List<dynamic>> getFeed(int userId) async {
-  final resp = await http.get(
-    Uri.parse('$host/api/posts/feed').replace(queryParameters: {'user_id': '$userId'}),
-  );
-
-  if (resp.statusCode == 200) {
-    return jsonDecode(resp.body) as List<dynamic>;
-  }
-  throw Exception('โหลดฟีดล้มเหลว: ${resp.statusCode}');
-}
-
-  static Future<List<dynamic>> searchUsers(String query) async {
-    final uri = Uri.parse('$host/api/search/users').replace(queryParameters: {
-      'q': query,
-    });
-    final resp = await http.get(uri);
+  static Future<List<dynamic>> getFeed(int userId) async {
+    final resp = await http.get(
+      Uri.parse('$_posts/feed').replace(queryParameters: {'user_id': '$userId'}),
+    );
     if (resp.statusCode == 200) {
-      final data = jsonDecode(resp.body);
-      // expect: [{id_user, username, avatar_url}, ...]
-      return (data as List).cast<dynamic>();
+      return jsonDecode(resp.body) as List<dynamic>;
     }
-    throw Exception('search users failed');
+    throw Exception('โหลดฟีดล้มเหลว: ${resp.statusCode}');
   }
 
-  // GET /api/search/subjects?q=...
-  static Future<List<String>> searchSubjects(String query) async {
-    final uri = Uri.parse('$host/api/search/subjects').replace(queryParameters: {
-      'q': query,
+  static Future<List<dynamic>> getFeedBySubject(String subject, int userId) async {
+    // ฝั่ง backend ใช้ /api/posts/by-subject?subject=...
+    final url = Uri.parse('$_posts/by-subject').replace(queryParameters: {
+      'subject': subject,
+      'user_id': '$userId',
     });
-    final resp = await http.get(uri);
-    if (resp.statusCode == 200) {
-      final data = jsonDecode(resp.body);
-      // expect: ["subject A", "subject B", ...]
-      return (data as List).map((e) => e.toString()).toList();
+    final res = await http.get(url);
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as List<dynamic>;
     }
-    throw Exception('search subjects failed');
+    throw Exception('HTTP ${res.statusCode}');
   }
 
-static Future<List<dynamic>> getFeedBySubject(String subject, int userId) async {
-  final encoded = Uri.encodeComponent(subject);
-  final url = Uri.parse('$host/api/posts/subject/$encoded')
-      .replace(queryParameters: {'user_id': '$userId'});
-  final res = await http.get(url);
-  if (res.statusCode == 200) {
-    return jsonDecode(res.body) as List<dynamic>;
+  static Future<Map<String, dynamic>> getCounts(int postId) async {
+    // เส้นทางอยู่ใต้ /api/posts (อย่าอิง /api/auth)
+    final r = await http.get(Uri.parse('$_posts/posts/$postId/counts'));
+    if (r.statusCode != 200) throw Exception('counts fail');
+    return jsonDecode(r.body) as Map<String, dynamic>;
   }
-  throw Exception('HTTP ${res.statusCode}');
-}
 
-static Future<Map<String, dynamic>> getCounts(int postId) async {
-  final r = await http.get(Uri.parse('$baseUrl/posts/$postId/counts')); // <<<<<
-  if (r.statusCode != 200) throw Exception('counts fail');
-  return jsonDecode(r.body) as Map<String, dynamic>;
-}
+  static Future<bool> toggleLike({required int postId, required int userId}) async {
+    final r = await http.post(
+      Uri.parse('$_posts/posts/$postId/like'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': userId}),
+    );
+    if (r.statusCode != 200) throw Exception('like fail');
+    final m = jsonDecode(r.body) as Map<String, dynamic>;
+    return m['liked'] == true;
+    }
 
-static Future<bool> toggleLike({required int postId, required int userId}) async {
-  final r = await http.post(
-    Uri.parse('$baseUrl/posts/$postId/like'),     // <<<<<
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({'user_id': userId}),
-  );
-  if (r.statusCode != 200) throw Exception('like fail');
-  final m = jsonDecode(r.body) as Map<String, dynamic>;
-  return m['liked'] == true;
-}
+  static Future<List<dynamic>> getComments(int postId) async {
+    final r = await http.get(Uri.parse('$_posts/posts/$postId/comments'));
+    if (r.statusCode != 200) throw Exception('comments fail');
+    return jsonDecode(r.body) as List<dynamic>;
+  }
 
-static Future<List<dynamic>> getComments(int postId) async {
-  final r = await http.get(Uri.parse('$baseUrl/posts/$postId/comments')); // <<<<<
-  if (r.statusCode != 200) throw Exception('comments fail');
-  return jsonDecode(r.body) as List<dynamic>;
-}
-
- static Future<void> addComment({
+  static Future<void> addComment({
     required int postId,
     required int userId,
     required String text,
   }) async {
     final r = await http.post(
-      Uri.parse('$baseUrl/posts/$postId/comments'),                   // ✅
+      Uri.parse('$_posts/posts/$postId/comments'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'user_id': userId, 'text': text}),
     );
     if (r.statusCode != 200) throw Exception('add comment fail');
   }
-// === Save / Unsave ===
-static Future<bool> toggleSave({required int postId, required int userId}) async {
-  final r = await http.post(
-    Uri.parse('$baseUrl/posts/$postId/save'),
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({'user_id': userId}),
-  );
-  if (r.statusCode != 200) throw Exception('save fail');
-  final m = jsonDecode(r.body) as Map<String, dynamic>;
-  return m['saved'] == true;
-}
 
-static Future<bool> getSavedStatus({required int postId, required int userId}) async {
-  final r = await http.get(Uri.parse('$baseUrl/posts/$postId/save/status?user_id=$userId'));
-  if (r.statusCode != 200) throw Exception('save status fail');
-  final m = jsonDecode(r.body) as Map<String, dynamic>;
-  return m['saved'] == true;
-}
+  // ---------------- Save ----------------
+  static Future<bool> toggleSave({required int postId, required int userId}) async {
+    final r = await http.post(
+      Uri.parse('$_posts/posts/$postId/save'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': userId}),
+    );
+    if (r.statusCode != 200) throw Exception('save fail');
+    final m = jsonDecode(r.body) as Map<String, dynamic>;
+    return m['saved'] == true;
+  }
 
-// (ตัวเลือก) ดึงโพสต์ที่บันทึกไว้
-static Future<List<dynamic>> getSavedFeed(int userId) async {
-  // postRoutes exports '/saved' and is mounted at /api/posts, so call that path on host
-  final r = await http.get(Uri.parse('$host/api/posts/saved?user_id=$userId'));
-  if (r.statusCode != 200) throw Exception('saved feed fail');
-  return jsonDecode(r.body) as List<dynamic>;
-}
+  static Future<bool> getSavedStatus({required int postId, required int userId}) async {
+    final r = await http.get(Uri.parse('$_posts/posts/$postId/save/status?user_id=$userId'));
+    if (r.statusCode != 200) throw Exception('save status fail');
+    final m = jsonDecode(r.body) as Map<String, dynamic>;
+    return m['saved'] == true;
+  }
 
-}
+  static Future<List<dynamic>> getSavedFeed(int userId) async {
+    final r = await http.get(Uri.parse('$_posts/saved?user_id=$userId'));
+    if (r.statusCode != 200) throw Exception('saved feed fail');
+    return jsonDecode(r.body) as List<dynamic>;
+  }
 
+  // ---------------- Search ----------------
+  static Future<List<dynamic>> searchUsers(String query) async {
+    final uri = Uri.parse('$_search/users').replace(queryParameters: {'q': query});
+    final resp = await http.get(uri);
+    if (resp.statusCode == 200) {
+      return (jsonDecode(resp.body) as List).cast<dynamic>();
+    }
+    throw Exception('search users failed');
+  }
+
+  static Future<List<String>> searchSubjects(String query) async {
+    final uri = Uri.parse('$_search/subjects').replace(queryParameters: {'q': query});
+    final resp = await http.get(uri);
+    if (resp.statusCode == 200) {
+      return (jsonDecode(resp.body) as List).map((e) => e.toString()).toList();
+    }
+    throw Exception('search subjects failed');
+  }
+}

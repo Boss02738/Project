@@ -1,89 +1,133 @@
 // controllers/postController.js
 const pool = require('../models/db');
 
+const normalizeImagePaths = (files = []) =>
+  (files || []).map(f => `/uploads/post_images/${f.filename}`);
+
 const createPost = async (req, res) => {
+  const client = await pool.connect();
   try {
     const { user_id, text, year_label, subject } = req.body;
     if (!user_id) return res.status(400).json({ message: 'ต้องมี user_id' });
 
-    let imageUrl = null, fileUrl = null;
-    if (req.files?.image?.[0]) {
-      imageUrl = '/uploads/post_images/' + req.files.image[0].filename;
-    }
+    const images = normalizeImagePaths(req.files?.images);
+    let fileUrl = null;
     if (req.files?.file?.[0]) {
-      fileUrl  = '/uploads/post_files/' + req.files.file[0].filename;
+      fileUrl = `/uploads/post_files/${req.files.file[0].filename}`;
     }
 
-    const r = await pool.query(
-      `INSERT INTO public.posts(user_id,text,year_label,subject,image_url,file_url)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       RETURNING id, created_at`,
-      [user_id, text ?? null, year_label ?? null, subject ?? null, imageUrl, fileUrl]
+    // เก็บรูปแรกไว้ใน posts.image_url เพื่อไม่พังของเดิม
+    const firstImage = images.length ? images[0] : null;
+
+    await client.query('BEGIN');
+
+    const insertPost = `
+      INSERT INTO public.posts (user_id, text, year_label, subject, image_url, file_url, created_at)
+      VALUES ($1,$2,$3,$4,$5,$6, NOW())
+      RETURNING id, user_id, text, year_label, subject, image_url, file_url, created_at
+    `;
+    const p = await client.query(insertPost, [user_id, text || null, year_label || null, subject || null, firstImage, fileUrl]);
+    const post = p.rows[0];
+
+    if (images.length) {
+      const values = [];
+      const params = [];
+      images.forEach((img, i) => {
+        params.push(`($1, $${i + 2})`);
+        values.push(img);
+      });
+      const q = `
+        INSERT INTO public.post_images (post_id, image_url)
+        VALUES ${params.join(',')}
+      `;
+      await client.query(q, [post.id, ...values]);
+    }
+
+    await client.query('COMMIT');
+
+    // ส่งกลับพร้อม images[]
+    const r = await client.query(
+      `SELECT p.*,
+              COALESCE(json_agg(pi.image_url ORDER BY pi.id) FILTER (WHERE pi.id IS NOT NULL), '[]') AS images
+         FROM public.posts p
+         LEFT JOIN public.post_images pi ON pi.post_id = p.id
+        WHERE p.id = $1
+        GROUP BY p.id`,
+      [post.id]
     );
 
-    res.json({
-      message: 'โพสต์สำเร็จ',
-      post_id: r.rows[0].id,
-      created_at: r.rows[0].created_at
-    });
+    res.status(201).json(r.rows[0]);
   } catch (e) {
+    await client.query('ROLLBACK');
     console.error('createPost error:', e);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
+    res.status(500).json({ message: 'internal error' });
+  } finally {
+    client.release();
   }
 };
 
 const getFeed = async (req, res) => {
   try {
-    const uid = Number(req.query.user_id) || 0;
-
-    const r = await pool.query(`
-      SELECT 
-        p.id, p.text, p.year_label, p.subject, p.image_url, p.file_url, p.created_at,
-        u.id_user AS user_id, u.username, COALESCE(u.avatar_url,'') AS avatar_url,
-        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
-        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
-        CASE 
-          WHEN $1 > 0 AND EXISTS(
-            SELECT 1 FROM public.likes l WHERE l.post_id = p.id AND l.user_id = $1
-          ) THEN true ELSE false 
-        END AS liked_by_me
-      FROM public.posts p
-      JOIN public.users u ON u.id_user = p.user_id
-      ORDER BY p.created_at DESC
-      LIMIT 100
-    `, [uid]);
-
-    res.json(r.rows);
-  } catch (e) {
-    console.error('getFeed error:', e);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
-  }
-};
-const getPostsBySubject = async (req, res) => {
-  try {
-    const subject = decodeURIComponent(req.params.subject || '');
-    const userId = Number(req.query.user_id || 0);
+    const viewerId = Number(req.query.user_id) || 0;
 
     const q = `
       SELECT 
-        p.id, p.text, p.image_url, p.file_url, p.subject, p.year_label, p.created_at,
-        u.username, COALESCE(u.avatar_url,'') AS avatar_url,
-        -- นับ like / comment
-        (SELECT COUNT(*)::int FROM public.likes    l WHERE l.post_id = p.id) AS like_count,
-        (SELECT COUNT(*)::int FROM public.comments c WHERE c.post_id = p.id) AS comment_count,
-        -- liked_by_me
-        CASE WHEN $2 > 0 AND EXISTS (
-          SELECT 1 FROM public.likes l2 WHERE l2.post_id = p.id AND l2.user_id = $2
-        ) THEN TRUE ELSE FALSE END AS liked_by_me
+        p.*,
+        u.username,
+        COALESCE(u.avatar_url,'') AS avatar_url,
+        COALESCE(json_agg(pi.image_url) FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
+        -- aggregates
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
+        -- did current viewer like this?
+        EXISTS (
+          SELECT 1 FROM public.likes l 
+          WHERE l.post_id = p.id AND l.user_id = $1
+        ) AS liked_by_me
       FROM public.posts p
       JOIN public.users u ON u.id_user = p.user_id
-      WHERE p.subject ILIKE $1
-      ORDER BY p.created_at DESC
+ LEFT JOIN public.post_images pi ON pi.post_id = p.id
+     GROUP BY p.id, u.username, u.avatar_url
+     ORDER BY p.created_at DESC
     `;
-    const r = await pool.query(q, [`%${subject}%`, userId || 0]);
-    res.json(r.rows);
+    const { rows } = await pool.query(q, [viewerId]);
+    res.json(rows);
   } catch (err) {
-    console.error('getPostsBySubject error:', err);
+    console.error(err);
+    res.status(500).json({ message: 'Error loading feed' });
+  }
+};
+
+// GET /api/posts/by-subject?subject=...&user_id=123
+const getPostsBySubject = async (req, res) => {
+  const { subject } = req.query;
+  const viewerId = Number(req.query.user_id) || 0;
+
+  try {
+    const q = `
+      SELECT 
+        p.*,
+        u.username,
+        COALESCE(u.avatar_url,'') AS avatar_url,
+        COALESCE(json_agg(pi.image_url ORDER BY pi.id)
+                 FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
+        EXISTS (
+          SELECT 1 FROM public.likes l 
+          WHERE l.post_id = p.id AND l.user_id = $2
+        ) AS liked_by_me
+      FROM public.posts p
+      JOIN public.users u ON u.id_user = p.user_id
+ LEFT JOIN public.post_images pi ON pi.post_id = p.id
+     WHERE ($1::text IS NULL OR p.subject = $1)
+  GROUP BY p.id, u.username, u.avatar_url
+  ORDER BY p.created_at DESC
+    `;
+    const r = await pool.query(q, [subject || null, viewerId]);
+    res.json(r.rows);
+  } catch (e) {
+    console.error('getPostsBySubject error:', e);
     res.status(500).json({ message: 'internal error' });
   }
 };

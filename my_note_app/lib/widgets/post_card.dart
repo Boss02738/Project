@@ -1,8 +1,99 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
-import 'package:my_note_app/widgets/fullscreen_image_viewer.dart';
+import 'package:photo_view/photo_view.dart';
+import 'package:photo_view/photo_view_gallery.dart';
 
+// ====== Fullscreen Gallery (swipe + zoom ได้) ======
+class GalleryViewer extends StatefulWidget {
+  final List<String> urls;
+  final int initialIndex;
+  final String heroPrefix;
+
+  const GalleryViewer({
+    super.key,
+    required this.urls,
+    required this.initialIndex,
+    required this.heroPrefix,
+  });
+
+  @override
+  State<GalleryViewer> createState() => _GalleryViewerState();
+}
+
+class _GalleryViewerState extends State<GalleryViewer> {
+  late PageController _pageController;
+  late int _currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        alignment: Alignment.bottomCenter,
+        children: [
+          PhotoViewGallery.builder(
+            itemCount: widget.urls.length,
+            pageController: _pageController,
+            onPageChanged: (i) => setState(() => _currentIndex = i),
+            builder: (context, index) {
+              final url = widget.urls[index];
+              final tag = '${widget.heroPrefix}_$index';
+              return PhotoViewGalleryPageOptions(
+                heroAttributes: PhotoViewHeroAttributes(tag: tag),
+                imageProvider: NetworkImage(url),
+                minScale: PhotoViewComputedScale.contained * 1.0,
+                maxScale: PhotoViewComputedScale.covered * 3.0,
+              );
+            },
+            scrollPhysics: const BouncingScrollPhysics(),
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
+            loadingBuilder: (context, event) => const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+          ),
+          SafeArea(
+            child: Stack(
+              children: [
+                Positioned(
+                  top: 16,
+                  left: 8,
+                  child: IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+                Positioned(
+                  bottom: 20,
+                  left: 0,
+                  right: 0,
+                  child: Text(
+                    '${_currentIndex + 1} / ${widget.urls.length}',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ====================== Post Card ======================
 class PostCard extends StatefulWidget {
   final Map<String, dynamic> post;
   const PostCard({super.key, required this.post});
@@ -14,34 +105,23 @@ class PostCard extends StatefulWidget {
 class _PostCardState extends State<PostCard> {
   bool isExpanded = false;
   int? _userId;
-
   int _likeCount = 0;
   int _commentCount = 0;
   bool _likedByMe = false;
-
-  // ✅ สำหรับ “บันทึกโพสต์”
   bool _savedByMe = false;
 
   @override
   void initState() {
     super.initState();
     _loadUser();
-
-    // init like/comment จาก payload ถ้ามี
     final m = widget.post;
     final liked = m['liked_by_me'];
     final lc = m['like_count'];
     final cc = m['comment_count'];
-
     if (liked is bool) _likedByMe = liked;
     if (lc is int) _likeCount = lc;
     if (cc is int) _commentCount = cc;
-
-    if (lc == null || cc == null) {
-      _loadCounts(); // ปลอดภัยเผื่อ payload เก่า
-    }
-
-    // โหลดสถานะ save (ถ้า payload ไม่มี saved_by_me)
+    if (lc == null || cc == null) _loadCounts();
     _initSaved();
   }
 
@@ -63,78 +143,32 @@ class _PostCardState extends State<PostCard> {
     } catch (_) {}
   }
 
-  // ---------- Like ----------
   Future<void> _toggleLike() async {
     final postId = widget.post['id'] as int?;
     if (postId == null || _userId == null) return;
     try {
-      final liked = await ApiService.toggleLike(
-        postId: postId,
-        userId: _userId!,
-      );
+      final liked = await ApiService.toggleLike(postId: postId, userId: _userId!);
       if (!mounted) return;
       setState(() {
         _likedByMe = liked;
         _likeCount += liked ? 1 : -1;
         if (_likeCount < 0) _likeCount = 0;
       });
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('กดไลก์ไม่สำเร็จ')));
-    }
+    } catch (_) {}
   }
 
-  // ---------- Save ----------
   Future<void> _initSaved() async {
     final postId = widget.post['id'] as int?;
     if (postId == null) return;
-    // ต้องมี userId ก่อน
     final sp = await SharedPreferences.getInstance();
     final uid = sp.getInt('user_id');
     if (uid == null) return;
     try {
-      final saved = await ApiService.getSavedStatus(
-        postId: postId,
-        userId: uid,
-      );
+      final saved = await ApiService.getSavedStatus(postId: postId, userId: uid);
       if (!mounted) return;
       setState(() => _savedByMe = saved);
     } catch (_) {}
   }
-
-  Future<void> _toggleSave() async {
-    final postId = widget.post['id'] as int?;
-    if (postId == null) return;
-
-    // ensure we have user id (may not be ready yet due to async init)
-    int? uid = _userId;
-    if (uid == null) {
-      final sp = await SharedPreferences.getInstance();
-      uid = sp.getInt('user_id');
-      if (uid == null) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ต้องล็อกอินก่อนเพื่อบันทึกโพสต์')),
-        );
-        return;
-      }
-      if (mounted) setState(() => _userId = uid);
-    }
-
-    try {
-      final saved = await ApiService.toggleSave(postId: postId, userId: uid);
-      if (!mounted) return;
-      setState(() => _savedByMe = saved);
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('บันทึกโพสต์ล้มเหลว')));
-    }
-  }
-
   // ---------- Comments ----------
   Future<void> _openComments() async {
     final postId = widget.post['id'] as int?;
@@ -154,35 +188,65 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  String _timeAgo(String? iso) {
-    if (iso == null || iso.isEmpty) return '';
-    DateTime dt;
-    try {
-      dt = DateTime.parse(iso).toLocal();
-    } catch (_) {
-      return '';
+  Future<void> _toggleSave() async {
+    final postId = widget.post['id'] as int?;
+    if (postId == null) return;
+    int? uid = _userId;
+    if (uid == null) {
+      final sp = await SharedPreferences.getInstance();
+      uid = sp.getInt('user_id');
+      if (uid == null) return;
+      if (mounted) setState(() => _userId = uid);
     }
+    try {
+      final saved = await ApiService.toggleSave(postId: postId, userId: uid);
+      if (!mounted) return;
+      setState(() => _savedByMe = saved);
+    } catch (_) {}
+  }
+
+  void _openGallery(List<String> urls, int startIndex, int postId) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => GalleryViewer(
+          urls: urls,
+          initialIndex: startIndex,
+          heroPrefix: 'post_img_$postId',
+        ),
+      ),
+    );
+  }
+
+  String _timeAgo(String? iso) {
+    if (iso == null) return '';
+    final dt = DateTime.tryParse(iso)?.toLocal();
+    if (dt == null) return '';
     final diff = DateTime.now().difference(dt);
-    if (diff.inSeconds < 60) return '${diff.inSeconds} วิ.';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} นาที';
-    if (diff.inHours < 24) return '${diff.inHours} ชม.';
+    if (diff.inMinutes < 1) return '${diff.inSeconds} วิ.';
+    if (diff.inHours < 1) return '${diff.inMinutes} นาที';
+    if (diff.inDays < 1) return '${diff.inHours} ชม.';
     if (diff.inDays < 7) return '${diff.inDays} วัน';
-    final m = dt.month.toString().padLeft(2, '0');
-    final d = dt.day.toString().padLeft(2, '0');
-    return '${dt.year}/$m/$d';
+    return '${dt.year}/${dt.month}/${dt.day}';
   }
 
   @override
   Widget build(BuildContext context) {
     final p = widget.post;
     final avatar = (p['avatar_url'] as String?) ?? '';
-    final img = (p['image_url'] as String?) ?? '';
     final file = (p['file_url'] as String?) ?? '';
     final name = p['username'] as String? ?? '';
     final text = p['text'] as String? ?? '';
     final subject = p['subject'] as String? ?? '';
     final year = p['year_label'] as String? ?? '';
     final created = p['created_at'] as String?;
+    final List<String> images = (p['images'] as List?)?.cast<String>() ?? [];
+    final legacy = p['image_url'] as String?;
+    final allImages = [
+      ...images,
+      if ((legacy ?? '').isNotEmpty && images.isEmpty) legacy!,
+    ].map((e) => '${ApiService.host}$e').toList();
+
     final showSeeMore = text.trim().length > 80;
 
     return Padding(
@@ -190,217 +254,137 @@ class _PostCardState extends State<PostCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ---------- Header ----------
+          // Header
           ListTile(
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
             leading: CircleAvatar(
               radius: 22,
               backgroundImage: avatar.isNotEmpty
                   ? NetworkImage('${ApiService.host}$avatar')
                   : const AssetImage('assets/default_avatar.png')
-                        as ImageProvider,
+                      as ImageProvider,
             ),
             title: Row(
               children: [
-                Flexible(
-                  child: Text(
-                    name,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                Expanded(
+                  child: Text(name,
+                      style: const TextStyle(fontWeight: FontWeight.bold)),
                 ),
-                const SizedBox(width: 6),
                 if (year.isNotEmpty)
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
-                    ),
+                    margin: const EdgeInsets.only(left: 6),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEFF4FF),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      year,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Color(0xFF335CFF),
-                      ),
-                    ),
+                        color: const Color(0xFFEFF4FF),
+                        borderRadius: BorderRadius.circular(999)),
+                    child: Text(year,
+                        style: const TextStyle(
+                            fontSize: 11, color: Color(0xFF335CFF))),
                   ),
               ],
             ),
-            subtitle: Text(
-              subject.isNotEmpty ? subject : '',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+            subtitle: Text(subject, overflow: TextOverflow.ellipsis),
             trailing: const Icon(Icons.more_horiz),
           ),
 
-          // ---------- Image (tap to zoom) ----------
-          if (img.isNotEmpty)
+          // Images Grid
+          if (allImages.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: GestureDetector(
-                  onTap: () {
-                    final tag = 'post_img_${p['id']}';
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => FullscreenImageViewer(
-                          url: '${ApiService.host}$img',
-                          heroTag: tag,
-                        ),
-                      ),
-                    );
-                  },
-                  child: Hero(
-                    tag: 'post_img_${p['id']}',
-                    child: AspectRatio(
-                      aspectRatio: 16 / 9,
-                      child: Image.network(
-                        '${ApiService.host}$img',
-                        fit: BoxFit.cover,
-                        // โชว์ progress ตอนโหลด
-                        loadingBuilder: (ctx, child, progress) {
-                          if (progress == null) return child;
-                          return Container(
-                            color: const Color(0xFFEFEFEF),
-                            alignment: Alignment.center,
-                            child: CircularProgressIndicator(
-                              value: progress.expectedTotalBytes != null
-                                  ? progress.cumulativeBytesLoaded /
-                                        (progress.expectedTotalBytes ?? 1)
-                                  : null,
-                            ),
-                          );
-                        },
-                        errorBuilder: (_, __, ___) => Container(
-                          color: const Color(0xFFEFEFEF),
-                          alignment: Alignment.center,
-                          child: const Icon(Icons.broken_image_outlined),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: _SmartImageGrid(
+                postId: p['id'] as int,
+                images: allImages,
+                onTap: (i) => _openGallery(allImages, i, p['id'] as int),
               ),
             ),
 
-          // ---------- File ----------
+          // File
           if (file.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              padding: const EdgeInsets.all(12),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(12),
-                  color: const Color(0xFFFBFBFB),
-                ),
+                    color: const Color(0xFFFBFBFB),
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(12)),
                 child: Row(
                   children: [
                     const Icon(Icons.insert_drive_file, size: 20),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        file.split('/').last,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
+                        child: Text(file.split('/').last,
+                            overflow: TextOverflow.ellipsis)),
                     const Icon(Icons.download_rounded),
                   ],
                 ),
               ),
             ),
 
-          // ---------- Actions row ----------
+          // Actions
           Padding(
             padding: const EdgeInsets.only(left: 6, right: 6, top: 6),
-            child: Row(
-              children: [
-                IconButton(
-                  icon: Icon(
-                    _likedByMe ? Icons.favorite : Icons.favorite_border,
-                  ),
-                  onPressed: _toggleLike,
-                ),
-                Text('$_likeCount'),
-                const SizedBox(width: 12),
-                IconButton(
+            child: Row(children: [
+              IconButton(
+                icon: Icon(
+                    _likedByMe ? Icons.favorite : Icons.favorite_border),
+                onPressed: _toggleLike,
+              ),
+              Text('$_likeCount'),
+              const SizedBox(width: 12),
+               IconButton(
                   icon: const Icon(Icons.mode_comment_outlined),
                   onPressed: _openComments,
                 ),
-                Text('$_commentCount'),
-                const Spacer(),
-                IconButton(
-                  tooltip: _savedByMe ? 'ยกเลิกบันทึก' : 'บันทึกโพสต์',
-                  icon: Icon(
-                    _savedByMe ? Icons.bookmark : Icons.bookmark_border,
-                  ),
-                  onPressed: _toggleSave,
-                ),
-              ],
-            ),
+              Text('$_commentCount'),
+              const Spacer(),
+              IconButton(
+                icon: Icon(_savedByMe
+                    ? Icons.bookmark
+                    : Icons.bookmark_border_outlined),
+                onPressed: _toggleSave,
+              ),
+            ]),
           ),
 
-          // ---------- Text + See more ----------
+          // Text
           if (text.trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text.rich(
-                    TextSpan(
-                      children: [
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text.rich(
+                      TextSpan(children: [
                         TextSpan(
-                          text: '$name ',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: Colors.black,
-                          ),
-                        ),
+                            text: '$name ',
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black)),
                         TextSpan(
-                          text: text,
-                          style: const TextStyle(color: Colors.black87),
-                        ),
-                      ],
+                            text: text,
+                            style: const TextStyle(color: Colors.black87))
+                      ]),
+                      maxLines: isExpanded ? null : 2,
+                      overflow: isExpanded
+                          ? TextOverflow.visible
+                          : TextOverflow.ellipsis,
                     ),
-                    maxLines: isExpanded ? null : 2,
-                    overflow: isExpanded
-                        ? TextOverflow.visible
-                        : TextOverflow.ellipsis,
-                  ),
-                  if (showSeeMore)
-                    TextButton(
-                      style: TextButton.styleFrom(
-                        padding: EdgeInsets.zero,
-                        minimumSize: const Size(0, 0),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      ),
-                      onPressed: () => setState(() => isExpanded = !isExpanded),
-                      child: Text(isExpanded ? 'ย่อ' : 'ดูเพิ่มเติม'),
-                    ),
-                ],
-              ),
+                    if (showSeeMore)
+                      TextButton(
+                        onPressed: () =>
+                            setState(() => isExpanded = !isExpanded),
+                        child: Text(isExpanded ? 'ย่อ' : 'ดูเพิ่มเติม'),
+                      )
+                  ]),
             ),
 
-          // ---------- Time ----------
+          // Time
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child: Text(
-              _timeAgo(created),
-              style: const TextStyle(color: Colors.grey, fontSize: 12),
-            ),
+            child:
+                Text(_timeAgo(created), style: const TextStyle(color: Colors.grey)),
           ),
         ],
       ),
@@ -408,6 +392,129 @@ class _PostCardState extends State<PostCard> {
   }
 }
 
+// ============ Smart Grid Layout ============
+class _SmartImageGrid extends StatelessWidget {
+  final int postId;
+  final List<String> images;
+  final void Function(int index)? onTap;
+  const _SmartImageGrid(
+      {required this.postId, required this.images, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final total = images.length;
+    final showCount = total > 6 ? 6 : total;
+    final remaining = total > 6 ? total - 5 : 0;
+
+    if (showCount == 5) {
+      // เคส 5 รูป
+      return Column(children: [
+        _RowGap(
+          gap: 6,
+          children: List.generate(
+              3,
+              (i) => _ImageTile(
+                  url: images[i],
+                  tag: 'post_img_${postId}_$i',
+                  onTap: () => onTap?.call(i))),
+        ),
+        const SizedBox(height: 6),
+        _RowGap(
+          gap: 6,
+          children: List.generate(
+              2,
+              (i) {
+                final idx = 3 + i;
+                return _ImageTile(
+                    url: images[idx],
+                    tag: 'post_img_${postId}_$idx',
+                    onTap: () => onTap?.call(idx));
+              }),
+        )
+      ]);
+    }
+
+    int crossAxisCount;
+    if (showCount == 1)
+      crossAxisCount = 1;
+    else if (showCount == 2)
+      crossAxisCount = 2;
+    else if (showCount == 4)
+      crossAxisCount = 2;
+    else
+      crossAxisCount = 3;
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: showCount,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: crossAxisCount,
+          mainAxisSpacing: 6,
+          crossAxisSpacing: 6,
+          childAspectRatio: 1),
+      itemBuilder: (_, i) {
+        final isLast = total > 6 && i == 5;
+        final url = images[i];
+        final tag = 'post_img_${postId}_$i';
+        if (isLast) {
+          return Stack(fit: StackFit.expand, children: [
+            _Thumb(url: url),
+            Container(
+              color: Colors.black45,
+              alignment: Alignment.center,
+              child: Text('+$remaining',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.bold)),
+            )
+          ]);
+        }
+        return GestureDetector(
+            onTap: () => onTap?.call(i),
+            child: Hero(tag: tag, child: _Thumb(url: url)));
+      },
+    );
+  }
+}
+
+class _RowGap extends StatelessWidget {
+  final double gap;
+  final List<Widget> children;
+  const _RowGap({required this.gap, required this.children});
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          for (int i = 0; i < children.length; i++) ...[
+            Expanded(child: AspectRatio(aspectRatio: 1, child: children[i])),
+            if (i != children.length - 1) SizedBox(width: gap),
+          ]
+        ],
+      );
+}
+
+class _ImageTile extends StatelessWidget {
+  final String url;
+  final String tag;
+  final VoidCallback? onTap;
+  const _ImageTile({required this.url, required this.tag, this.onTap});
+  @override
+  Widget build(BuildContext context) =>
+      GestureDetector(onTap: onTap, child: Hero(tag: tag, child: _Thumb(url: url)));
+}
+
+class _Thumb extends StatelessWidget {
+  final String url;
+  const _Thumb({required this.url});
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+        borderRadius: BorderRadius.circular(10),
+        child: Image.network(url, fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) =>
+                const Icon(Icons.broken_image_outlined, size: 32)),
+      );
+}
 // ====================== BottomSheet: Comments ======================
 class _CommentsSheet extends StatefulWidget {
   final int postId;

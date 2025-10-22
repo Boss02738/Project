@@ -25,7 +25,7 @@ app.use(express.json());                // ✅ ต้องมีสำหรั
 // Routes 
 // auth upload 
 app.use('/api/auth', authRoutes);
-app.use('/api/auth', postRoutes);
+// app.use('/api/auth', postRoutes);
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 // search
@@ -36,6 +36,24 @@ pool.query('SELECT NOW()', (err, r) => {
   if (err) console.error('❌ DB failed:', err);
   else console.log('✅ PostgreSQL at:', r.rows[0].now);
 });
-
+app.use((req, res, next) => {
+  if (req.method === 'POST' && req.path.startsWith('/api/posts')) {
+    // debug: ดูชื่อฟิลด์ที่ client ส่งมา
+    // Multerจะเติม req.files หลังผ่าน upload แล้ว
+  }
+  next();
+});
+app.use((err, req, res, next) => {
+  if (!err) return next();
+  console.error('Upload error:', err.message);
+  if (err.message.includes('Unexpected field')) {
+    // ส่วนใหญ่เกิดจากชื่อฟิลด์ไม่ตรง
+    return res.status(400).json({ message: 'ฟิลด์ไฟล์ไม่ตรงกับที่เซิร์ฟเวอร์กำหนด: ใช้ images (รูปหลายรูป) และ file (ไฟล์แนบ)' });
+  }
+  if (err.message.includes('Only image files')) {
+    return res.status(400).json({ message: 'ฟิลด์ images รองรับเฉพาะไฟล์รูปภาพ' });
+  }
+  return res.status(400).json({ message: err.message || 'Upload error' });
+});
 // Start server
 app.listen(PORT, () => console.log(`🚀 http://localhost:${PORT}`));

@@ -7,7 +7,7 @@ import 'package:my_note_app/screens/Drawing_Screen.dart';
 import 'package:my_note_app/screens/search_screen.dart';
 
 class NewPostScreen extends StatefulWidget {
-  final int userId;         // id_user จริงจาก login
+  final int userId; // id_user จริงจาก login
   final String username;
 
   const NewPostScreen({
@@ -31,10 +31,14 @@ class _NewPostScreenState extends State<NewPostScreen> {
   // form state
   String selectedYear = 'ปี 1';
   String? selectedSubject;
-  File? _image;
+
+  // รูปหลายรูป (สูงสุด 10)
+  final ImagePicker _picker = ImagePicker();
+  List<XFile> _images = []; // preview
+  // แนบไฟล์อื่น 1 ชิ้น (ถ้าอยากรองรับ pdf/docn ให้เปลี่ยนเป็น file_picker)
   File? _file;
 
-  final List<String> years = ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4','วิชาเฉพาะเลือก'];
+  final List<String> years = ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4', 'วิชาเฉพาะเลือก'];
 
   final List<String> subjects1 = [
     '01418111 วิทยาการคอมพิวเตอร์เบื้องต้น',
@@ -112,79 +116,72 @@ class _NewPostScreenState extends State<NewPostScreen> {
     super.dispose();
   }
 
-  Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-    );
-    if (pickedFile != null) setState(() => _image = File(pickedFile.path));
+  // --------- Pickers ----------
+  Future<void> _pickImages() async {
+    final files = await _picker.pickMultiImage(imageQuality: 85);
+    if (files == null) return;
+    // รวมกับของเดิม (จำกัด 10)
+    final merged = [..._images, ...files];
+    setState(() => _images = merged.take(10).toList());
   }
 
   Future<void> _pickFile() async {
-    // เดโม่ใช้ image_picker; ถ้าจะรองรับ pdf/doc ให้เปลี่ยนเป็น package: file_picker
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
-    if (pickedFile != null) setState(() => _file = File(pickedFile.path));
+    final f = await _picker.pickImage(source: ImageSource.gallery);
+    if (f != null) setState(() => _file = File(f.path));
   }
 
-Future<void> _handlePost() async {
-  if (selectedSubject == null) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('กรุณาเลือกรายวิชา')),
-    );
-    return;
-  }
-
-  // loading
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (_) => const Center(child: CircularProgressIndicator()),
-  );
-
-  try {
-    final res = await ApiService.createPost(
-      userId: widget.userId,
-      text: _detailController.text.trim(),
-      yearLabel: selectedYear,
-      subject: selectedSubject,
-      image: _image,
-      file: _file,
-    );
-
-    if (!mounted) return;
-    Navigator.pop(context); // ปิด loading
-
-    if (res.statusCode == 200) {
-      // ✅ เคาะระฆังให้ Home รีโหลด
-
-      // ✅ แจ้งเตือน แต่ 'ไม่' เด้งกลับ Home
+  Future<void> _handlePost() async {
+    if (selectedSubject == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('โพสต์สำเร็จ')),
+        const SnackBar(content: Text('กรุณาเลือกรายวิชา')),
+      );
+      return;
+    }
+
+    // loading
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final res = await ApiService.createPost(
+        userId: widget.userId,
+        text: _detailController.text.trim(),
+        yearLabel: selectedYear,
+        subject: selectedSubject,
+        images: _images.map((x) => File(x.path)).toList(),
+        file: _file,
       );
 
-      // เคลียร์ฟอร์ม (ถ้าต้องการ)
-      setState(() {
-        _detailController.clear();
-        _image = null;
-        _file = null;
-        selectedYear = 'ปี 1';
-        selectedSubject = subjects.isNotEmpty ? subjects.first : null;
-      });
-    } else {
+      if (!mounted) return;
+      Navigator.pop(context); // ปิด loading
+
+      if (res.statusCode == 201 || res.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('โพสต์สำเร็จ')),
+        );
+        setState(() {
+          _detailController.clear();
+          _images = [];
+          _file = null;
+          selectedYear = 'ปี 1';
+          selectedSubject = subjects.isNotEmpty ? subjects.first : null;
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('โพสต์ไม่สำเร็จ (${res.statusCode})')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('โพสต์ไม่สำเร็จ (${res.statusCode})')),
+        const SnackBar(content: Text('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')),
       );
     }
-  } catch (e) {
-    if (!mounted) return;
-    Navigator.pop(context);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')),
-    );
   }
-}
 
   ImageProvider _avatarProvider() {
     if (_avatarUrl != null && _avatarUrl!.isNotEmpty) {
@@ -193,23 +190,62 @@ Future<void> _handlePost() async {
     return const AssetImage('assets/default_avatar.png');
   }
 
+  // preview รูปแบบ Grid
+  Widget _imagesPreview() {
+    if (_images.isEmpty) return const SizedBox.shrink();
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: _images.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 3,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
+      ),
+      itemBuilder: (_, i) {
+        final img = _images[i];
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image.file(File(img.path), fit: BoxFit.cover),
+              ),
+            ),
+            Positioned(
+              right: 2,
+              top: 2,
+              child: InkWell(
+                onTap: () => setState(() => _images.removeAt(i)),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black45,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  padding: const EdgeInsets.all(2),
+                  child: const Icon(Icons.close, color: Colors.white, size: 16),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final subjectItems = subjects
-        .map((e) => DropdownMenuItem<String>(value: e, child: Text(e)))
-        .toList();
+    final subjectItems =
+        subjects.map((e) => DropdownMenuItem<String>(value: e, child: Text(e))).toList();
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('NewPost'),
-          automaticallyImplyLeading: false, // ❌ เอาลูกศรออก
+        automaticallyImplyLeading: false,
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
-            child: CircleAvatar(
-              radius: 18,
-              backgroundImage: _avatarProvider(),
-            ),
+            child: CircleAvatar(radius: 18, backgroundImage: _avatarProvider()),
           ),
         ],
       ),
@@ -225,15 +261,11 @@ Future<void> _handlePost() async {
                   Flexible(
                     child: Text(
                       _username,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
-
                   // ปี
                   Flexible(
                     flex: 1,
@@ -249,15 +281,13 @@ Future<void> _handlePost() async {
                           isExpanded: true,
                           value: selectedYear,
                           items: years
-                              .map((e) =>
-                                  DropdownMenuItem(value: e, child: Text(e)))
+                              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
                           onChanged: (val) {
                             if (val == null) return;
                             setState(() {
                               selectedYear = val;
-                              selectedSubject =
-                                  subjects.isNotEmpty ? subjects.first : null;
+                              selectedSubject = subjects.isNotEmpty ? subjects.first : null;
                             });
                           },
                         ),
@@ -265,7 +295,6 @@ Future<void> _handlePost() async {
                     ),
                   ),
                   const SizedBox(width: 8),
-
                   // วิชา
                   Flexible(
                     flex: 2,
@@ -279,36 +308,23 @@ Future<void> _handlePost() async {
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           isExpanded: true,
-                          value: subjects.contains(selectedSubject)
-                              ? selectedSubject
-                              : null,
+                          value: subjects.contains(selectedSubject) ? selectedSubject : null,
                           hint: const Text('รายวิชา'),
                           items: subjectItems,
                           selectedItemBuilder: (context) => subjects.map((e) {
-                            return Text(
-                              e,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            );
+                            return Text(e, maxLines: 1, overflow: TextOverflow.ellipsis);
                           }).toList(),
-                          onChanged: (val) =>
-                              setState(() => selectedSubject = val),
+                          onChanged: (val) => setState(() => selectedSubject = val),
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-
                   ElevatedButton(
                     onPressed: _handlePost,
                     style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 12,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     child: const Text('โพสต์'),
                   ),
@@ -321,15 +337,14 @@ Future<void> _handlePost() async {
                 children: [
                   IconButton(
                     icon: const Icon(Icons.image),
-                    onPressed: _pickImage,
-                    tooltip: 'เลือกรูปภาพ',
+                    onPressed: _pickImages,
+                    tooltip: 'เลือกรูปภาพ (หลายรูป)',
                   ),
                   IconButton(
                     icon: const Icon(Icons.attach_file),
                     onPressed: _pickFile,
-                    tooltip: 'แนบไฟล์'
+                    tooltip: 'แนบไฟล์',
                   ),
-                  
                 ],
               ),
               const SizedBox(height: 8),
@@ -339,22 +354,16 @@ Future<void> _handlePost() async {
                 maxLines: 5,
                 decoration: InputDecoration(
                   hintText: 'รายละเอียดโพสต์',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10),
-                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const SizedBox(height: 16),
 
-              if (_image != null)
-                Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  height: 120,
-                  child: Image.file(_image!),
-                ),
+              _imagesPreview(),
+
               if (_file != null)
                 Container(
-                  margin: const EdgeInsets.only(bottom: 8),
+                  margin: const EdgeInsets.only(top: 8),
                   child: Row(
                     children: [
                       const Icon(Icons.insert_drive_file),
@@ -391,33 +400,18 @@ Future<void> _handlePost() async {
         selectedItemColor: const Color.fromARGB(255, 31, 102, 160),
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
-        onTap: (index) async{
+        onTap: (index) async {
           if (index == 0) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const homescreen()),
-            );
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const homescreen()));
           } else if (index == 1) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => const SearchScreen(),
-              ),
-            );
+            Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen()));
           }
         },
-        // 
         items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            label: 'Home',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
           BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.account_circle_outlined),
-            label: 'Profile',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.account_circle_outlined), label: 'Profile'),
         ],
       ),
     );
