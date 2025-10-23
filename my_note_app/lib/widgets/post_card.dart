@@ -3,6 +3,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+import 'dart:io';
+import 'package:open_file/open_file.dart';
 
 // ====== Fullscreen Gallery (swipe + zoom ได้) ======
 class GalleryViewer extends StatefulWidget {
@@ -109,6 +113,21 @@ class _PostCardState extends State<PostCard> {
   int _commentCount = 0;
   bool _likedByMe = false;
   bool _savedByMe = false;
+
+  Future<String?> _downloadFile(String url, String fileName) async {
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        final dir = await getApplicationDocumentsDirectory();
+        final filePath = '${dir.path}/$fileName';
+        final file = await File(filePath).writeAsBytes(response.bodyBytes);
+        return file.path;
+      }
+    } catch (e) {
+      debugPrint('Download error: $e');
+    }
+    return null;
+  }
 
   @override
   void initState() {
@@ -235,6 +254,7 @@ class _PostCardState extends State<PostCard> {
     final p = widget.post;
     final avatar = (p['avatar_url'] as String?) ?? '';
     final file = (p['file_url'] as String?) ?? '';
+    final fileName = file.isNotEmpty ? file.split('/').last : null;
     final name = p['username'] as String? ?? '';
     final text = p['text'] as String? ?? '';
     final subject = p['subject'] as String? ?? '';
@@ -298,26 +318,67 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
 
-          // File
+          // File download UI
           if (file.isNotEmpty)
             Padding(
-              padding: const EdgeInsets.all(12),
-              child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                    color: const Color(0xFFFBFBFB),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () async {
+                  final url = '${ApiService.host}$file';
+                  final savePath = await _downloadFile(url, fileName ?? 'downloaded_file');
+                  if (savePath != null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('ไฟล์ถูกดาวน์โหลดไปที่ $savePath')),
+                    );
+                    // เปิดไฟล์ทันที
+                    try {
+                      await OpenFile.open(savePath);
+                    } catch (e) {
+                      debugPrint('Open file error: $e');
+                    }
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('ดาวน์โหลดไฟล์ไม่สำเร็จ')),
+                    );
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
                     border: Border.all(color: Colors.grey.shade300),
-                    borderRadius: BorderRadius.circular(12)),
-                child: Row(
-                  children: [
-                    const Icon(Icons.insert_drive_file, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                        child: Text(file.split('/').last,
-                            overflow: TextOverflow.ellipsis)),
-                    const Icon(Icons.download_rounded),
-                  ],
+                    borderRadius: BorderRadius.circular(12),
+                    color: const Color(0xFFFBFBFB),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.insert_drive_file, size: 20, color: Color(0xFF335CFF)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          fileName ?? '',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEFF4FF),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: const [
+                            Icon(Icons.download_rounded, size: 18, color: Color(0xFF335CFF)),
+                            SizedBox(width: 2),
+                            Text('ดาวน์โหลด', style: TextStyle(fontSize: 12, color: Color(0xFF335CFF))),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
