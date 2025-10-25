@@ -118,6 +118,22 @@ class _PostCardState extends State<PostCard> {
     try {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
+        // First try: save to public Downloads on Android so user can access file easily
+        if (Platform.isAndroid) {
+          try {
+            final externalDir = Directory('/sdcard/Download');
+            if (!await externalDir.exists()) await externalDir.create(recursive: true);
+            final publicPath = '${externalDir.path}/$fileName';
+            final publicFile = File(publicPath);
+            await publicFile.writeAsBytes(response.bodyBytes);
+            return publicFile.path;
+          } catch (e) {
+            // ignore and fallback to app directory
+            debugPrint('Write to external Download failed, fallback: $e');
+          }
+        }
+
+        // Fallback: save inside app documents directory
         final dir = await getApplicationDocumentsDirectory();
         final filePath = '${dir.path}/$fileName';
         final file = await File(filePath).writeAsBytes(response.bodyBytes);

@@ -196,4 +196,16 @@ class ApiService {
     }
     throw Exception('search subjects failed');
   }
+  static Future<List<String>> getSubjects({String? yearLabel, String? q}) async {
+  final uri = Uri.parse('$_search/subjects').replace(queryParameters: {
+    if (q != null && q.trim().isNotEmpty) 'q': q.trim(),
+    if (yearLabel != null && yearLabel.trim().isNotEmpty) 'year_label': yearLabel.trim(),
+  });
+  final resp = await http.get(uri);
+  if (resp.statusCode == 200) {
+    final data = jsonDecode(resp.body);
+    return (data as List).map((e) => e.toString()).toList();
+  }
+  throw Exception('getSubjects failed: ${resp.statusCode}');
+}
 }
