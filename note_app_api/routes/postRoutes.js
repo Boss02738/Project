@@ -80,5 +80,6 @@ router.post('/posts/:id/comments',  post.addComment);
 router.post('/posts/:id/save',        post.toggleSave);
 router.get ('/posts/:id/save/status', post.getSavedStatus);
 router.get ('/saved',                 post.getSavedPosts);
-
+//Profile 
+router.get('/user/:id', post.getPostsByUser);
 module.exports = router;

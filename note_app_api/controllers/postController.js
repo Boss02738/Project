@@ -287,5 +287,38 @@ const getSavedPosts = async (req, res) => {
     res.status(500).json({ message: 'internal error' });
   }
 };
+const getPostsByUser = async (req, res) => {
+  try {
+    const uid = Number(req.params.id);
+    const viewerId = Number(req.query.viewer_id) || 0;
+    if (!uid) return res.status(400).json({ message: 'missing user id' });
 
-module.exports = { createPost, getFeed, getPostsBySubject, toggleLike, addComment, getComments, getPostCounts,toggleSave, getSavedStatus, getSavedPosts };
+    const q = `
+      SELECT 
+        p.*,
+        u.username,
+        COALESCE(u.avatar_url,'') AS avatar_url,
+        COALESCE(json_agg(pi.image_url ORDER BY pi.id)
+                 FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
+        EXISTS (
+          SELECT 1 FROM public.likes l 
+          WHERE l.post_id = p.id AND l.user_id = $2
+        ) AS liked_by_me
+      FROM public.posts p
+      JOIN public.users u ON u.id_user = p.user_id
+ LEFT JOIN public.post_images pi ON pi.post_id = p.id
+     WHERE p.user_id = $1
+  GROUP BY p.id, u.username, u.avatar_url
+  ORDER BY p.created_at DESC
+    `;
+    const r = await pool.query(q, [uid, viewerId]);
+    res.json(r.rows);
+  } catch (e) {
+    console.error('getPostsByUser error:', e);
+    res.status(500).json({ message: 'internal error' });
+  }
+};
+
+module.exports = { createPost, getFeed, getPostsBySubject, toggleLike, addComment, getComments, getPostCounts,toggleSave, getSavedStatus, getSavedPosts, getPostsByUser };

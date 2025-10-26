@@ -9,7 +9,7 @@ class ApiService {
     if (Platform.isAndroid) {
       return 'http://10.0.2.2:3000';      // Android emulator
     }
-    return 'http://192.168.1.106:3000';   // Physical device/iOS
+    return 'http://10.48.14.195:3000';   // Physical device/iOS
   }
 
   // แยก base ตามกลุ่ม API ชัด ๆ
@@ -213,5 +213,27 @@ class ApiService {
     return (data as List).map((e) => e.toString()).toList();
   }
   throw Exception('getSubjects failed: ${resp.statusCode}');
+}
+static Future<List<dynamic>> getPostsByUser({
+  required int profileUserId,
+  required int viewerId,
+}) async {
+  final uri = Uri.parse('$host/api/posts/user/$profileUserId')
+      .replace(queryParameters: {'viewer_id': '$viewerId'});
+  final resp = await http.get(uri);
+  if (resp.statusCode == 200) {
+    return (jsonDecode(resp.body) as List).cast<dynamic>();
+  }
+  throw Exception('โหลดโพสต์ผู้ใช้ล้มเหลว: ${resp.statusCode}');
+}
+static Future<Map<String, dynamic>> getUserProfile(int userId) async {
+  final url = Uri.parse('$_auth/user/$userId');
+  final resp = await http.get(url);
+  // debug ชั่วคราว
+  // print('GET $url -> ${resp.statusCode} ${resp.body}');
+  if (resp.statusCode == 200) {
+    return jsonDecode(resp.body) as Map<String, dynamic>;
+  }
+  throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
 }
 }

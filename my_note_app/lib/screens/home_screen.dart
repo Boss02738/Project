@@ -6,7 +6,7 @@ import 'package:my_note_app/screens/NewPost.dart';
 import 'package:my_note_app/screens/login_screen.dart';
 import 'package:my_note_app/screens/search_screen.dart';
 import 'package:my_note_app/widgets/post_card.dart';
-
+import 'package:my_note_app/screens/profile_screen.dart';
 class homescreen extends StatefulWidget {
   const homescreen({super.key});
   @override
@@ -128,14 +128,24 @@ class _HomeState extends State<homescreen> {
       ),
       const SearchScreen(),
       const Center(child: Text('Add Screen')),
-      const Center(child: Text('Profile Screen')),
+      // show profile screen as one of the tab pages; pass current _userId (may be null)
+      ProfileScreen(userId: _userId),
     ];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Note app'),
-        automaticallyImplyLeading: false,
-      ),
+  title: Text(
+    _currentIndex == 3
+        ? 'Profile'
+        : _currentIndex == 1
+            ? 'Search'
+            : _currentIndex == 0
+                ? 'Home'
+                : 'Note app',
+  ),
+  automaticallyImplyLeading: false,
+),
+
       body: Column(children: [Expanded(child: screens[_currentIndex])]),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
@@ -157,6 +167,8 @@ class _HomeState extends State<homescreen> {
               MaterialPageRoute(builder: (_) => const SearchScreen()),
             );
           } else {
+            // for index 0 and 3 (Profile) just update current index to show the
+            // corresponding page in `screens`
             setState(() => _currentIndex = index);
           }
         },

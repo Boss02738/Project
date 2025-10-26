@@ -271,31 +271,65 @@ const uploadAvatar = async (req, res) => {
 };
 
 // ดึงข้อมูลสั้นๆ ของผู้ใช้สำหรับ header
+// const getUserBrief = async (req, res) => {
+//   try {
+//     const id = Number(req.params.id);
+//     if (!id) return res.status(400).json({ message: 'ต้องมี user id' });
+
+//     const r = await pool.query(
+//       `SELECT id_user, username, COALESCE(avatar_url, '/uploads/avatars/default.png') AS avatar_url
+//        FROM public.users
+//        WHERE id_user = $1
+//        LIMIT 1`,
+//       [id]
+//     );
+
+//     if (r.rowCount === 0) return res.status(404).json({ message: 'ไม่พบผู้ใช้' });
+
+//     const u = r.rows[0];
+//     res.json({
+//       id: u.id_user,
+//       username: u.username,
+//       avatar_url: u.avatar_url,
+//     });
+//   } catch (err) {
+//     console.error('getUserBrief error:', err);
+//     res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
+//   }
+// }
 const getUserBrief = async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    if (!id) return res.status(400).json({ message: 'ต้องมี user id' });
+    const { id } = req.params;
 
-    const r = await pool.query(
-      `SELECT id_user, username, COALESCE(avatar_url, '/uploads/avatars/default.png') AS avatar_url
-       FROM public.users
-       WHERE id_user = $1
-       LIMIT 1`,
-      [id]
-    );
+    const q = `
+      SELECT
+        u.id_user,
+        u.username,
+        u.email,
+        COALESCE(u.bio, '') AS bio,
+        COALESCE(u.gender, '') AS gender,
+        COALESCE(u.avatar_url, '/uploads/avatars/default.png') AS avatar_url,
+        COALESCE(u.profile_completed, false) AS profile_completed,
+        -- นับจำนวนโพสต์ของผู้ใช้
+        (SELECT COUNT(*)::int FROM public.posts p WHERE p.user_id = u.id_user) AS post_count
+        -- ถ้ามีตาราง friends ให้เติมตรงนี้ได้ เช่น:
+        -- ,(SELECT COUNT(*)::int FROM public.friends f WHERE f.user_id = u.id_user) AS friends_count
+      FROM public.users u
+      WHERE u.id_user = $1
+      LIMIT 1
+    `;
+    const r = await pool.query(q, [id]);
+    if (r.rowCount === 0) return res.status(404).json({ message: 'user not found' });
 
-    if (r.rowCount === 0) return res.status(404).json({ message: 'ไม่พบผู้ใช้' });
+    // ถ้าไม่มี friends table ก็ใส่ 0 ไปก่อน
+    const row = r.rows[0];
+    if (row.friends_count === undefined) row.friends_count = 0;
 
-    const u = r.rows[0];
-    res.json({
-      id: u.id_user,
-      username: u.username,
-      avatar_url: u.avatar_url,
-    });
+    return res.json(row);
   } catch (err) {
     console.error('getUserBrief error:', err);
-    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
+    return res.status(500).json({ message: 'server error' });
   }
-}
-module.exports = { startRegister, verifyRegister, resendOtp, login, updateProfile, uploadAvatar, getUserBrief };
+};
 
+module.exports = { startRegister, verifyRegister, resendOtp, login, updateProfile, uploadAvatar, getUserBrief };
