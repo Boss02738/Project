@@ -14,7 +14,6 @@ class SubjectFeedScreen extends StatefulWidget {
 class _SubjectFeedScreenState extends State<SubjectFeedScreen> {
   late Future<List<dynamic>> _futureFeed;
   int? _userId;
-  bool _loadingUser = true;
 
   @override
   void initState() {
@@ -24,9 +23,8 @@ class _SubjectFeedScreenState extends State<SubjectFeedScreen> {
 
   Future<void> _initAndLoad() async {
     final sp = await SharedPreferences.getInstance();
-    _userId = sp.getInt('user_id') ?? 0; // ถ้าไม่มีให้เป็น 0
+    _userId = sp.getInt('user_id') ?? 0;
     setState(() {
-      _loadingUser = false;
       _futureFeed = ApiService.getFeedBySubject(widget.subjectName, _userId!);
     });
   }
@@ -40,16 +38,8 @@ class _SubjectFeedScreenState extends State<SubjectFeedScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loadingUser) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
-      );
-    }
-
     return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.subjectName, overflow: TextOverflow.ellipsis),
-      ),
+      appBar: AppBar(title: Text(widget.subjectName, overflow: TextOverflow.ellipsis)),
       body: FutureBuilder<List<dynamic>>(
         future: _futureFeed,
         builder: (context, snap) {

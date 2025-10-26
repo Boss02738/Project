@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/drawing_screen.dart' as rt;
@@ -30,7 +31,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
   // header user
   String _username = '';
   String? _avatarUrl;
-  bool _loadingUser = true;
+  // bool _loadingUser = true; // ไม่ได้ใช้
 
   // form state
   String selectedYear = 'ปี 1';
@@ -39,8 +40,9 @@ class _NewPostScreenState extends State<NewPostScreen> {
   // รูปหลายรูป (สูงสุด 10)
   final ImagePicker _picker = ImagePicker();
   List<XFile> _images = []; // preview
-  // แนบไฟล์อื่น 1 ชิ้น
+  // แนบไฟล์อื่น 1 ชิ้น (ถ้าอยากรองรับ pdf/docn ให้เปลี่ยนเป็น file_picker)
   File? _file;
+  String? _fileName;
 
   final List<String> years = ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4', 'วิชาเฉพาะเลือก'];
 
@@ -103,11 +105,10 @@ class _NewPostScreenState extends State<NewPostScreen> {
             ? data['username'] as String
             : widget.username;
         _avatarUrl = data['avatar_url'] as String?;
-        _loadingUser = false;
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() => _loadingUser = false);
+  setState(() {});
     }
   }
 
@@ -120,14 +121,23 @@ class _NewPostScreenState extends State<NewPostScreen> {
   // --------- Pickers ----------
   Future<void> _pickImages() async {
     final files = await _picker.pickMultiImage(imageQuality: 85);
-    if (files == null) return;
+    //if (files == null) return;
+    // รวมกับของเดิม (จำกัด 10)
     final merged = [..._images, ...files];
     setState(() => _images = merged.take(10).toList());
   }
 
   Future<void> _pickFile() async {
-    final f = await _picker.pickImage(source: ImageSource.gallery);
-    if (f != null) setState(() => _file = File(f.path));
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pdf', 'doc', 'docx', 'zip', 'ppt', 'xls', 'xlsx'],
+    );
+    if (result != null && result.files.isNotEmpty) {
+      setState(() {
+        _file = File(result.files.single.path!);
+        _fileName = result.files.single.name;
+      });
+    }
   }
 
   Future<void> _handlePost() async {
@@ -438,19 +448,28 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
               _imagesPreview(),
 
-              if (_file != null)
+              if (_file != null && _fileName != null)
                 Container(
                   margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(12),
+                    color: const Color(0xFFFBFBFB),
+                  ),
                   child: Row(
                     children: [
-                      const Icon(Icons.insert_drive_file),
+                      const Icon(Icons.insert_drive_file, size: 20),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          _file!.path.split(Platform.pathSeparator).last,
+                          _fileName!,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.check_circle, color: Colors.green),
                     ],
                   ),
                 ),
