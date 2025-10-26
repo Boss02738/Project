@@ -9,7 +9,7 @@ class ApiService {
     if (Platform.isAndroid) {
       return 'http://10.0.2.2:3000';      // Android emulator
     }
-    return 'http://10.48.14.195:3000';   // Physical device/iOS
+    return 'http://10.40.150.148:3000';   // Physical device/iOS
   }
 
   // แยก base ตามกลุ่ม API ชัด ๆ

@@ -5,6 +5,7 @@ import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/NewPost.dart';
 import 'package:my_note_app/screens/subject_feed_screen.dart';
+import 'package:my_note_app/screens/profile_screen.dart'; // ✅ เพิ่มตรงนี้
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -18,22 +19,21 @@ class _SearchScreenState extends State<SearchScreen> {
   final _debouncer = _Debouncer(const Duration(milliseconds: 350));
   bool _loading = false;
 
-  // โหมดค้นหา
   SearchFilter _filter = SearchFilter.all;
-
-  // ผู้ใช้ปัจจุบัน (เพื่อแยกประวัติเป็นรายไอดี)
   int? _userId;
   String get _recentKey => 'recent_search_${_userId ?? "guest"}';
 
-  // recent search (ล่าสุด 10 รายการ)
   List<String> _recent = [];
-
-  // results
   List<dynamic> _userResults = [];
   List<String> _subjectResults = [];
 
-  // สำหรับ Subject Picker
-  final List<String> _years = const ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4', 'วิชาเฉพาะเลือก'];
+  final List<String> _years = const [
+    'ปี 1',
+    'ปี 2',
+    'ปี 3',
+    'ปี 4',
+    'วิชาเฉพาะเลือก',
+  ];
   String _selectedYear = 'ปี 1';
 
   @override
@@ -45,11 +45,11 @@ class _SearchScreenState extends State<SearchScreen> {
   Future<void> _initUserThenLoadRecent() async {
     final sp = await SharedPreferences.getInstance();
     setState(() {
-      _userId = sp.getInt('user_id'); // อาจเป็น null (guest)
+      _userId = sp.getInt('user_id');
     });
     await _loadRecent();
   }
-  
+
   @override
   void dispose() {
     _controller.dispose();
@@ -67,7 +67,6 @@ class _SearchScreenState extends State<SearchScreen> {
     final sp = await SharedPreferences.getInstance();
     final list = [..._recent];
 
-    // เอา duplicate ออก แล้วสอดรายการใหม่ไว้หัวแถว
     list.removeWhere((e) => e.toLowerCase() == text.toLowerCase());
     list.insert(0, text);
     if (list.length > 10) list.removeRange(10, list.length);
@@ -75,69 +74,64 @@ class _SearchScreenState extends State<SearchScreen> {
     await sp.setStringList(_recentKey, list);
     if (mounted) setState(() => _recent = list);
   }
+
   Future<void> _clearRecent() async {
-  final sp = await SharedPreferences.getInstance();
-  await sp.remove(_recentKey);
-  if (mounted) setState(() => _recent = []);
-}
-
-Future<void> _removeRecentItem(String q) async {
-  final sp = await SharedPreferences.getInstance();
-  final list = [..._recent]..removeWhere((e) => e.toLowerCase() == q.toLowerCase());
-  await sp.setStringList(_recentKey, list);
-  if (mounted) setState(() => _recent = list);
-}
-
-
-Future<void> _search(String q) async {
-  final term = q.trim();
-  if (term.isEmpty) {
-    setState(() {
-      _userResults = [];
-      _subjectResults = [];
-      _loading = false;
-    });
-    return;
+    final sp = await SharedPreferences.getInstance();
+    await sp.remove(_recentKey);
+    if (mounted) setState(() => _recent = []);
   }
 
-  setState(() => _loading = true);
-  try {
-    if (_filter == SearchFilter.users || _filter == SearchFilter.all) {
-      _userResults = await ApiService.searchUsers(term);
-    } else {
-      _userResults = [];
-    }
-
-    if (_filter == SearchFilter.subjects || _filter == SearchFilter.all) {
-      _subjectResults = await ApiService.searchSubjects(term);
-    } else {
-      _subjectResults = [];
-    }
-
-    // 🔸 ลบบรรทัดเซฟประวัติออกจากตรงนี้
-    // await _saveRecent(term);
-  } catch (_) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('ค้นหาไม่สำเร็จ')),
-    );
-  } finally {
-    if (mounted) setState(() => _loading = false);
+  Future<void> _removeRecentItem(String q) async {
+    final sp = await SharedPreferences.getInstance();
+    final list = [..._recent]
+      ..removeWhere((e) => e.toLowerCase() == q.toLowerCase());
+    await sp.setStringList(_recentKey, list);
+    if (mounted) setState(() => _recent = list);
   }
-}
 
+  Future<void> _search(String q) async {
+    final term = q.trim();
+    if (term.isEmpty) {
+      setState(() {
+        _userResults = [];
+        _subjectResults = [];
+        _loading = false;
+      });
+      return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      if (_filter == SearchFilter.users || _filter == SearchFilter.all) {
+        _userResults = await ApiService.searchUsers(term);
+      } else {
+        _userResults = [];
+      }
+
+      if (_filter == SearchFilter.subjects || _filter == SearchFilter.all) {
+        _subjectResults = await ApiService.searchSubjects(term);
+      } else {
+        _subjectResults = [];
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('ค้นหาไม่สำเร็จ')));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
 
   void _onQueryChanged(String q) {
     _debouncer.run(() => _search(q));
   }
 
-void _onSubmit(String q) async {
-  await _saveRecent(q); // ✅ เซฟที่นี่
-  _search(q);
-}
+  void _onSubmit(String q) async {
+    await _saveRecent(q);
+    _search(q);
+  }
 
-
-  // ---------- เปิด Subject Picker: เลือกปี -> เลือกรายวิชา ----------
   Future<void> _openSubjectPicker() async {
     await showModalBottomSheet(
       context: context,
@@ -152,7 +146,6 @@ void _onSubmit(String q) async {
           initialYear: _selectedYear,
           onYearChanged: (y) => _selectedYear = y,
           onSubjectTap: (subject) async {
-            // ✅ เซฟลงประวัติก่อนนำทาง
             await _saveRecent(subject);
             if (!mounted) return;
             Navigator.pop(ctx);
@@ -206,78 +199,80 @@ void _onSubmit(String q) async {
           itemBuilder: (_) => const [
             PopupMenuItem(value: SearchFilter.all, child: Text('All')),
             PopupMenuItem(value: SearchFilter.users, child: Text('Users')),
-            PopupMenuItem(value: SearchFilter.subjects, child: Text('Subjects')),
+            PopupMenuItem(
+              value: SearchFilter.subjects,
+              child: Text('Subjects'),
+            ),
           ],
         ),
       ],
     );
   }
 
-Widget _buildRecent() {
-  if (_recent.isEmpty) return const SizedBox.shrink();
+  Widget _buildRecent() {
+    if (_recent.isEmpty) return const SizedBox.shrink();
 
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      const SizedBox(height: 12),
-      Row(
-        children: [
-          const Text(
-            'Recent Search',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const Spacer(),
-          TextButton.icon(
-            onPressed: _clearRecent,
-            icon: const Icon(Icons.delete_sweep_outlined, size: 18),
-            label: const Text('ลบประวัติทั้งหมด'),
-            style: TextButton.styleFrom(padding: EdgeInsets.zero),
-          ),
-        ],
-      ),
-      const SizedBox(height: 4),
-      ..._recent.map((q) {
-        return Container(
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          child: Row(
-            children: [
-              const Icon(Icons.history, size: 20, color: Colors.black54),
-              const SizedBox(width: 8),
-              Expanded(
-                child: GestureDetector(
-                  onTap: () async {
-                    _controller.text = q;
-                    _controller.selection = TextSelection.fromPosition(
-                      TextPosition(offset: _controller.text.length),
-                    );
-                    await _saveRecent(q);
-                    _search(q);
-                  },
-                  child: Text(
-                    q,
-                    style: const TextStyle(fontSize: 15),
-                    overflow: TextOverflow.ellipsis,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            const Text(
+              'Recent Search',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _clearRecent,
+              icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+              label: const Text('ลบประวัติทั้งหมด'),
+              style: TextButton.styleFrom(padding: EdgeInsets.zero),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        ..._recent.map((q) {
+          return Container(
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            child: Row(
+              children: [
+                const Icon(Icons.history, size: 20, color: Colors.black54),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () async {
+                      _controller.text = q;
+                      _controller.selection = TextSelection.fromPosition(
+                        TextPosition(offset: _controller.text.length),
+                      );
+                      await _saveRecent(q);
+                      _search(q);
+                    },
+                    child: Text(
+                      q,
+                      style: const TextStyle(fontSize: 15),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.close, size: 20, color: Colors.grey),
-                splashRadius: 20,
-                padding: EdgeInsets.zero,
-                onPressed: () => _removeRecentItem(q),
-              ),
-            ],
-          ),
-        );
-      }),
-    ],
-  );
-}
+                IconButton(
+                  icon: const Icon(Icons.close, size: 20, color: Colors.grey),
+                  splashRadius: 20,
+                  padding: EdgeInsets.zero,
+                  onPressed: () => _removeRecentItem(q),
+                ),
+              ],
+            ),
+          );
+        }),
+      ],
+    );
+  }
 
   Widget _buildResults() {
-    if (_loading) {
+    if (_loading)
       return const Expanded(child: Center(child: CircularProgressIndicator()));
-    }
 
     final hasUser = _userResults.isNotEmpty;
     final hasSubject = _subjectResults.isNotEmpty;
@@ -300,22 +295,39 @@ Widget _buildRecent() {
           if (hasUser) ...[
             const Padding(
               padding: EdgeInsets.fromLTRB(4, 12, 4, 4),
-              child: Text('Users', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: Text(
+                'Users',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
             ..._userResults.map((u) {
               final username = u['username'] as String? ?? '';
               final avatar = u['avatar_url'] as String? ?? '';
+              // ✅ ดึง id_user แบบปลอดภัย
+              final int? targetUserId = (u['id_user'] as num?)?.toInt();
+
               return ListTile(
                 leading: CircleAvatar(
                   backgroundImage: avatar.isNotEmpty
                       ? NetworkImage('${ApiService.host}$avatar')
-                      : const AssetImage('assets/default_avatar.png') as ImageProvider,
+                      : const AssetImage('assets/default_avatar.png')
+                            as ImageProvider,
                 ),
                 title: Text(username),
                 trailing: const Icon(Icons.north_east, size: 18),
                 onTap: () async {
+                  if (targetUserId == null) return; // กัน null
+
                   await _saveRecent(username);
-                  // TODO: ไปหน้าโปรไฟล์เมื่อพร้อม
+                  if (!mounted) return;
+
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          ProfileScreen(userId: targetUserId), // ✅ ส่ง id ไป
+                    ),
+                  );
                 },
               );
             }),
@@ -323,7 +335,10 @@ Widget _buildRecent() {
           if (hasSubject) ...[
             const Padding(
               padding: EdgeInsets.fromLTRB(4, 16, 4, 4),
-              child: Text('Subjects', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: Text(
+                'Subjects',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
             ),
             ..._subjectResults.map(
               (s) => ListTile(
@@ -393,10 +408,16 @@ Widget _buildRecent() {
           }
         },
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            label: 'Home',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
           BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_circle_outlined), label: 'Profile'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.account_circle_outlined),
+            label: 'Profile',
+          ),
         ],
       ),
     );
@@ -448,10 +469,8 @@ class _SubjectPickerSheetState extends State<_SubjectPickerSheet> {
     setState(() {
       _futureSubjects = ApiService.getSubjects(yearLabel: _year);
     });
-    
   }
 
-  
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -527,5 +546,4 @@ class _SubjectPickerSheetState extends State<_SubjectPickerSheet> {
       ),
     );
   }
-  
 }
