@@ -1,15 +1,21 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class ApiService {
-  // เปลี่ยนเป็น IP เครื่องตัวเอง
-  static const String host = 'http://10.40.150.148:3000';
+  // Android emulator ใช้ 10.0.2.2, ถ้ารันบนมือถือใช้ IP จริงของเครื่อง dev
+  static String get host {
+    if (Platform.isAndroid) {
+      return 'http://10.0.2.2:3000';      // Android emulator
+    }
+    return 'http://192.168.1.106:3000';   // Physical device/iOS
+  }
 
   // แยก base ตามกลุ่ม API ชัด ๆ
-  static const String _auth = '$host/api/auth';
-  static const String _posts = '$host/api/posts';
-  static const String _search = '$host/api/search';
+  static String get _auth => '$host/api/auth';
+  static String get _posts => '$host/api/posts';
+  static String get _search => '$host/api/search';
 
   // ---------------- Auth ----------------
   static Future<http.Response> register(String username, String password) async {

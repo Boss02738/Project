@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:my_note_app/api/api_service.dart';
 
-const String apiBase = 'http://10.40.150.148:3000/api/auth';
+String get apiBase => '${ApiService.host}/api/auth';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -105,6 +106,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     setState(() => loading = true);
     try {
+      debugPrint('Requesting OTP from: ${apiBase}/register/request-otp');
       final res = await http.post(
         Uri.parse('$apiBase/register/request-otp'),
         headers: {'Content-Type': 'application/json'},
@@ -114,7 +116,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
           'password': _password.text,
         }),
       );
-
+      
+      debugPrint('Response status: ${res.statusCode}');
+      debugPrint('Response body: ${res.body}');
+      
       final data = jsonDecode(res.body);
       if (res.statusCode == 200) {
         setState(() => otpSent = true);

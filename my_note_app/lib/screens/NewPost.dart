@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 import 'dart:io';
+import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/home_screen.dart';
-import 'package:my_note_app/screens/Drawing_Screen.dart';
+import 'package:my_note_app/screens/drawing_screen.dart' as rt;
+import 'package:my_note_app/screens/documents_screen.dart'; // <- ถ้าชื่อไฟล์คุณเป็น documents_screen.dart ให้แก้ import และชื่อคลาสให้ตรง
 import 'package:my_note_app/screens/search_screen.dart';
+import 'package:http/http.dart' as http;
+import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class NewPostScreen extends StatefulWidget {
   final int userId; // id_user จริงจาก login
@@ -35,7 +39,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
   // รูปหลายรูป (สูงสุด 10)
   final ImagePicker _picker = ImagePicker();
   List<XFile> _images = []; // preview
-  // แนบไฟล์อื่น 1 ชิ้น (ถ้าอยากรองรับ pdf/docn ให้เปลี่ยนเป็น file_picker)
+  // แนบไฟล์อื่น 1 ชิ้น
   File? _file;
 
   final List<String> years = ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4', 'วิชาเฉพาะเลือก'];
@@ -70,10 +74,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
     '01418490 สหกิจศึกษา',
     '01418499 โครงงานวิทยาการคอมพิวเตอร์',
   ];
-  final List<String> subjects5 = [
-    '01418490 เว็บ',
-    '01418499 ธนาคาร',
-  ];
+  final List<String> subjects5 = ['01418490 เว็บ', '01418499 ธนาคาร'];
 
   late final Map<String, List<String>> subjectsByYear = {
     'ปี 1': subjects1,
@@ -120,7 +121,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
   Future<void> _pickImages() async {
     final files = await _picker.pickMultiImage(imageQuality: 85);
     if (files == null) return;
-    // รวมกับของเดิม (จำกัด 10)
     final merged = [..._images, ...files];
     setState(() => _images = merged.take(10).toList());
   }
@@ -132,13 +132,11 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
   Future<void> _handlePost() async {
     if (selectedSubject == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรุณาเลือกรายวิชา')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('กรุณาเลือกรายวิชา')));
       return;
     }
 
-    // loading
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -159,9 +157,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
       Navigator.pop(context); // ปิด loading
 
       if (res.statusCode == 201 || res.statusCode == 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('โพสต์สำเร็จ')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('โพสต์สำเร็จ')));
         setState(() {
           _detailController.clear();
           _images = [];
@@ -188,6 +185,70 @@ class _NewPostScreenState extends State<NewPostScreen> {
       return NetworkImage('${ApiService.host}${_avatarUrl!}');
     }
     return const AssetImage('assets/default_avatar.png');
+  }
+
+  // --------- เปิดหน้าเขียนโน้ต realtime ----------
+  String _slugify(String s) {
+    final t = s
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    if (t.isEmpty) return 'room-${DateTime.now().millisecondsSinceEpoch}';
+    return t.length <= 64 ? t : t.substring(0, 64);
+  }
+
+  Future<void> _openHandwriteRealtime() async {
+    final title = 'handnote-${DateTime.now().millisecondsSinceEpoch}';
+    final roomId = _slugify(title);
+
+    try {
+      final r = await http.post(
+        Uri.parse('${ApiService.host}/rooms'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'roomId': roomId, 'name': title}),
+      );
+      if (r.statusCode != 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('สร้างห้องไม่สำเร็จ (${r.statusCode})')),
+        );
+        return;
+      }
+
+      // parse response to get actual roomId (server returns roomId)
+      String createdRoomId = roomId;
+      try {
+        final Map<String, dynamic> j = jsonDecode(r.body) as Map<String, dynamic>;
+        if (j['roomId'] is String && (j['roomId'] as String).isNotEmpty) {
+          createdRoomId = j['roomId'] as String;
+        }
+      } catch (_) {}
+
+      // create socket and join room to enable realtime saving/loading
+      final socket = IO.io(
+        ApiService.host,
+        IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
+      );
+      socket.connect();
+      socket.onConnect((_) => socket.emit('join', {'boardId': createdRoomId}));
+
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => rt.NoteScribblePage(
+            boardId: createdRoomId,
+            initialTitle: title,
+            socket: socket,
+            documentId: null,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('เชื่อมต่อเซิร์ฟเวอร์ realtime ไม่ได้')),
+      );
+    }
   }
 
   // preview รูปแบบ Grid
@@ -235,8 +296,9 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final subjectItems =
-        subjects.map((e) => DropdownMenuItem<String>(value: e, child: Text(e))).toList();
+    final subjectItems = subjects
+        .map((e) => DropdownMenuItem<String>(value: e, child: Text(e)))
+        .toList();
 
     return Scaffold(
       appBar: AppBar(
@@ -261,7 +323,10 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   Flexible(
                     child: Text(
                       _username,
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -281,13 +346,15 @@ class _NewPostScreenState extends State<NewPostScreen> {
                           isExpanded: true,
                           value: selectedYear,
                           items: years
-                              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                              .map((e) =>
+                                  DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
                           onChanged: (val) {
                             if (val == null) return;
                             setState(() {
                               selectedYear = val;
-                              selectedSubject = subjects.isNotEmpty ? subjects.first : null;
+                              selectedSubject =
+                                  subjects.isNotEmpty ? subjects.first : null;
                             });
                           },
                         ),
@@ -308,13 +375,20 @@ class _NewPostScreenState extends State<NewPostScreen> {
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           isExpanded: true,
-                          value: subjects.contains(selectedSubject) ? selectedSubject : null,
+                          value: subjects.contains(selectedSubject)
+                              ? selectedSubject
+                              : null,
                           hint: const Text('รายวิชา'),
                           items: subjectItems,
                           selectedItemBuilder: (context) => subjects.map((e) {
-                            return Text(e, maxLines: 1, overflow: TextOverflow.ellipsis);
+                            return Text(
+                              e,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            );
                           }).toList(),
-                          onChanged: (val) => setState(() => selectedSubject = val),
+                          onChanged: (val) =>
+                              setState(() => selectedSubject = val),
                         ),
                       ),
                     ),
@@ -323,8 +397,10 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   ElevatedButton(
                     onPressed: _handlePost,
                     style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 12),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
                     ),
                     child: const Text('โพสต์'),
                   ),
@@ -354,7 +430,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 maxLines: 5,
                 decoration: InputDecoration(
                   hintText: 'รายละเอียดโพสต์',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  border:
+                      OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -382,12 +459,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
               Center(
                 child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => NoteScribblePage()),
-                    );
-                  },
+                  onPressed: _openHandwriteRealtime,
                   child: const Text('เขียนโน้ตด้วยลายมือ'),
                 ),
               ),
@@ -396,20 +468,40 @@ class _NewPostScreenState extends State<NewPostScreen> {
         ),
       ),
       bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 2,
+        currentIndex: 3, // หน้านี้คือ Add (index 3)
         selectedItemColor: const Color.fromARGB(255, 31, 102, 160),
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
         onTap: (index) async {
           if (index == 0) {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const homescreen()));
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const homescreen()),
+            );
           } else if (index == 1) {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const SearchScreen()));
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const SearchScreen()),
+            );
+          } else if (index == 2) {
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const DocumentsScreen()),
+            );
+          } else if (index == 3) {
+            // อยู่หน้า Add แล้ว ไม่ต้องทำอะไร
+          } else if (index == 4) {
+            // ไปหน้าโปรไฟล์ของคุณถ้ามี
+            // Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
           }
         },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
           BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
+          BottomNavigationBarItem(icon: Icon(Icons.folder_open), label: 'Documents'),
           BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
           BottomNavigationBarItem(icon: Icon(Icons.account_circle_outlined), label: 'Profile'),
         ],

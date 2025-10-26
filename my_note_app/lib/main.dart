@@ -13,7 +13,13 @@ class MyApp extends StatelessWidget {
     return MaterialApp(
       title: 'Note App',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(primarySwatch: Colors.blue),
+      theme: ThemeData(
+        primarySwatch: Colors.blue,
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
+        ),
+      ),
       home: LoginScreen(), // ใช้ชื่อคลาสที่ถูกต้อง
     );
   }

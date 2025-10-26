@@ -38,6 +38,7 @@ dependencies:
   image_picker: ^1.0.7
   shared_preferences: ^2.5.3
   photo_view: ^0.15.0
+  socket_io_client: ^2.0.3
   # file_picker: ^5.2.11
 
 
