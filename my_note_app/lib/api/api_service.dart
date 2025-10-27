@@ -236,4 +236,22 @@ static Future<Map<String, dynamic>> getUserProfile(int userId) async {
   }
   throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
 }
+static Future<List<dynamic>> getSavedPosts(int userId) async {
+  final res = await http.get(Uri.parse('$_posts/posts/saved/$userId'));
+  if (res.statusCode == 200) {
+    return json.decode(res.body);
+  } else {
+    throw Exception('โหลดโพสต์ที่บันทึกไม่สำเร็จ');
+  }
+}
+
+static Future<List<dynamic>> getLikedPosts(int userId) async {
+  final res = await http.get(Uri.parse('$_posts/posts/liked/$userId'));
+  if (res.statusCode == 200) {
+    return json.decode(res.body);
+  } else {
+    throw Exception('โหลดโพสต์ที่ถูกใจไม่สำเร็จ');
+  }
+}
+
 }
