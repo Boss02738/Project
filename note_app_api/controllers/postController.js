@@ -110,8 +110,9 @@ const getFeed = async (req, res) => {
       FROM public.posts p
       JOIN public.users u ON u.id_user = p.user_id
  LEFT JOIN public.post_images pi ON pi.post_id = p.id
-  GROUP BY p.id, u.username, u.avatar_url
-  ORDER BY p.created_at DESC
+ WHERE COALESCE(p.is_archived,false) = false
+ GROUP BY p.id, u.username, u.avatar_url
+ ORDER BY p.created_at DESC
     `;
     const { rows } = await pool.query(q, [viewerId]);
     res.json(rows);
@@ -143,8 +144,8 @@ const getPostsBySubject = async (req, res) => {
       FROM public.posts p
       JOIN public.users u ON u.id_user = p.user_id
  LEFT JOIN public.post_images pi ON pi.post_id = p.id
-     WHERE ($1::text IS NULL OR p.subject = $1)
-  GROUP BY p.id, u.username, u.avatar_url
+ WHERE COALESCE(p.is_archived,false) = false
+   AND ($1::text IS NULL OR p.subject = $1)  GROUP BY p.id, u.username, u.avatar_url
   ORDER BY p.created_at DESC
     `;
     const r = await pool.query(q, [subject || null, viewerId]);
@@ -160,7 +161,9 @@ const toggleLike = async (req, res) => {
   const postId = Number(req.params.id);
   const userId = Number(req.body.user_id);
   if (!postId || !userId) return res.status(400).json({ message: 'missing post_id/user_id' });
-
+  const chk = await pool.query('SELECT COALESCE(is_archived,false) AS a FROM public.posts WHERE id=$1',[postId]);
+  if (!chk.rowCount) return res.status(404).json({ message: 'post_not_found' });
+  if (chk.rows[0].a)  return res.status(400).json({ message: 'post_archived' });
   try {
     const existing = await pool.query(
       'SELECT id FROM public.likes WHERE post_id=$1 AND user_id=$2',
@@ -245,7 +248,9 @@ const toggleSave = async (req, res) => {
   const postId = Number(req.params.id);
   const userId = Number(req.body.user_id);
   if (!postId || !userId) return res.status(400).json({ message: 'missing post_id/user_id' });
-
+  const chk = await pool.query('SELECT COALESCE(is_archived,false) AS a FROM public.posts WHERE id=$1',[postId]);
+  if (!chk.rowCount) return res.status(404).json({ message: 'post_not_found' });
+  if (chk.rows[0].a)  return res.status(400).json({ message: 'post_archived' });
   try {
     const existing = await pool.query(
       'SELECT id FROM public.saves WHERE post_id=$1 AND user_id=$2',
@@ -271,10 +276,15 @@ const getSavedStatus = async (req, res) => {
 
   try {
     const r = await pool.query(
-      'SELECT 1 FROM public.saves WHERE post_id=$1 AND user_id=$2 LIMIT 1',
+      `SELECT 1
+         FROM public.saves s
+         JOIN public.posts p ON p.id = s.post_id
+        WHERE s.post_id=$1 AND s.user_id=$2
+          AND COALESCE(p.is_archived,false)=false
+        LIMIT 1`,
       [postId, userId]
     );
-    res.json({ saved: r.rowCount > 0 });
+    res.json({ saved: r.rowCount > 0 }); // ถ้า archived จะได้ false
   } catch (e) {
     console.error('getSavedStatus error:', e);
     res.status(500).json({ message: 'internal error' });
@@ -292,33 +302,19 @@ const getSavedPosts = async (req, res) => {
         u.id_user AS user_id,
         u.username,
         COALESCE(u.avatar_url, '') AS avatar_url,
-
-        -- รวมรูปทั้งหมดของโพสต์
-        COALESCE(
-          json_agg(pi.image_url ORDER BY pi.id)
-          FILTER (WHERE pi.id IS NOT NULL),
-          '[]'
-        ) AS images,
-
-        -- นับยอดต่าง ๆ
+        COALESCE(json_agg(pi.image_url ORDER BY pi.id)
+                 FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
         (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
         (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
-
-        -- สถานะสำหรับผู้ดู (viewer = คนที่เปิด Saved เอง)
         TRUE AS saved_by_me,
-        EXISTS(
-          SELECT 1
-          FROM public.likes l
-          WHERE l.post_id = p.id AND l.user_id = $1
-        ) AS liked_by_me,
-
-        -- ใช้เวลาที่บันทึกไว้ในการ sort
+        EXISTS(SELECT 1 FROM public.likes l WHERE l.post_id = p.id AND l.user_id = $1) AS liked_by_me,
         s.created_at AS saved_at
       FROM public.saves s
       JOIN public.posts p ON p.id = s.post_id
       JOIN public.users u ON u.id_user = p.user_id
       LEFT JOIN public.post_images pi ON pi.post_id = p.id
       WHERE s.user_id = $1
+       AND COALESCE(p.is_archived,false) = false
       GROUP BY p.id, u.id_user, u.username, u.avatar_url, s.created_at
       ORDER BY s.created_at DESC
     `;
@@ -352,7 +348,7 @@ const getPostsByUser = async (req, res) => {
       FROM public.posts p
       JOIN public.users u ON u.id_user = p.user_id
  LEFT JOIN public.post_images pi ON pi.post_id = p.id
-     WHERE p.user_id = $1
+     WHERE p.user_id = $1 AND COALESCE(p.is_archived,false) = false
   GROUP BY p.id, u.username, u.avatar_url
   ORDER BY p.created_at DESC
     `;
@@ -405,6 +401,112 @@ const getPostDetail = async (req, res) => {
     res.status(500).json({ error: 'internal_error' });
   }
 };
+const archivePost = async (req, res) => {
+  try {
+    const postId = req.params.id;
+    const userId = req.body.user_id;
+
+    const { rows } = await pool.query(
+      'UPDATE posts SET is_archived = true WHERE id = $1 AND user_id = $2 RETURNING *',
+      [postId, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'ไม่พบโพสต์หรือไม่มีสิทธิ์ลบ' });
+    }
+    res.json({ message: 'Archived', post: rows[0] });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+};
+
+const hardDeletePost = async (req, res) => {
+  const postId = Number(req.params.id);
+  if (!postId) return res.status(400).json({ message: 'missing post_id' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // ดึง path รูป/ไฟล์ก่อนลบ
+    const { rows } = await client.query(
+      `SELECT image_url, file_url FROM public.posts WHERE id=$1`,
+      [postId]
+    );
+
+    if (!rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ message: 'post not found' });
+    }
+
+    const { image_url, file_url } = rows[0];
+
+    // ลบ record
+    await client.query(`DELETE FROM public.posts WHERE id=$1`, [postId]);
+    await client.query(`DELETE FROM public.post_images WHERE post_id=$1`, [postId]);
+    await client.query('COMMIT');
+
+    // ลบไฟล์ใน local uploads ถ้ามี
+    [image_url, file_url].filter(Boolean).forEach((p) => {
+      const filePath = path.join(__dirname, '..', p);
+      fs.unlink(filePath, (err) => {
+        if (err) console.warn('Delete file failed:', filePath);
+      });
+    });
+
+    res.json({ ok: true, message: 'deleted' });
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('hardDeletePost error:', e);
+    res.status(500).json({ message: 'internal error' });
+  } finally {
+    client.release();
+  }
+};
+const getArchivedPosts = async (req, res) => {
+  try {
+    const userId = Number(req.query.user_id);
+    if (!userId) return res.status(400).json({ message: 'missing user_id' });
+        const q = `
+      SELECT 
+        p.*,
+        u.username,
+        COALESCE(u.avatar_url,'') AS avatar_url,
+        COALESCE(json_agg(pi.image_url ORDER BY pi.id)
+                 FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count
+      FROM public.posts p
+      JOIN public.users u ON u.id_user = p.user_id
+      LEFT JOIN public.post_images pi ON pi.post_id = p.id
+      WHERE p.user_id = $1 AND p.is_archived = true
+      GROUP BY p.id, u.username, u.avatar_url
+      ORDER BY p.created_at DESC`;
+    const r = await pool.query(q, [userId]);
+    res.json(r.rows);
+  } catch (e) {
+    console.error('getArchivedPosts error:', e);
+    res.status(500).json({ message: 'internal error' });
+  }
+};
+
+const unarchivePost = async (req, res) => {
+  try {
+    const postId = Number(req.params.id);
+    const userId = Number(req.body.user_id);
+    if (!postId || !userId) return res.status(400).json({ message: 'missing ids' });
+    const { rows } = await pool.query(
+      'UPDATE posts SET is_archived = false WHERE id = $1 AND user_id = $2 RETURNING *',
+      [postId, userId]
+    );
+    if (!rows.length) return res.status(404).json({ message: 'not_found_or_no_permission' });
+    res.json({ message: 'Unarchived', post: rows[0] });
+  } catch (e) {
+    console.error('unarchivePost error:', e);
+    res.status(500).json({ message: 'internal error' });
+ }
+};
 
 module.exports = {
   createPost,
@@ -418,5 +520,9 @@ module.exports = {
   getSavedStatus,
   getSavedPosts,
   getPostsByUser,
-  getPostDetail,       // << เพิ่ม export
+  getPostDetail,
+  archivePost,
+  hardDeletePost,
+  getArchivedPosts,
+  unarchivePost,
 };

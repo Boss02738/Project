@@ -16,7 +16,7 @@ class ApiService {
       return env;
     }
     if (Platform.isAndroid) return 'http://10.0.2.2:3000'; // Android emulator
-    return 'http://192.168.1.102:3000'; // ปรับเป็น IP เครื่อง dev
+    return 'http://10.34.104.53:3000'; // ปรับเป็น IP เครื่อง dev
   }
 
   // ---------- Base paths ----------
@@ -469,7 +469,35 @@ class ApiService {
       fieldName: 'slip',
     );
   }
+
+  Future<bool> archivePost(int postId, int userId) async {
+    final url = Uri.parse('$_posts/$postId/archive');
+    final r = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': userId}),
+    );
+    return r.statusCode == 200;
+  }
+
+  Future<bool> unarchivePost(int postId, int userId) async {
+    final r = await http.post(Uri.parse('$_posts/$postId/unarchive'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': userId}),
+    );
+    return r.statusCode == 200;
+  }
+  Future<List<dynamic>> getArchived(int userId) async {
+    final r = await http.get(Uri.parse('$_posts/archived?user_id=$userId'));
+    if (r.statusCode == 200) return jsonDecode(r.body) as List;
+    throw Exception('load archived failed');
+  }
+    Future<bool> deletePost(int id) async {
+    final r = await http.delete(Uri.parse('$_posts/$id'));
+    return r.statusCode == 200;
+  }
 }
+
 
 // Error อ่านง่ายขึ้นเวลามี status >= 400
 class HttpException implements Exception {

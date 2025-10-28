@@ -2,8 +2,10 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
-import 'package:my_note_app/screens/saved_posts_screen.dart.dart';
-import 'package:my_note_app/screens/liked_posts_screen.dart.dart';
+import 'package:my_note_app/screens/saved_posts_screen.dart';
+import 'package:my_note_app/screens/liked_posts_screen.dart';
+import 'package:my_note_app/screens/deleted_posts_screen.dart';
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -61,11 +63,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         backgroundImage: avatar.isNotEmpty
                             ? NetworkImage('${ApiService.host}$avatar')
                             : const AssetImage('assets/default_avatar.png')
-                                as ImageProvider,
+                                  as ImageProvider,
                       ),
-                      title: Text(username.isEmpty ? 'MeowMath' : username,
-                          style: const TextStyle(
-                              fontSize: 18, fontWeight: FontWeight.w600)),
+                      title: Text(
+                        username.isEmpty ? 'MeowMath' : username,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                       subtitle: const Text('Your profile'),
                     ),
                     const Divider(height: 1),
@@ -105,16 +111,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
 
                     // Deleted (placeholder)
-                    const _SettingsItem(
+                     _SettingsItem(
                       icon: Icons.delete_outline,
                       title: 'Deleted',
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                DeletedPostsScreen(userId: _userId!),
+                          ),
+                        );
+                      },
                     ),
 
                     // Log out (placeholder)
-                    const _SettingsItem(
-                      icon: Icons.logout,
-                      title: 'Log Out',
-                    ),
+                    const _SettingsItem(icon: Icons.logout, title: 'Log Out'),
                   ],
                 );
               },
@@ -128,11 +140,7 @@ class _SettingsItem extends StatelessWidget {
   final String title;
   final VoidCallback? onTap;
 
-  const _SettingsItem({
-    required this.icon,
-    required this.title,
-    this.onTap,
-  });
+  const _SettingsItem({required this.icon, required this.title, this.onTap});
 
   @override
   Widget build(BuildContext context) {

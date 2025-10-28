@@ -132,10 +132,15 @@ class _HomeState extends State<homescreen> {
                 final double priceBaht = satang / 100.0;
 
                 // postId เป็น int
-                final int postId = p['id'] is int ? p['id'] as int : int.parse('${p['id']}');
+                final int postId = p['id'] is int
+                    ? p['id'] as int
+                    : int.parse('${p['id']}');
 
                 // การ์ดโพสต์ "เดิม" (ไม่แตะโค้ดข้างใน)
-                final postCard = PostCard(post: p);
+                final postCard = PostCard(
+                  post: p,
+                  onDeleted: _reload, // ✅ ลบแล้วรีโหลดฟีด
+                );
 
                 // ถ้าเป็นโพสต์ฟรี แสดงแค่การ์ดเดิม
                 if (!isPaid) {
@@ -160,7 +165,9 @@ class _HomeState extends State<homescreen> {
                               children: [
                                 Text(
                                   '${priceBaht.toStringAsFixed(2)} ฿',
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                                 const Spacer(),
                                 OutlinedButton(
@@ -185,10 +192,7 @@ class _HomeState extends State<homescreen> {
                     // รวมเป็นหนึ่งบล็อค โดย "ไม่แก้หน้าตา PostCard"
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        postCard,
-                        priceBar,
-                      ],
+                      children: [postCard, priceBar],
                     );
                   },
                 );
@@ -205,17 +209,17 @@ class _HomeState extends State<homescreen> {
 
     return Scaffold(
       appBar: (_currentIndex == 3)
-    ? null // ❌ ซ่อน AppBar ตอนอยู่หน้า Profile
-    : AppBar(
-        title: Text(
-          _currentIndex == 1
-              ? 'Search'
-              : _currentIndex == 0
-                  ? 'Home'
-                  : 'Note app',
-        ),
-        automaticallyImplyLeading: false,
-      ),
+          ? null // ❌ ซ่อน AppBar ตอนอยู่หน้า Profile
+          : AppBar(
+              title: Text(
+                _currentIndex == 1
+                    ? 'Search'
+                    : _currentIndex == 0
+                    ? 'Home'
+                    : 'Note app',
+              ),
+              automaticallyImplyLeading: false,
+            ),
 
       body: Column(children: [Expanded(child: screens[_currentIndex])]),
       bottomNavigationBar: BottomNavigationBar(
