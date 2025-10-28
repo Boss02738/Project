@@ -6,7 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/drawing_screen.dart' as rt;
-import 'package:my_note_app/screens/documents_screen.dart'; // <- ถ้าชื่อไฟล์คุณเป็น documents_screen.dart ให้แก้ import และชื่อคลาสให้ตรง
+import 'package:my_note_app/screens/documents_screen.dart';
 import 'package:my_note_app/screens/search_screen.dart';
 import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -28,10 +28,13 @@ class NewPostScreen extends StatefulWidget {
 class _NewPostScreenState extends State<NewPostScreen> {
   final TextEditingController _detailController = TextEditingController();
 
+  // ---- เพิ่มสำหรับราคา ----
+  String _priceType = 'free'; // 'free' | 'paid'
+  final TextEditingController _priceCtrl = TextEditingController(); // บาท
+
   // header user
   String _username = '';
   String? _avatarUrl;
-  // bool _loadingUser = true; // ไม่ได้ใช้
 
   // form state
   String selectedYear = 'ปี 1';
@@ -40,7 +43,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
   // รูปหลายรูป (สูงสุด 10)
   final ImagePicker _picker = ImagePicker();
   List<XFile> _images = []; // preview
-  // แนบไฟล์อื่น 1 ชิ้น (ถ้าอยากรองรับ pdf/docn ให้เปลี่ยนเป็น file_picker)
+  // แนบไฟล์อื่น 1 ชิ้น
   File? _file;
   String? _fileName;
 
@@ -108,21 +111,20 @@ class _NewPostScreenState extends State<NewPostScreen> {
       });
     } catch (_) {
       if (!mounted) return;
-  setState(() {});
+      setState(() {});
     }
   }
 
   @override
   void dispose() {
     _detailController.dispose();
+    _priceCtrl.dispose(); // <- เพิ่ม dispose
     super.dispose();
   }
 
   // --------- Pickers ----------
   Future<void> _pickImages() async {
     final files = await _picker.pickMultiImage(imageQuality: 85);
-    //if (files == null) return;
-    // รวมกับของเดิม (จำกัด 10)
     final merged = [..._images, ...files];
     setState(() => _images = merged.take(10).toList());
   }
@@ -147,6 +149,18 @@ class _NewPostScreenState extends State<NewPostScreen> {
       return;
     }
 
+    // ตรวจราคาเมื่อเลือกแบบเสียเงิน
+    double? priceBaht;
+    if (_priceType == 'paid') {
+      priceBaht = double.tryParse(_priceCtrl.text.trim());
+      if (priceBaht == null || priceBaht <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('กรุณาใส่ราคาเป็นจำนวนที่มากกว่า 0')),
+        );
+        return;
+      }
+    }
+
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -161,6 +175,10 @@ class _NewPostScreenState extends State<NewPostScreen> {
         subject: selectedSubject,
         images: _images.map((x) => File(x.path)).toList(),
         file: _file,
+
+        // ---- ส่งราคาตามแบบใหม่ ----
+        priceType: _priceType,   // 'free' หรือ 'paid'
+        priceBaht: priceBaht,    // null ถ้า free
       );
 
       if (!mounted) return;
@@ -171,8 +189,11 @@ class _NewPostScreenState extends State<NewPostScreen> {
             .showSnackBar(const SnackBar(content: Text('โพสต์สำเร็จ')));
         setState(() {
           _detailController.clear();
+          _priceType = 'free';
+          _priceCtrl.clear();
           _images = [];
           _file = null;
+          _fileName = null;
           selectedYear = 'ปี 1';
           selectedSubject = subjects.isNotEmpty ? subjects.first : null;
         });
@@ -419,6 +440,41 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
               const SizedBox(height: 16),
 
+              // ---- ส่วนกำหนดราคา (ใหม่) ----
+              Row(
+                children: [
+                  const Text('ราคา:'),
+                  const SizedBox(width: 12),
+                  ChoiceChip(
+                    label: const Text('ฟรี'),
+                    selected: _priceType == 'free',
+                    onSelected: (_) => setState(() => _priceType = 'free'),
+                  ),
+                  const SizedBox(width: 8),
+                  ChoiceChip(
+                    label: const Text('เสียเงิน'),
+                    selected: _priceType == 'paid',
+                    onSelected: (_) => setState(() => _priceType = 'paid'),
+                  ),
+                ],
+              ),
+              if (_priceType == 'paid') ...[
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _priceCtrl,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'ใส่ราคา (บาท)',
+                    prefixText: '฿ ',
+                    border: OutlineInputBorder(),
+                    hintText: 'เช่น 29 หรือ 29.00',
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 16),
+
               Row(
                 children: [
                   IconButton(
@@ -513,8 +569,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
           } else if (index == 3) {
             // อยู่หน้า Add แล้ว ไม่ต้องทำอะไร
           } else if (index == 4) {
-            // ไปหน้าโปรไฟล์ของคุณถ้ามี
-            // Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const ProfileScreen()));
+            // ไปหน้าโปรไฟล์ถ้ามี
           }
         },
         items: const [

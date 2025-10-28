@@ -7,6 +7,8 @@ import 'package:my_note_app/screens/login_screen.dart';
 import 'package:my_note_app/screens/search_screen.dart';
 import 'package:my_note_app/widgets/post_card.dart';
 import 'package:my_note_app/screens/profile_screen.dart';
+import 'package:my_note_app/screens/payment_screen.dart';
+
 class homescreen extends StatefulWidget {
   const homescreen({super.key});
   @override
@@ -119,8 +121,77 @@ class _HomeState extends State<homescreen> {
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemCount: feed.length,
               itemBuilder: (_, i) {
-                final p = feed[i];
-                return PostCard(post: p);
+                final p = feed[i] as Map<String, dynamic>;
+
+                // อ่านชนิดราคาและราคา (บาท) จากโพสต์
+                final String priceType = (p['price_type'] ?? 'free').toString();
+                final bool isPaid = priceType == 'paid';
+                final int satang = (p['price_amount_satang'] ?? 0) is int
+                    ? p['price_amount_satang'] as int
+                    : int.tryParse('${p['price_amount_satang']}') ?? 0;
+                final double priceBaht = satang / 100.0;
+
+                // postId เป็น int
+                final int postId = p['id'] is int ? p['id'] as int : int.parse('${p['id']}');
+
+                // การ์ดโพสต์ "เดิม" (ไม่แตะโค้ดข้างใน)
+                final postCard = PostCard(post: p);
+
+                // ถ้าเป็นโพสต์ฟรี แสดงแค่การ์ดเดิม
+                if (!isPaid) {
+                  return postCard;
+                }
+
+                // เป็นโพสต์เสียเงิน → เช็คสิทธิ์ (hasAccess) เฉพาะเมื่อเป็น paid
+                return FutureBuilder<Map<String, dynamic>>(
+                  future: ApiService.getPostDetail(
+                    postId: postId,
+                    viewerUserId: _userId!,
+                  ),
+                  builder: (context, detailSnap) {
+                    final bool hasAccess =
+                        (detailSnap.data?['hasAccess'] == true);
+
+                    // แถว “ราคา + ปุ่มซื้อ” ใต้การ์ด เฉพาะกรณี paid และยังไม่มีสิทธิ์
+                    final priceBar = (!hasAccess)
+                        ? Padding(
+                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                            child: Row(
+                              children: [
+                                Text(
+                                  '${priceBaht.toStringAsFixed(2)} ฿',
+                                  style: const TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                                const Spacer(),
+                                OutlinedButton(
+                                  onPressed: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => PaymentScreen(
+                                          postId: postId,
+                                          buyerId: _userId!,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: const Text('ซื้อ'),
+                                ),
+                              ],
+                            ),
+                          )
+                        : const SizedBox.shrink();
+
+                    // รวมเป็นหนึ่งบล็อค โดย "ไม่แก้หน้าตา PostCard"
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        postCard,
+                        priceBar,
+                      ],
+                    );
+                  },
+                );
               },
             ),
           );
@@ -134,18 +205,17 @@ class _HomeState extends State<homescreen> {
 
     return Scaffold(
       appBar: AppBar(
-  title: Text(
-    _currentIndex == 3
-        ? 'Profile'
-        : _currentIndex == 1
-            ? 'Search'
-            : _currentIndex == 0
-                ? 'Home'
-                : 'Note app',
-  ),
-  automaticallyImplyLeading: false,
-),
-
+        title: Text(
+          _currentIndex == 3
+              ? 'Profile'
+              : _currentIndex == 1
+                  ? 'Search'
+                  : _currentIndex == 0
+                      ? 'Home'
+                      : 'Note app',
+        ),
+        automaticallyImplyLeading: false,
+      ),
       body: Column(children: [Expanded(child: screens[_currentIndex])]),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
@@ -167,8 +237,6 @@ class _HomeState extends State<homescreen> {
               MaterialPageRoute(builder: (_) => const SearchScreen()),
             );
           } else {
-            // for index 0 and 3 (Profile) just update current index to show the
-            // corresponding page in `screens`
             setState(() => _currentIndex = index);
           }
         },

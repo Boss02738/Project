@@ -3,11 +3,14 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // Clipboard
+import 'package:flutter/painting.dart' show paintImage;
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:scribble/scribble.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
@@ -72,6 +75,61 @@ class TextBoxData {
       );
 }
 
+/* =================== IMAGE LAYER MODEL =================== */
+
+class ImageLayerData {
+  final String id;
+  final String bytesB64; // raw image base64 (png/jpg)
+  final double x;        // center x (px)
+  final double y;        // center y (px)
+  final double scale;    // 0.2..6
+  final double rotation; // radians
+
+  const ImageLayerData({
+    required this.id,
+    required this.bytesB64,
+    required this.x,
+    required this.y,
+    required this.scale,
+    required this.rotation,
+  });
+
+  ImageLayerData copyWith({
+    String? bytesB64,
+    double? x,
+    double? y,
+    double? scale,
+    double? rotation,
+  }) {
+    return ImageLayerData(
+      id: id,
+      bytesB64: bytesB64 ?? this.bytesB64,
+      x: x ?? this.x,
+      y: y ?? this.y,
+      scale: scale ?? this.scale,
+      rotation: rotation ?? this.rotation,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'bytesB64': bytesB64,
+        'x': x,
+        'y': y,
+        'scale': scale,
+        'rotation': rotation,
+      };
+
+  factory ImageLayerData.fromJson(Map<String, dynamic> m) => ImageLayerData(
+        id: m['id'] as String,
+        bytesB64: m['bytesB64'] as String,
+        x: (m['x'] as num?)?.toDouble() ?? 140,
+        y: (m['y'] as num?)?.toDouble() ?? 160,
+        scale: (m['scale'] as num?)?.toDouble() ?? 1.0,
+        rotation: (m['rotation'] as num?)?.toDouble() ?? 0.0,
+      );
+}
+
 /* =================== PAGE =================== */
 
 Sketch emptySketch() => Sketch.fromJson({'lines': []});
@@ -83,6 +141,7 @@ class NoteScribblePage extends StatefulWidget {
   final String? initialTitle;
   final List<Sketch>? initialPages;
   final List<List<TextBoxData>>? initialTextsPerPage;
+  final List<List<ImageLayerData>>? initialImagesPerPage;
 
   const NoteScribblePage({
     super.key,
@@ -92,6 +151,7 @@ class NoteScribblePage extends StatefulWidget {
     this.initialTitle,
     this.initialPages,
     this.initialTextsPerPage,
+    this.initialImagesPerPage,
   });
 
   @override
@@ -122,6 +182,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
   late List<Sketch> _pages;
   late List<List<TextBoxData>> _textsPages;
+  late List<List<ImageLayerData>> _imagePages;
   int _pageIndex = 0;
   int _pendingSelfDeleteIndex = -1;
 
@@ -129,6 +190,13 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   bool get offline => widget.socket == null;
 
   late final PageController _pageController;
+
+  final ImagePicker _picker = ImagePicker();
+  int _selectedImageIndex = -1;
+  bool _isManipulatingImage = false;
+
+  // โหมด: วาด (false) / แก้ไขรูป (true)
+  bool _editImagesMode = false;
 
   @override
   void initState() {
@@ -147,9 +215,13 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                 .toList()
             : [<TextBoxData>[]];
 
-    while (_textsPages.length < _pages.length) {
-      _textsPages.add(<TextBoxData>[]);
-    }
+    _imagePages =
+        (widget.initialImagesPerPage != null && widget.initialImagesPerPage!.isNotEmpty)
+            ? widget.initialImagesPerPage!.map((l) => l.map((e) => e).toList()).toList()
+            : List.generate(_pages.length, (_) => <ImageLayerData>[]);
+
+    while (_textsPages.length < _pages.length) _textsPages.add(<TextBoxData>[]);
+    while (_imagePages.length < _pages.length) _imagePages.add(<ImageLayerData>[]);
 
     _title = widget.initialTitle ?? 'Untitled';
 
@@ -237,19 +309,27 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                   ?.map((e) => TextBoxData.fromJson(Map<String, dynamic>.from(e as Map)))
                   .toList() ??
               <TextBoxData>[];
+          final images = (jsonMap['images'] as List?)
+                  ?.map((e) => ImageLayerData.fromJson(Map<String, dynamic>.from(e as Map)))
+                  .toList() ??
+              <ImageLayerData>[];
 
           _ensurePages(page + 1);
           _pages[page] = sketch;
           _textsPages[page] = texts;
+          _imagePages[page] = images;
 
           if (page == _pageIndex) {
             _notifier.setSketch(sketch: sketch);
+            _selectedImageIndex = -1;
             setState(() {});
           }
         } else if (page == _pageIndex) {
           _notifier.clear();
           _pages[_pageIndex] = emptySketch();
           _textsPages[_pageIndex] = <TextBoxData>[];
+          _imagePages[_pageIndex] = <ImageLayerData>[];
+          _selectedImageIndex = -1;
           setState(() {});
         }
       } catch (_) {}
@@ -270,13 +350,19 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                 ?.map((e) => TextBoxData.fromJson(Map<String, dynamic>.from(e as Map)))
                 .toList() ??
             <TextBoxData>[];
+        final images = (jsonMap['images'] as List?)
+                ?.map((e) => ImageLayerData.fromJson(Map<String, dynamic>.from(e as Map)))
+                .toList() ??
+            <ImageLayerData>[];
 
         _ensurePages(page + 1);
         _pages[page] = incoming;
         _textsPages[page] = texts;
+        _imagePages[page] = images;
 
         if (page == _pageIndex) {
           _notifier.setSketch(sketch: _pages[_pageIndex]);
+          _selectedImageIndex = -1;
           setState(() {});
         }
       } catch (_) {}
@@ -289,7 +375,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         _ensurePages(page + 1);
         _pages[page] = emptySketch();
         _textsPages[page] = <TextBoxData>[];
+        _imagePages[page] = <ImageLayerData>[];
         if (page == _pageIndex) {
+          _selectedImageIndex = -1;
           _notifier.clear();
           setState(() {});
         }
@@ -305,6 +393,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             for (int i = 0; i < count - _pages.length; i++) {
               _pages.add(emptySketch());
               _textsPages.add(<TextBoxData>[]);
+              _imagePages.add(<ImageLayerData>[]);
             }
           }
           if (_pageIndex >= _pages.length) {
@@ -328,6 +417,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
           setState(() {
             _pages.removeAt(d);
             _textsPages.removeAt(d);
+            _imagePages.removeAt(d);
+            _selectedImageIndex = -1;
             if (_pageIndex > d) _pageIndex -= 1;
             if (_pageIndex >= _pages.length) _pageIndex = _pages.length - 1;
           });
@@ -342,6 +433,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     while (_pages.length < count) {
       _pages.add(emptySketch());
       _textsPages.add(<TextBoxData>[]);
+      _imagePages.add(<ImageLayerData>[]);
     }
   }
 
@@ -365,6 +457,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     final payload = {
       'lines': (sketchJson['lines'] ?? []),
       'texts': _textsPages[_pageIndex].map((t) => t.toJson()).toList(),
+      'images': _imagePages[_pageIndex].map((img) => img.toJson()).toList(),
     };
 
     widget.socket!.emit('set_sketch', {
@@ -390,6 +483,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     int width = 512,
     int height = 288,
     List<TextBoxData>? texts,
+    List<ImageLayerData>? images,
   }) async {
     try {
       final recorder = ui.PictureRecorder();
@@ -399,7 +493,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       final bg = Paint()..color = Colors.white;
       canvas.drawRect(Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()), bg);
 
-      // content bounds
       double minX = double.infinity, minY = double.infinity;
       double maxX = -double.infinity, maxY = -double.infinity;
 
@@ -426,6 +519,17 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         }
       }
 
+      if (images != null && images.isNotEmpty) {
+        for (final img in images) {
+          final w = 200.0 * img.scale;
+          final h = 200.0 * img.scale;
+          minX = math.min(minX, img.x - w / 2);
+          minY = math.min(minY, img.y - h / 2);
+          maxX = math.max(maxX, img.x + w / 2);
+          maxY = math.max(maxY, img.y + h / 2);
+        }
+      }
+
       if (minX == double.infinity) {
         final picture = recorder.endRecording();
         final img = await picture.toImage(width, height);
@@ -447,8 +551,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         final dynamic dyn = line;
         Map<String, dynamic> m = {};
         try {
-    final j = dyn.toJson();
-    if (j is Map) m = Map<String, dynamic>.from(j);
+          final j = dyn.toJson();
+          if (j is Map) m = Map<String, dynamic>.from(j);
         } catch (_) {}
 
         final bool isEraser = (m['tool'] == 'eraser') || (m['pen'] == 'eraser');
@@ -479,6 +583,32 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
           }
         }
         canvas.drawPath(path, paint);
+      }
+
+      if (images != null && images.isNotEmpty) {
+        for (final layer in images) {
+          try {
+            final bytes = base64Decode(layer.bytesB64);
+            final codec = await ui.instantiateImageCodec(bytes);
+            final frame = await codec.getNextFrame();
+            final uiImage = frame.image;
+
+            final imgW = uiImage.width.toDouble();
+            final imgH = uiImage.height.toDouble();
+
+            canvas.save();
+            canvas.translate(layer.x, layer.y);
+            canvas.rotate(layer.rotation);
+            canvas.scale(layer.scale, layer.scale);
+            final rect = Rect.fromCenter(
+              center: Offset.zero,
+              width: imgW,
+              height: imgH,
+            );
+            paintImage(canvas: canvas, rect: rect, image: uiImage, fit: BoxFit.contain);
+            canvas.restore();
+          } catch (_) {}
+        }
       }
 
       if (texts != null) {
@@ -532,6 +662,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         'data': {
           'lines': _pages[i].toJson()['lines'] ?? [],
           'texts': _textsPages[i].map((t) => t.toJson()).toList(),
+          'images': _imagePages[i].map((img) => img.toJson()).toList(),
         }
       });
     }
@@ -539,15 +670,28 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     final coverBase64 = await _sketchToPngBase64(
       _pages.first,
       texts: _textsPages.isNotEmpty ? _textsPages.first : null,
+      images: _imagePages.isNotEmpty ? _imagePages.first : null,
     );
 
+    // If cover generation failed, notify briefly (helps debugging)
+    if (coverBase64 == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Warning: failed to generate cover image; saving without cover')),
+        );
+      }
+    }
+
+    // To be tolerant with server naming, send both camelCase and snake_case keys
     final payload = {
       if (widget.documentId != null) 'id': widget.documentId,
       'title': titleCtrl.text.trim().isEmpty ? 'Untitled' : titleCtrl.text.trim(),
       'boardId': widget.boardId,
+      'board_id': widget.boardId,
       'pages': pages,
       'coverPng': coverBase64,
-      // attach owner if user logged in
+      'cover_png': coverBase64,
+      // owner_id is expected in snake_case on the server
       if ((await SharedPreferences.getInstance()).getInt('user_id') != null)
         'owner_id': (await SharedPreferences.getInstance()).getInt('user_id'),
     };
@@ -558,26 +702,11 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(payload),
       );
-      debugPrint('POST $baseServerUrl/documents => ${r.statusCode}');
-      debugPrint('POST body: ${r.body}');
       if (!mounted) return;
       if (r.statusCode == 200) {
         setState(() => _title = payload['title'] as String);
-        // ถ้า server คืน id ให้แสดงให้ผู้ใช้เห็น (กรณีสร้างใหม่)
-        try {
-          final Map<String, dynamic> json = jsonDecode(r.body) as Map<String, dynamic>;
-          if (json.containsKey('id')) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('บันทึกเรียบร้อย (id: ${json['id']})')),
-            );
-          } else {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(const SnackBar(content: Text('บันทึกเรียบร้อย')));
-          }
-        } catch (_) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('บันทึกเรียบร้อย')));
-        }
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('บันทึกเรียบร้อย')));
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text('บันทึกไม่สำเร็จ (${r.statusCode})')));
@@ -613,6 +742,22 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               },
               icon: const Icon(Icons.content_copy),
             ),
+          // สลับโหมด วาด / แก้ไขรูป
+          IconButton(
+            tooltip: _editImagesMode ? 'ไปโหมดวาด' : 'ไปโหมดแก้ไขรูป',
+            onPressed: () {
+              setState(() {
+                _editImagesMode = !_editImagesMode;
+                _selectedImageIndex = -1;
+              });
+            },
+            icon: Icon(_editImagesMode ? Icons.brush : Icons.photo),
+          ),
+          IconButton(
+            tooltip: 'เพิ่มรูป',
+            onPressed: _addImageLayer,
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+          ),
           IconButton(
             tooltip: 'เพิ่มข้อความ',
             onPressed: _addTextBox,
@@ -635,6 +780,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                 _notifier.clear();
                 _pages[_pageIndex] = emptySketch();
                 _textsPages[_pageIndex] = <TextBoxData>[];
+                _imagePages[_pageIndex] = <ImageLayerData>[];
+                _selectedImageIndex = -1;
                 widget.socket!.emit('clear_board', {
                   'boardId': widget.boardId,
                   'page': _pageIndex,
@@ -704,16 +851,23 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         child: PageView.builder(
           controller: _pageController,
           scrollDirection: Axis.vertical,
+          physics: _isManipulatingImage
+              ? const NeverScrollableScrollPhysics()
+              : const BouncingScrollPhysics(),
           itemCount: _pages.length,
           onPageChanged: (i) {
             _pages[_pageIndex] = _notifier.currentSketch;
-            setState(() => _pageIndex = i);
+            setState(() {
+              _pageIndex = i;
+              _selectedImageIndex = -1;
+            });
             _notifier.setSketch(sketch: _pages[_pageIndex]);
             _requestInitForCurrentPage();
           },
           itemBuilder: (ctx, i) {
             final isCurrent = i == _pageIndex;
             final texts = _textsPages[i];
+            final images = _imagePages[i];
 
             final sheet = Container(
               margin: const EdgeInsets.fromLTRB(12, 12, 12, 24),
@@ -725,12 +879,49 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               child: isCurrent
                   ? Stack(
                       children: [
-                        Scribble(
-                          notifier: _notifier,
-                          drawPen: !_isEraser,
-                          drawEraser: _isEraser,
+                        // 1) รูปภาพชั้นล่าง: รับทัชเฉพาะโหมดแก้ไขรูป
+                        IgnorePointer(
+                          ignoring: !_editImagesMode,
+                          child: Stack(
+                            children: List.generate(images.length, (idx) {
+                              final layer = images[idx];
+                              return _ImageLayerWidget(
+                                key: ValueKey('img-$i-$idx-${layer.id}'),
+                                layer: layer,
+                                selected: _selectedImageIndex == idx,
+                                onSelected: () {
+                                  setState(() => _selectedImageIndex = idx);
+                                },
+                                onChanged: (updated) {
+                                  setState(() {
+                                    _imagePages[i][idx] = updated;
+                                  });
+                                  _scheduleSync();
+                                },
+                                onManipulationStart: () =>
+                                    setState(() => _isManipulatingImage = true),
+                                onManipulationEnd: () =>
+                                    setState(() => _isManipulatingImage = false),
+                              );
+                            }),
+                          ),
                         ),
+
+                        // 2) Scribble ด้านบน: รับทัชเฉพาะโหมดวาด → วาดทับรูปได้
+                        IgnorePointer(
+                          ignoring: _editImagesMode,
+                          child: Scribble(
+                            notifier: _notifier,
+                            drawPen: !_isEraser,
+                            drawEraser: _isEraser,
+                          ),
+                        ),
+
+                        // 3) ข้อความอยู่บนสุด
                         ...texts.map((t) => _buildTextBoxWidget(t)),
+
+                        // 4) แถบควบคุมรูป (เฉพาะโหมดแก้ไขรูป)
+                        if (_editImagesMode) _selectedImageFloatingToolbar(),
                       ],
                     )
                   : const SizedBox.expand(),
@@ -792,6 +983,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                   setState(() {
                     _pages.add(emptySketch());
                     _textsPages.add(<TextBoxData>[]);
+                    _imagePages.add(<ImageLayerData>[]);
+                    _selectedImageIndex = -1;
                   });
                   final newIndex = _pages.length - 1;
                   _notifier.setSketch(sketch: _pages[newIndex]);
@@ -802,7 +995,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                   );
                   setState(() => _pageIndex = newIndex);
                   if (!offline) {
-                    widget.socket!.emit('add_page', {'boardId': widget.boardId, 'page': _pageIndex});
+                    widget.socket!
+                        .emit('add_page', {'boardId': widget.boardId, 'page': _pageIndex});
                   }
                 },
                 icon: const Icon(Icons.add_circle),
@@ -817,6 +1011,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                         setState(() {
                           _pages.removeAt(deletedIndex);
                           _textsPages.removeAt(deletedIndex);
+                          _imagePages.removeAt(deletedIndex);
+                          _selectedImageIndex = -1;
                           final next = deletedIndex.clamp(0, _pages.length - 1);
                           _pageIndex = next;
                           _notifier.setSketch(sketch: _pages[_pageIndex]);
@@ -827,8 +1023,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           curve: Curves.easeOut,
                         );
                         if (!offline) {
-                          widget.socket!
-                              .emit('delete_page', {'boardId': widget.boardId, 'page': deletedIndex});
+                          widget.socket!.emit(
+                            'delete_page',
+                            {'boardId': widget.boardId, 'page': deletedIndex},
+                          );
                           _requestInitForCurrentPage();
                         }
                       }
@@ -856,6 +1054,122 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         ),
       ),
     );
+  }
+
+  /* ---------------- Floating toolbar for image ---------------- */
+
+  Widget _selectedImageFloatingToolbar() {
+    final hasSel = _selectedImageIndex >= 0 &&
+        _selectedImageIndex < _imagePages[_pageIndex].length;
+
+    return Align(
+      alignment: Alignment.topRight,
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Card(
+          elevation: 3,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'ซูม −',
+                onPressed: hasSel ? () => _zoomSelectedImage(1 / 1.15) : null,
+                icon: const Icon(Icons.zoom_out),
+              ),
+              IconButton(
+                tooltip: 'ซูม +',
+                onPressed: hasSel ? () => _zoomSelectedImage(1.15) : null,
+                icon: const Icon(Icons.zoom_in),
+              ),
+              IconButton(
+                tooltip: 'ลบรูป',
+                onPressed: hasSel ? _deleteSelectedImage : null,
+                icon: const Icon(Icons.delete_outline, color: Colors.redAccent),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _zoomSelectedImage(double factor) {
+    final idx = _selectedImageIndex;
+    if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
+    final cur = _imagePages[_pageIndex][idx];
+    final next = cur.copyWith(
+      scale: (cur.scale * factor).clamp(0.2, 6.0),
+    );
+    setState(() {
+      _imagePages[_pageIndex][idx] = next;
+    });
+    _scheduleSync();
+  }
+
+  /* ---------------- Image layers ---------------- */
+
+  Future<void> _addImageLayer() async {
+    try {
+      final XFile? file = await _picker.pickImage(source: ImageSource.gallery);
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      final id = DateTime.now().microsecondsSinceEpoch.toString();
+      final img = ImageLayerData(
+        id: id,
+        bytesB64: base64Encode(bytes),
+        x: 140,
+        y: 160,
+        scale: 1.0,
+        rotation: 0.0,
+      );
+      setState(() {
+        _imagePages[_pageIndex] = [..._imagePages[_pageIndex], img];
+        _selectedImageIndex = _imagePages[_pageIndex].length - 1;
+      });
+      _scheduleSync();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('เพิ่มรูปไม่สำเร็จ: $e')));
+    }
+  }
+
+  void _deleteSelectedImage() {
+    final idx = _selectedImageIndex;
+    if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
+    setState(() {
+      final list = [..._imagePages[_pageIndex]];
+      list.removeAt(idx);
+      _imagePages[_pageIndex] = list;
+      _selectedImageIndex = -1;
+    });
+    _scheduleSync();
+  }
+
+  void _bringImageToFront() {
+    final idx = _selectedImageIndex;
+    if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
+    setState(() {
+      final list = [..._imagePages[_pageIndex]];
+      final l = list.removeAt(idx);
+      list.add(l);
+      _imagePages[_pageIndex] = list;
+      _selectedImageIndex = list.length - 1;
+    });
+    _scheduleSync();
+  }
+
+  void _sendImageToBack() {
+    final idx = _selectedImageIndex;
+    if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
+    setState(() {
+      final list = [..._imagePages[_pageIndex]];
+      final l = list.removeAt(idx);
+      list.insert(0, l);
+      _imagePages[_pageIndex] = list;
+      _selectedImageIndex = 0;
+    });
+    _scheduleSync();
   }
 
   /* ---------------- Text box controls ---------------- */
@@ -968,7 +1282,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             border: Border.all(color: Colors.black12),
           ),
           child: Builder(builder: (ctx) {
-            // Constrain text width so long text doesn't overflow the screen when positioned
             final screenW = MediaQuery.of(ctx).size.width;
             final maxW = (screenW - (t.x + 24)).clamp(80.0, screenW);
             return ConstrainedBox(
@@ -1115,7 +1428,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   }) {
     final presets = <Color>[Colors.black, Colors.red, Colors.yellow, Colors.green, Colors.blue];
 
-    // Use Wrap so the swatches + palette button will wrap to new line instead of overflowing
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -1421,8 +1733,8 @@ class _RainbowPanel2D extends StatefulWidget {
 }
 
 class _RainbowPanel2DState extends State<_RainbowPanel2D> {
-  late double _hue; // 0..360
-  late double _value; // 1..0
+  late double _hue;   // 0..360
+  late double _value; // 0..1
 
   @override
   void initState() {
@@ -1486,7 +1798,7 @@ class _RainbowPanel2DState extends State<_RainbowPanel2D> {
               Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
-                  gradient: LinearGradient(
+                gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [Colors.transparent, Colors.black.withOpacity(0.95)],
@@ -1510,5 +1822,127 @@ class _RainbowPanel2DState extends State<_RainbowPanel2D> {
         ),
       );
     });
+  }
+}
+
+/* ---------------- Image layer widget ---------------- */
+
+class _ImageLayerWidget extends StatefulWidget {
+  final ImageLayerData layer;
+  final bool selected;
+  final VoidCallback onSelected;
+  final ValueChanged<ImageLayerData> onChanged;
+  final VoidCallback? onManipulationStart;
+  final VoidCallback? onManipulationEnd;
+
+  const _ImageLayerWidget({
+    super.key,
+    required this.layer,
+    required this.selected,
+    required this.onSelected,
+    required this.onChanged,
+    this.onManipulationStart,
+    this.onManipulationEnd,
+  });
+
+  @override
+  State<_ImageLayerWidget> createState() => _ImageLayerWidgetState();
+}
+
+class _ImageLayerWidgetState extends State<_ImageLayerWidget> {
+  late ImageLayerData _state;
+  Offset _focalStart = Offset.zero;
+  double _startScale = 1.0;
+  double _startRotation = 0.0;
+
+  Uint8List _bytes = Uint8List(0);
+
+  @override
+  void initState() {
+    super.initState();
+    _state = widget.layer;
+    _bytes = base64Decode(widget.layer.bytesB64);
+  }
+
+  @override
+  void didUpdateWidget(covariant _ImageLayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.layer != widget.layer) {
+      _state = widget.layer;
+      if (oldWidget.layer.bytesB64 != widget.layer.bytesB64) {
+        _bytes = base64Decode(widget.layer.bytesB64);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned.fill(
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTapDown: (_) => widget.onSelected(),
+        onScaleStart: (details) {
+          widget.onSelected();
+          widget.onManipulationStart?.call();
+          _focalStart = details.focalPoint;
+          _startScale = _state.scale;
+          _startRotation = _state.rotation;
+        },
+        onScaleEnd: (_) => widget.onManipulationEnd?.call(),
+        onScaleUpdate: (details) {
+          final translation = details.focalPoint - _focalStart;
+          final updated = _state.copyWith(
+            x: _state.x + translation.dx,
+            y: _state.y + translation.dy,
+            scale: (_startScale * details.scale).clamp(0.2, 6.0),
+            rotation: _startRotation + details.rotation,
+          );
+          _focalStart = details.focalPoint;
+          _state = updated;
+          widget.onChanged(updated);
+        },
+        child: CustomSingleChildLayout(
+          delegate: _CenteredAt(Offset(_state.x, _state.y)),
+          child: Transform.rotate(
+            angle: _state.rotation,
+            child: Transform.scale(
+              scale: _state.scale,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Image.memory(_bytes, fit: BoxFit.contain),
+                  if (widget.selected)
+                    IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.primary,
+                            width: 2,
+                            strokeAlign: BorderSide.strokeAlignOutside,
+                          ),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CenteredAt extends SingleChildLayoutDelegate {
+  final Offset center;
+  _CenteredAt(this.center);
+
+  @override
+  bool shouldRelayout(covariant _CenteredAt oldDelegate) => oldDelegate.center != center;
+
+  @override
+  Offset getPositionForChild(Size size, Size childSize) {
+    return Offset(center.dx - childSize.width / 2, center.dy - childSize.height / 2);
   }
 }
