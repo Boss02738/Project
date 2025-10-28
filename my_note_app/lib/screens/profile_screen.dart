@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/widgets/post_card.dart';
 import 'package:my_note_app/screens/settings_screen.dart';
+import 'package:my_note_app/screens/edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   /// โปรไฟล์ที่ต้องการเปิดดู; ถ้าไม่ส่งมา จะเปิดโปรไฟล์ตนเอง
@@ -200,19 +201,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () {
+              onPressed: () async {
                 if (_isMe) {
-                  // ไปหน้าแก้โปรไฟล์ของคุณ (ถ้ามี)
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Edit profile (coming soon)')),
+                  final changed = await Navigator.push<bool>(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => EditProfileScreen(
+                        userId: _profileUserId!,
+                        initialUsername:
+                            (_profile?['username'] as String?) ?? '',
+                        initialBio: (_profile?['bio'] as String?) ?? '',
+                        initialAvatar:
+                            (_profile?['avatar_url'] as String?) ?? '',
+                      ),
+                    ),
                   );
+                  // ถ้ากลับมาพร้อม changed == true ให้รีเฟรชหน้าโปรไฟล์
+                  if (changed == true) {
+                    _refresh();
+                  }
                 } else {
-                  // กด Add friend (placeholder)
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('ส่งคำขอเป็นเพื่อนแล้ว')),
                   );
                 }
               },
+
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(

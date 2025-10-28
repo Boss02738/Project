@@ -272,12 +272,39 @@ const getSavedPosts = async (req, res) => {
 
   try {
     const q = `
-      SELECT p.id, p.text, p.year_label, p.subject, p.image_url, p.file_url, p.created_at,
-             u.id_user AS user_id, u.username, COALESCE(u.avatar_url,'') AS avatar_url
+      SELECT 
+        p.*,
+        u.id_user AS user_id,
+        u.username,
+        COALESCE(u.avatar_url, '') AS avatar_url,
+
+        -- รวมรูปทั้งหมดของโพสต์
+        COALESCE(
+          json_agg(pi.image_url ORDER BY pi.id)
+          FILTER (WHERE pi.id IS NOT NULL),
+          '[]'
+        ) AS images,
+
+        -- นับยอดต่าง ๆ
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
+
+        -- สถานะสำหรับผู้ดู (viewer = คนที่เปิด Saved เอง)
+        TRUE AS saved_by_me,
+        EXISTS(
+          SELECT 1
+          FROM public.likes l
+          WHERE l.post_id = p.id AND l.user_id = $1
+        ) AS liked_by_me,
+
+        -- ใช้เวลาที่บันทึกไว้ในการ sort
+        s.created_at AS saved_at
       FROM public.saves s
       JOIN public.posts p ON p.id = s.post_id
       JOIN public.users u ON u.id_user = p.user_id
-      WHERE s.user_id=$1
+      LEFT JOIN public.post_images pi ON pi.post_id = p.id
+      WHERE s.user_id = $1
+      GROUP BY p.id, u.id_user, u.username, u.avatar_url, s.created_at
       ORDER BY s.created_at DESC
     `;
     const r = await pool.query(q, [userId]);
@@ -287,6 +314,7 @@ const getSavedPosts = async (req, res) => {
     res.status(500).json({ message: 'internal error' });
   }
 };
+
 const getPostsByUser = async (req, res) => {
   try {
     const uid = Number(req.params.id);

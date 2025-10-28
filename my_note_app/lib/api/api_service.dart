@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class ApiService {
@@ -9,7 +8,7 @@ class ApiService {
     if (Platform.isAndroid) {
       return 'http://10.0.2.2:3000';      // Android emulator
     }
-    return 'http://10.40.150.148:3000';   // Physical device/iOS
+    return 'http://10.48.3.33:3000';   // Physical device/iOS
   }
 
   // แยก base ตามกลุ่ม API ชัด ๆ
@@ -36,7 +35,7 @@ class ApiService {
   }
 
   // --------------- Profile ---------------
-  static Future<http.Response> uploadAvatar({
+  static Future<http.Response> uploadAvatar({   
     required String email,
     required File file,
   }) async {
@@ -254,4 +253,41 @@ static Future<List<dynamic>> getLikedPosts(int userId) async {
   }
 }
 
+static Future<void> updateProfileById({
+  required int userId,
+  String? username,
+  String? bio,
+}) async {
+  final uri = Uri.parse('$_auth/profile/update-by-id');
+  final res = await http.post(
+    uri,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'user_id': userId,
+      if (username != null) 'username': username,
+      if (bio != null) 'bio': bio,
+    }),
+  );
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    throw 'Update profile failed (${res.statusCode}) ${res.body}';
+  }
 }
+
+static Future<String> uploadAvatarById({
+  required int userId,
+  required File file,
+}) async {
+  final req = http.MultipartRequest('POST', Uri.parse('$_auth/profile/avatar-by-id'));
+  req.fields['user_id'] = '$userId';
+  req.files.add(await http.MultipartFile.fromPath('avatar', file.path));
+  final streamed = await req.send();
+  final res = await http.Response.fromStream(streamed);
+  if (res.statusCode < 200 || res.statusCode >= 300) {
+    throw 'Upload avatar failed (${res.statusCode}) ${res.body}';
+  }
+  final data = jsonDecode(res.body) as Map<String, dynamic>;
+  return (data['avatar_url'] as String?) ?? '';
+}
+}
+
+

@@ -14,6 +14,8 @@ const {
   updateProfile,
   uploadAvatar,
   getUserBrief,
+  updateProfileById,
+  uploadAvatarById,
 } = require('../controllers/authController');
 
 // ---------- เตรียมโฟลเดอร์อัปโหลดเฉพาะอวาตาร์ ----------
@@ -54,7 +56,11 @@ router.post('/login', login);
 // ---------- Profile ----------
 router.post('/profile/update',  updateProfile);
 router.post('/profile/avatar',  uploadAvatarMulter.single('avatar'), uploadAvatar);
-
+router.post('/profile/update-by-id', updateProfileById); // << เพิ่ม
+router.post('/profile/avatar-by-id',
+  uploadAvatarMulter.single('avatar'),
+  uploadAvatarById
+); // <<
 // ---------- ข้อมูลผู้ใช้แบบย่อ ----------
 router.get('/user/:id', getUserBrief);
 
