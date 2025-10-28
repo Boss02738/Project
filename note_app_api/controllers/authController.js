@@ -1,58 +1,51 @@
-// controllers/authController.js
 const bcrypt = require('bcrypt');
 const pool = require('../models/db');
 const { genOTP } = require('../utils/otp');
 const { sendOTP } = require('../utils/mailer');
 
-/* ---------------- CONFIG ---------------- */
+// เวลา OTP หมดอายุ (นาที)
 const OTP_EXPIRE_MIN = Number(process.env.OTP_EXPIRE_MIN || 5);
+// เวลารอส่งใหม่ (วินาที)
 const RESEND_COOLDOWN = Number(process.env.OTP_RESEND_COOLDOWN_SEC || 60);
 
-/* ---------------- HELPERS ---------------- */
-const isValidKuEmail = (email) => /^[^@]+@ku\.th$/i.test(String(email || '').trim());
-const normEmail = (email) => String(email || '').trim().toLowerCase();
-const normGender = (g) => {
-  const s = String(g || '').trim().toLowerCase();
-  return s && ['male', 'female', 'other'].includes(s) ? s : null;
-};
-const cleanPhone = (p) => {
-  const digits = String(p || '').replace(/[^\d]/g, '');
-  return digits.length ? digits : null;
-};
+// helper ตรวจ email ว่าต้องลงท้ายด้วย @ku.th
+function isValidKuEmail(email) {
+  return /^[^@]+@ku\.th$/.test(email);
+}
 
 /* =============================
    STEP 1: Request OTP
    ============================= */
 const startRegister = async (req, res) => {
-  const username = String(req.body.username || '').trim();
-  const email = normEmail(req.body.email);
-  const password = String(req.body.password || '');
-
+  const { username, email, password } = req.body;
   if (!username || !email || !password)
     return res.status(400).json({ message: 'กรอก username, email, password ให้ครบ' });
-  if (!isValidKuEmail(email))
+
+  // email ต้องเป็น @ku.th
+  if (!isValidKuEmail(email)) {
     return res.status(400).json({ message: 'อนุญาตเฉพาะอีเมล @ku.th เท่านั้น' });
+  }
 
   try {
+    // กัน username/email ซ้ำตั้งแต่แรก
     const dupeUser = await pool.query('SELECT 1 FROM public.users WHERE username=$1', [username]);
     if (dupeUser.rowCount > 0) return res.status(409).json({ message: 'Username นี้ถูกใช้แล้ว' });
 
     const dupeEmail = await pool.query('SELECT 1 FROM public.users WHERE email=$1', [email]);
     if (dupeEmail.rowCount > 0) return res.status(409).json({ message: 'อีเมลนี้ถูกใช้แล้ว' });
 
-    // cooldown
-    const last = await pool.query(
-      `SELECT created_at FROM public.verification_password
-       WHERE email=$1 AND purpose='register'
-       ORDER BY created_at DESC LIMIT 1`,
-      [email]
-    );
+    // คูลดาวน์ OTP
+    const last = await pool.query(`
+      SELECT created_at FROM public.verification_password
+      WHERE email=$1 AND purpose='register'
+      ORDER BY created_at DESC LIMIT 1`, [email]);
+
     if (last.rowCount > 0) {
       const diff = (Date.now() - new Date(last.rows[0].created_at).getTime()) / 1000;
       if (diff < RESEND_COOLDOWN) {
         return res.status(429).json({
           message: `ขอ OTP ได้อีกใน ${Math.ceil(RESEND_COOLDOWN - diff)} วิ`,
-          retry_after_sec: Math.ceil(RESEND_COOLDOWN - diff),
+          retry_after_sec: Math.ceil(RESEND_COOLDOWN - diff)
         });
       }
     }
@@ -61,22 +54,26 @@ const startRegister = async (req, res) => {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + OTP_EXPIRE_MIN * 60 * 1000);
 
+    // ลบ OTP เก่า
     await pool.query(`DELETE FROM public.verification_password WHERE email=$1 AND purpose='register'`, [email]);
-    await pool.query(
-      `INSERT INTO public.verification_password(email, otp, purpose, expires_at)
-       VALUES ($1,$2,'register',$3)`,
-      [email, otp, expiresAt]
-    );
+
+    await pool.query(`
+      INSERT INTO public.verification_password(email, otp, purpose, expires_at)
+      VALUES ($1,$2,'register',$3)`, [email, otp, expiresAt]);
 
     await sendOTP(email, otp, OTP_EXPIRE_MIN);
-    return res.json({
+
+    res.json({
       message: 'ส่ง OTP แล้ว กรุณาตรวจอีเมล',
-      email, ttl_min: OTP_EXPIRE_MIN, now: now.toISOString(),
-      expiresAt: expiresAt.toISOString(), resend_after_sec: RESEND_COOLDOWN,
+      email,
+      ttl_min: OTP_EXPIRE_MIN,
+      now: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      resend_after_sec: RESEND_COOLDOWN,
     });
   } catch (err) {
     console.error('startRegister error:', err);
-    return res.status(500).json({ message: 'internal_error' });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
   }
 };
 
@@ -84,45 +81,43 @@ const startRegister = async (req, res) => {
    STEP 2: Verify OTP & Register
    ============================= */
 const verifyRegister = async (req, res) => {
-  const username = String(req.body.username || '').trim();
-  const email = normEmail(req.body.email);
-  const password = String(req.body.password || '');
-  const otp = String(req.body.otp || '').trim();
-
+  const { username, email, password, otp } = req.body;
   if (!username || !email || !password || !otp)
     return res.status(400).json({ message: 'กรอกข้อมูลให้ครบ' });
-  if (!isValidKuEmail(email))
+
+  if (!isValidKuEmail(email)) {
     return res.status(400).json({ message: 'อนุญาตเฉพาะอีเมล @ku.th เท่านั้น' });
+  }
 
   try {
-    const q = await pool.query(
-      `SELECT id, expires_at
-         FROM public.verification_password
-        WHERE email=$1 AND otp=$2 AND purpose='register'
-        ORDER BY created_at DESC LIMIT 1`,
-      [email, otp]
-    );
+    const q = await pool.query(`
+      SELECT id, expires_at FROM public.verification_password
+      WHERE email=$1 AND otp=$2 AND purpose='register'
+      ORDER BY created_at DESC LIMIT 1`, [email, otp]);
+
     if (q.rowCount === 0) return res.status(400).json({ message: 'OTP ไม่ถูกต้อง' });
     if (new Date(q.rows[0].expires_at).getTime() < Date.now())
       return res.status(400).json({ message: 'OTP หมดอายุแล้ว' });
 
+    // กันซ้ำอีกชั้น
     const dupeUser = await pool.query('SELECT 1 FROM public.users WHERE username=$1', [username]);
     if (dupeUser.rowCount > 0) return res.status(409).json({ message: 'Username นี้ถูกใช้แล้ว' });
+
     const dupeEmail = await pool.query('SELECT 1 FROM public.users WHERE email=$1', [email]);
     if (dupeEmail.rowCount > 0) return res.status(409).json({ message: 'อีเมลนี้ถูกใช้แล้ว' });
 
+    // สมัครจริง
     const hash = await bcrypt.hash(password, 10);
-    await pool.query(
-      `INSERT INTO public.users(username, password, email, email_verified, profile_completed)
-       VALUES ($1,$2,$3,true,false)`,
-      [username, hash, email]
-    );
+    await pool.query(`
+      INSERT INTO public.users(username, password, email, email_verified, profile_completed)
+      VALUES ($1,$2,$3,true,false)`, [username, hash, email]);
 
+    // ลบ OTP หลังใช้
     await pool.query('DELETE FROM public.verification_password WHERE id=$1', [q.rows[0].id]);
-    return res.json({ message: 'สมัครสำเร็จ' });
+    res.json({ message: 'สมัครสำเร็จ' });
   } catch (err) {
     console.error('verifyRegister error:', err);
-    return res.status(500).json({ message: 'internal_error' });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
   }
 };
 
@@ -130,27 +125,28 @@ const verifyRegister = async (req, res) => {
    STEP 3: Resend OTP
    ============================= */
 const resendOtp = async (req, res) => {
-  const email = normEmail(req.body.email);
+  const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'ต้องใส่ email' });
-  if (!isValidKuEmail(email))
+
+  if (!isValidKuEmail(email)) {
     return res.status(400).json({ message: 'อนุญาตเฉพาะอีเมล @ku.th เท่านั้น' });
+  }
 
   try {
     const u = await pool.query('SELECT 1 FROM public.users WHERE email=$1', [email]);
     if (u.rowCount > 0) return res.status(409).json({ message: 'อีเมลนี้สมัครแล้ว' });
 
-    const last = await pool.query(
-      `SELECT created_at FROM public.verification_password
-        WHERE email=$1 AND purpose='register'
-        ORDER BY created_at DESC LIMIT 1`,
-      [email]
-    );
+    const last = await pool.query(`
+      SELECT created_at FROM public.verification_password
+      WHERE email=$1 AND purpose='register'
+      ORDER BY created_at DESC LIMIT 1`, [email]);
+
     if (last.rowCount > 0) {
       const diff = (Date.now() - new Date(last.rows[0].created_at).getTime()) / 1000;
       if (diff < RESEND_COOLDOWN) {
         return res.status(429).json({
           message: `ขอ OTP ได้อีกใน ${Math.ceil(RESEND_COOLDOWN - diff)} วิ`,
-          retry_after_sec: Math.ceil(RESEND_COOLDOWN - diff),
+          retry_after_sec: Math.ceil(RESEND_COOLDOWN - diff)
         });
       }
     }
@@ -159,22 +155,26 @@ const resendOtp = async (req, res) => {
     const now = new Date();
     const expiresAt = new Date(now.getTime() + OTP_EXPIRE_MIN * 60 * 1000);
 
+    // ลบ OTP เก่าทั้งหมดก่อน
     await pool.query(`DELETE FROM public.verification_password WHERE email=$1 AND purpose='register'`, [email]);
-    await pool.query(
-      `INSERT INTO public.verification_password(email, otp, purpose, expires_at)
-       VALUES ($1,$2,'register',$3)`,
-      [email, otp, expiresAt]
-    );
+
+    await pool.query(`
+      INSERT INTO public.verification_password(email, otp, purpose, expires_at)
+      VALUES ($1,$2,'register',$3)`, [email, otp, expiresAt]);
+
     await sendOTP(email, otp, OTP_EXPIRE_MIN);
 
-    return res.json({
+    res.json({
       message: 'ส่ง OTP ใหม่แล้ว',
-      email, ttl_min: OTP_EXPIRE_MIN, now: now.toISOString(),
-      expiresAt: expiresAt.toISOString(), resend_after_sec: RESEND_COOLDOWN,
+      email,
+      ttl_min: OTP_EXPIRE_MIN,
+      now: now.toISOString(),
+      expiresAt: expiresAt.toISOString(),
+      resend_after_sec: RESEND_COOLDOWN,
     });
   } catch (err) {
     console.error('resendOtp error:', err);
-    return res.status(500).json({ message: 'internal_error' });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
   }
 };
 
@@ -182,9 +182,7 @@ const resendOtp = async (req, res) => {
    LOGIN
    ============================= */
 const login = async (req, res) => {
-  const email = normEmail(req.body.email);
-  const password = String(req.body.password || '');
-
+  const { email, password } = req.body;
   if (!email || !password)
     return res.status(400).json({ message: 'กรอกอีเมลและรหัสผ่าน' });
 
@@ -199,7 +197,9 @@ const login = async (req, res) => {
     if (!ok) return res.status(401).json({ message: 'รหัสผ่านไม่ถูกต้อง' });
 
     const needProfile = (u.profile_completed !== undefined) ? !u.profile_completed : (!u.bio || !u.gender);
-    const avatarUrl = (u.avatar_url && String(u.avatar_url).trim() !== '')
+
+    // ✅ ส่ง avatar_url พร้อม fallback
+    const avatarUrl = (u.avatar_url && u.avatar_url.trim() !== '')
       ? u.avatar_url
       : '/uploads/avatars/default.png';
 
@@ -210,95 +210,60 @@ const login = async (req, res) => {
     });
   } catch (err) {
     console.error('login error:', err);
-    return res.status(500).json({ message: 'internal_error' });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
   }
 };
 
 /* =============================
-   UPDATE PROFILE (by email)
+   UPDATE PROFILE
    ============================= */
 const updateProfile = async (req, res) => {
+  const { email, bio, gender } = req.body;
+  if (!email) return res.status(400).json({ message: 'ต้องมี email' });
+
+  const allow = new Set(['male','female','other']);
+  if (gender && !allow.has(String(gender).toLowerCase())) {
+    return res.status(400).json({ message: 'ค่า gender ไม่ถูกต้อง' });
+  }
+
   try {
-    const email = normEmail(req.body.email);
-    if (!email) return res.status(400).json({ message: 'ต้องมี email' });
+    const user = await pool.query('SELECT id_user FROM public.users WHERE email=$1', [email]);
+    if (user.rowCount === 0) return res.status(404).json({ message: 'ไม่พบบัญชีนี้' });
 
-    const bio = (req.body.bio || '').toString().trim() || null;
-    const gender = normGender(req.body.gender);
-    const phone = cleanPhone(req.body.phone);
-
-    // ตรวจว่ามีผู้ใช้อยู่จริง
-    const u = await pool.query('SELECT id_user FROM public.users WHERE email=$1 LIMIT 1', [email]);
-    if (u.rowCount === 0) return res.status(404).json({ message: 'ไม่พบบัญชีนี้' });
-
-    const q = await pool.query(
+    await pool.query(
       `UPDATE public.users
-          SET bio = COALESCE($2, bio),
-              gender = COALESCE($3, gender),
-              phone = COALESCE($4, phone),
-              profile_completed = true
-        WHERE email = $1
-        RETURNING id_user, username, email,
-                  COALESCE(avatar_url, '/uploads/avatars/default.png') AS avatar_url,
-                  bio, gender, phone, profile_completed`,
-      [email, bio, gender, phone]
+         SET bio=$2,
+             gender=$3,
+             profile_completed=true
+       WHERE email=$1`,
+      [email, bio ?? null, (gender ?? '').toLowerCase() || null]
     );
 
-    return res.json({ message: 'อัปเดตโปรไฟล์สำเร็จ', user: q.rows[0] });
+    res.json({ message: 'อัปเดตโปรไฟล์สำเร็จ' });
   } catch (err) {
     console.error('updateProfile error:', err);
-    return res.status(500).json({ message: 'internal_error' });
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
   }
 };
 
-/* =============================
-   UPDATE PROFILE (by id_user)  <-- ใช้กับ /api/users/:id/profile
-   ============================= */
-const updateProfileById = async (req, res) => {
-  try {
-    const userId = Number(req.params.id);
-    if (!userId) return res.status(400).json({ message: 'invalid user id' });
-
-    const bio = (req.body.bio || '').toString().trim() || null;
-    const gender = normGender(req.body.gender);
-    const phone = cleanPhone(req.body.phone);
-
-    const q = await pool.query(
-      `UPDATE public.users
-          SET bio = COALESCE($2, bio),
-              gender = COALESCE($3, gender),
-              phone = COALESCE($4, phone),
-              profile_completed = true
-        WHERE id_user = $1
-        RETURNING id_user, username, email,
-                  COALESCE(avatar_url, '/uploads/avatars/default.png') AS avatar_url,
-                  bio, gender, phone, profile_completed`,
-      [userId, bio, gender, phone]
-    );
-
-    if (q.rowCount === 0) return res.status(404).json({ message: 'user not found' });
-    return res.json({ message: 'อัปเดตโปรไฟล์สำเร็จ', user: q.rows[0] });
-  } catch (err) {
-    console.error('POST /api/users/:id/profile error:', err);
-    return res.status(500).json({ message: 'internal_error' });
-  }
-};
-
-/* =============================
-   UPLOAD AVATAR
-   ============================= */
+// ✅ อัปโหลดรูป + อัปเดต users.avatar_url
 const uploadAvatar = async (req, res) => {
   try {
-    const email = normEmail(req.body.email);
+    const email = req.body.email;
     if (!email) return res.status(400).json({ message: 'ต้องส่ง email มาด้วย' });
     if (!req.file) return res.status(400).json({ message: 'ไม่พบไฟล์รูป (avatar)' });
 
+    // ตรวจ user
     const u = await pool.query('SELECT id_user FROM public.users WHERE email=$1', [email]);
     if (u.rowCount === 0) return res.status(404).json({ message: 'ไม่พบบัญชีนี้' });
 
+    // path ที่ client เรียกได้
     const fileUrl = `/uploads/avatars/${req.file.filename}`;
+
     await pool.query('UPDATE public.users SET avatar_url=$2 WHERE email=$1', [email, fileUrl]);
 
-    return res.json({ ok: true, message: 'อัปโหลดรูปสำเร็จ', avatar_url: fileUrl });
+    console.log('[uploadAvatar] saved:', email, fileUrl);
+    return res.json({ message: 'อัปโหลดรูปสำเร็จ', avatar_url: fileUrl });
   } catch (err) {
     console.error('uploadAvatar error:', err);
     return res.status(500).json({ message: 'อัปโหลดรูปไม่สำเร็จ' });
@@ -308,27 +273,35 @@ const uploadAvatar = async (req, res) => {
 const getUserBrief = async (req, res) => {
   try {
     const { id } = req.params;
-    const r = await pool.query(
-      `SELECT
-          u.id_user,
-          u.username,
-          u.email,
-          COALESCE(u.bio, '') AS bio,
-          COALESCE(u.gender, '') AS gender,
-          COALESCE(u.avatar_url, '/uploads/avatars/default.png') AS avatar_url,
-          COALESCE(u.profile_completed, false) AS profile_completed,
-          COALESCE(u.phone, '') AS phone,
-          (SELECT COUNT(*)::int FROM public.posts p WHERE p.user_id = u.id_user) AS post_count
-        FROM public.users u
-       WHERE u.id_user = $1
-       LIMIT 1`,
-      [id]
-    );
+
+    const q = `
+      SELECT
+        u.id_user,
+        u.username,
+        u.email,
+        COALESCE(u.bio, '') AS bio,
+        COALESCE(u.gender, '') AS gender,
+        COALESCE(u.avatar_url, '/uploads/avatars/default.png') AS avatar_url,
+        COALESCE(u.profile_completed, false) AS profile_completed,
+        -- นับจำนวนโพสต์ของผู้ใช้
+        (SELECT COUNT(*)::int FROM public.posts p WHERE p.user_id = u.id_user) AS post_count
+        -- ถ้ามีตาราง friends ให้เติมตรงนี้ได้ เช่น:
+        -- ,(SELECT COUNT(*)::int FROM public.friends f WHERE f.user_id = u.id_user) AS friends_count
+      FROM public.users u
+      WHERE u.id_user = $1
+      LIMIT 1
+    `;
+    const r = await pool.query(q, [id]);
     if (r.rowCount === 0) return res.status(404).json({ message: 'user not found' });
-    return res.json(r.rows[0]);
+
+    // ถ้าไม่มี friends table ก็ใส่ 0 ไปก่อน
+    const row = r.rows[0];
+    if (row.friends_count === undefined) row.friends_count = 0;
+
+    return res.json(row);
   } catch (err) {
     console.error('getUserBrief error:', err);
-    return res.status(500).json({ message: 'internal_error' });
+    return res.status(500).json({ message: 'server error' });
   }
 };
 const updateProfileById = async (req, res) => {

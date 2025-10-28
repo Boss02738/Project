@@ -21,7 +21,6 @@ const pool = require("./models/db");
 const authRoutes = require("./routes/authRoutes");
 const postRoutes = require("./routes/postRoutes");
 const searchRoutes = require("./routes/searchRoutes");
-const purchaseRoutes = require("./routes/purchaseRoutes");
 
 // ====== APP/HTTP SERVER/IO ======
 const app = express();
@@ -52,7 +51,6 @@ const upload = multer({ storage });
 app.use("/api/auth", authRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/search", searchRoutes);
-app.use("/api/purchases", purchaseRoutes);
 
 // ========== HEALTH ==========
 app.get("/", (_req, res) => res.send("NoteCoLab server ok (merged in note_app_api)"));

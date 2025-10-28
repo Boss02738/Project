@@ -159,15 +159,6 @@ class ApiService {
     }
   }
 
-  static Future<Map<String, dynamic>> getUserProfile(int userId) async {
-    final url = Uri.parse('$_auth/user/$userId');
-    final resp = await http.get(url);
-    if (resp.statusCode == 200) {
-      return jsonDecode(resp.body) as Map<String, dynamic>;
-    }
-    throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
-  }
-
   // =========================================================
   // ========================== Posts ========================
   // =========================================================
@@ -380,6 +371,74 @@ class ApiService {
       return (jsonDecode(resp.body) as List).cast<dynamic>();
     }
     throw Exception('โหลดโพสต์ผู้ใช้ล้มเหลว: ${resp.statusCode}');
+  }
+
+  static Future<Map<String, dynamic>> getUserProfile(int userId) async {
+    final url = Uri.parse('$_auth/user/$userId');
+    final resp = await http.get(url);
+    // debug ชั่วคราว
+    // print('GET $url -> ${resp.statusCode} ${resp.body}');
+    if (resp.statusCode == 200) {
+      return jsonDecode(resp.body) as Map<String, dynamic>;
+    }
+    throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+  }
+
+  static Future<List<dynamic>> getSavedPosts(int userId) async {
+    final res = await http.get(Uri.parse('$_posts/posts/saved/$userId'));
+    if (res.statusCode == 200) {
+      return json.decode(res.body);
+    } else {
+      throw Exception('โหลดโพสต์ที่บันทึกไม่สำเร็จ');
+    }
+  }
+
+  static Future<List<dynamic>> getLikedPosts(int userId) async {
+    final res = await http.get(Uri.parse('$_posts/posts/liked/$userId'));
+    if (res.statusCode == 200) {
+      return json.decode(res.body);
+    } else {
+      throw Exception('โหลดโพสต์ที่ถูกใจไม่สำเร็จ');
+    }
+  }
+
+  static Future<void> updateProfileById({
+    required int userId,
+    String? username,
+    String? bio,
+  }) async {
+    final uri = Uri.parse('$_auth/profile/update-by-id');
+    final res = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'user_id': userId,
+        if (username != null) 'username': username,
+        if (bio != null) 'bio': bio,
+      }),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw 'Update profile failed (${res.statusCode}) ${res.body}';
+    }
+  }
+
+  static Future<String> uploadAvatarById({
+    required int userId,
+    required File file,
+  }) async {
+    final req = http.MultipartRequest(
+      'POST',
+      Uri.parse('$_auth/profile/avatar-by-id'),
+    );
+    req.fields['user_id'] = '$userId';
+    req.files.add(await http.MultipartFile.fromPath('avatar', file.path));
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw 'Upload avatar failed (${res.statusCode}) ${res.body}';
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return (data['avatar_url'] as String?) ?? '';
   }
 
   // =========================================================
