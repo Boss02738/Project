@@ -301,13 +301,10 @@ const uploadAvatar = async (req, res) => {
     return res.json({ ok: true, message: 'อัปโหลดรูปสำเร็จ', avatar_url: fileUrl });
   } catch (err) {
     console.error('uploadAvatar error:', err);
-    return res.status(500).json({ message: 'internal_error' });
+    return res.status(500).json({ message: 'อัปโหลดรูปไม่สำเร็จ' });
   }
 };
 
-/* =============================
-   USER BRIEF
-   ============================= */
 const getUserBrief = async (req, res) => {
   try {
     const { id } = req.params;
@@ -334,14 +331,56 @@ const getUserBrief = async (req, res) => {
     return res.status(500).json({ message: 'internal_error' });
   }
 };
+const updateProfileById = async (req, res) => {
+  try {
+    const { user_id, username, bio } = req.body;
+    const id = Number(user_id);
+    if (!id) return res.status(400).json({ message: 'ต้องมี user_id' });
 
-module.exports = {
-  startRegister,
-  verifyRegister,
-  resendOtp,
-  login,
-  updateProfile,       // by email
-  updateProfileById,   // by id_user
-  uploadAvatar,
-  getUserBrief,
+    // ถ้าผู้ใช้กรอก username ใหม่ ต้องเช็คซ้ำซ้อน
+    if (username && String(username).trim() !== '') {
+      const dupe = await pool.query(
+        'SELECT 1 FROM public.users WHERE LOWER(username)=LOWER($1) AND id_user<>$2',
+        [String(username).trim(), id]
+      );
+      if (dupe.rowCount > 0) {
+        return res.status(409).json({ message: 'Username นี้ถูกใช้แล้ว' });
+      }
+    }
+
+    await pool.query(
+      `UPDATE public.users
+         SET username = COALESCE($2, username),
+             bio      = COALESCE($3, bio)
+       WHERE id_user = $1`,
+      [id, (username ?? null), (bio ?? null)]
+    );
+
+    return res.json({ message: 'อัปเดตโปรไฟล์สำเร็จ' });
+  } catch (err) {
+    console.error('updateProfileById error:', err);
+    return res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
+  }
 };
+
+// อัปโหลด avatar ด้วย user_id (ไม่ต้องใช้ email)
+const uploadAvatarById = async (req, res) => {
+  try {
+    const id = Number(req.body.user_id);
+    if (!id) return res.status(400).json({ message: 'ต้องมี user_id' });
+    if (!req.file) return res.status(400).json({ message: 'ไม่พบไฟล์รูป (avatar)' });
+
+    const fileUrl = `/uploads/avatars/${req.file.filename}`;
+    await pool.query(
+      'UPDATE public.users SET avatar_url=$2 WHERE id_user=$1',
+      [id, fileUrl]
+    );
+
+    return res.json({ message: 'อัปโหลดรูปสำเร็จ', avatar_url: fileUrl });
+  } catch (err) {
+    console.error('uploadAvatarById error:', err);
+    return res.status(500).json({ message: 'อัปโหลดรูปไม่สำเร็จ' });
+  }
+};
+
+module.exports = { startRegister, verifyRegister, resendOtp, login, updateProfile, uploadAvatar, getUserBrief, updateProfileById, uploadAvatarById };

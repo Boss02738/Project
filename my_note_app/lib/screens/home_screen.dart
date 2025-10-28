@@ -204,18 +204,19 @@ class _HomeState extends State<homescreen> {
     ];
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: (_currentIndex == 3)
+    ? null // ❌ ซ่อน AppBar ตอนอยู่หน้า Profile
+    : AppBar(
         title: Text(
-          _currentIndex == 3
-              ? 'Profile'
-              : _currentIndex == 1
-                  ? 'Search'
-                  : _currentIndex == 0
-                      ? 'Home'
-                      : 'Note app',
+          _currentIndex == 1
+              ? 'Search'
+              : _currentIndex == 0
+                  ? 'Home'
+                  : 'Note app',
         ),
         automaticallyImplyLeading: false,
       ),
+
       body: Column(children: [Expanded(child: screens[_currentIndex])]),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
