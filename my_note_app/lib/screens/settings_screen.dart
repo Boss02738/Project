@@ -1,6 +1,5 @@
 // lib/screens/settings_screen.dart
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:http/http.dart' as http;
@@ -10,6 +9,8 @@ import 'package:my_note_app/screens/saved_posts_screen.dart';
 import 'package:my_note_app/screens/liked_posts_screen.dart';
 import 'package:my_note_app/screens/deleted_posts_screen.dart';
 import 'package:my_note_app/screens/purchased_posts_feed_screen.dart';
+import 'package:my_note_app/screens/login_screen.dart';
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -55,8 +56,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 }
 
                 final data = snap.data!;
-                final username = (data['username'] as String?) ?? '';
-                final avatar = (data['avatar_url'] as String?) ?? '';
+                final username = (data['username'] ?? 'MeowMath') as String;
+                final avatar = (data['avatar_url'] ?? '') as String;
 
                 return ListView(
                   children: [
@@ -70,14 +71,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   as ImageProvider,
                       ),
                       title: Text(
-                        username.isEmpty ? 'MeowMath' : username,
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      title: Text(
-                        username.isEmpty ? 'MeowMath' : username,
+                        username,
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w600,
@@ -87,86 +81,117 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const Divider(height: 1),
 
-                    // Theme (placeholder)
                     const _SettingsItem(
                       icon: Icons.brightness_6_outlined,
                       title: 'Theme',
                     ),
 
-                    // Saved
                     _SettingsItem(
                       icon: Icons.bookmark_border,
                       title: 'Saved',
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => SavedPostsScreen(userId: _userId!),
-                          ),
-                        );
-                      },
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => SavedPostsScreen(userId: _userId!),
+                        ),
+                      ),
                     ),
 
-                    // Likes
                     _SettingsItem(
                       icon: Icons.favorite_border,
                       title: 'Likes',
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => LikedPostsScreen(userId: _userId!),
-                          ),
-                        );
-                      },
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => LikedPostsScreen(userId: _userId!),
+                        ),
+                      ),
                     ),
 
-                    // Purchased posts (ใหม่)
                     _SettingsItem(
                       icon: Icons.shopping_bag_outlined,
                       title: 'Purchased posts',
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                PurchasedPostsScreen(userId: _userId!),
-                          ),
-                        );
-                      },
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              PurchasedPostsScreen(userId: _userId!),
+                        ),
+                      ),
                     ),
 
-                    // Withdraw (ใหม่)
                     _SettingsItem(
                       icon: Icons.account_balance_wallet_outlined,
                       title: 'Withdraw',
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => WithdrawScreen(userId: _userId!),
-                          ),
-                        );
-                      },
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => WithdrawScreen(userId: _userId!),
+                        ),
+                      ),
                     ),
 
-                    // Deleted (placeholder)
-                     _SettingsItem(
+                    _SettingsItem(
                       icon: Icons.delete_outline,
                       title: 'Deleted',
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                DeletedPostsScreen(userId: _userId!),
-                          ),
-                        );
-                      },
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => DeletedPostsScreen(userId: _userId!),
+                        ),
+                      ),
                     ),
 
-                    // Log out (placeholder)
-                    const _SettingsItem(icon: Icons.logout, title: 'Log Out'),
+                    _SettingsItem(
+                      icon: Icons.logout,
+                      title: 'Log Out',
+                      onTap: () async {
+                        final confirm = await showDialog<bool>(
+                          context: context,
+                          builder: (context) {
+                            return AlertDialog(
+                              title: const Text('ยืนยันการออกจากระบบ'),
+                              content: const Text(
+                                'คุณแน่ใจหรือไม่ว่าต้องการออกจากระบบ?',
+                              ),
+                              actions: [
+                                TextButton(
+                                  onPressed: () =>
+                                      Navigator.pop(context, false),
+                                  child: const Text('ยกเลิก'),
+                                ),
+                                FilledButton(
+                                  onPressed: () => Navigator.pop(context, true),
+                                  child: const Text('ออกจากระบบ'),
+                                ),
+                              ],
+                            );
+                          },
+                        );
+
+                        if (confirm != true)
+                          return; // ถ้ากดยกเลิก ก็ไม่ทำอะไรต่อ
+
+                        // ถ้ากดยืนยัน → ล้างข้อมูลผู้ใช้
+                        final sp = await SharedPreferences.getInstance();
+                        await sp.clear();
+
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('ออกจากระบบเรียบร้อยแล้ว'),
+                            ),
+                          );
+
+                          // เด้งไปหน้า Login และเคลียร์ navigation stack
+                          Navigator.pushNamedAndRemoveUntil(
+                            context,
+                            '/login',
+                            (route) => false,
+                          );
+                        }
+                      },
+                    ),
                   ],
                 );
               },
@@ -215,10 +240,11 @@ class _PurchasedPostsScreenState extends State<PurchasedPostsScreen> {
 
   Future<List<dynamic>> _fetchPurchased() async {
     final uri = Uri.parse(
-        '${ApiService.host}/api/users/${widget.userId}/purchased-posts');
+      '${ApiService.host}/api/users/${widget.userId}/purchased-posts',
+    );
     final res = await http.get(uri);
     if (res.statusCode == 200) {
-      return (jsonDecode(res.body) as List<dynamic>);
+      return jsonDecode(res.body) as List<dynamic>;
     }
     throw Exception('โหลดไม่ได้ (${res.statusCode})');
   }
@@ -249,7 +275,8 @@ class _PurchasedPostsScreenState extends State<PurchasedPostsScreen> {
               final priceSatang = (p['price_amount_satang'] ?? 0) as int;
               return ListTile(
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
                 tileColor: Theme.of(context).colorScheme.surface,
                 title: Text(
                   (p['text'] ?? '').toString(),
@@ -260,9 +287,6 @@ class _PurchasedPostsScreenState extends State<PurchasedPostsScreen> {
                   'ซื้อเมื่อ: ${(p['granted_at'] ?? '').toString()} • ราคา ฿${(priceSatang / 100).toStringAsFixed(2)}',
                 ),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () {
-                  // TODO: เปิดดูโพสต์จริง/เอกสารจริงของคุณ
-                },
               );
             },
           );
@@ -284,8 +308,8 @@ class WithdrawScreen extends StatefulWidget {
 }
 
 class _WithdrawScreenState extends State<WithdrawScreen> {
-  final _amountCtrl = TextEditingController(); // ป้อนเป็น "สตางค์"
-  final _mobileCtrl = TextEditingController(); // PromptPay (มือถือ)
+  final _amountCtrl = TextEditingController();
+  final _mobileCtrl = TextEditingController();
   bool _loading = false;
 
   int? _coinBalanceSatang;
@@ -307,13 +331,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   Future<void> _loadSummary() async {
     try {
       final uri = Uri.parse(
-          '${ApiService.host}/api/wallet/summary?user_id=${widget.userId}');
+        '${ApiService.host}/api/wallet/summary?user_id=${widget.userId}',
+      );
       final res = await http.get(uri);
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
-          _coinBalanceSatang = data['coin_balance_satang'] as int? ?? 0;
-          _transactions = data['transactions'] as List<dynamic>? ?? [];
+          _coinBalanceSatang = data['coin_balance_satang'] ?? 0;
+          _transactions = data['transactions'] ?? [];
         });
       } else {
         _toast('โหลดสรุปกระเป๋าไม่สำเร็จ (${res.statusCode})');
@@ -332,8 +357,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     }
     setState(() => _loading = true);
     try {
-      final uri =
-          Uri.parse('${ApiService.host}/api/wallet/payout-request');
+      final uri = Uri.parse('${ApiService.host}/api/wallet/payout-request');
       final res = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
@@ -376,18 +400,21 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('ยอดเหรียญที่ถอนได้',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'ยอดเหรียญที่ถอนได้',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 6),
-            Text(balText,
-                style:
-                    const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+            Text(
+              balText,
+              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 20),
             TextField(
               controller: _amountCtrl,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                labelText: 'จำนวนที่ต้องการถอน (สตางค์) เช่น 9900 = ฿99.00',
+                labelText: 'จำนวนที่ต้องการถอน (สตางค์)',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -404,13 +431,13 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             FilledButton.icon(
               onPressed: _loading ? null : _submitWithdraw,
               icon: const Icon(Icons.paid),
-              label: _loading
-                  ? const Text('กำลังส่งคำขอ...')
-                  : const Text('ยืนยันถอนเงิน'),
+              label: Text(_loading ? 'กำลังส่งคำขอ...' : 'ยืนยันถอนเงิน'),
             ),
             const SizedBox(height: 24),
-            Text('ประวัติธุรกรรมล่าสุด',
-                style: Theme.of(context).textTheme.titleMedium),
+            Text(
+              'ประวัติธุรกรรมล่าสุด',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
             const SizedBox(height: 8),
             ..._transactions.take(10).map((tx) {
               final m = tx as Map<String, dynamic>;
