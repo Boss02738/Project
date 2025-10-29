@@ -1,7 +1,7 @@
 // lib/services/api_service.dart
 import 'dart:convert';
 import 'dart:io'; // ถ้าจะ build เป็น Flutter Web ให้แยกไฟล์/หลีกเลี่ยง import นี้
-import 'dart:typed_data'; // << เพิ่ม สำหรับ Uint8List
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
@@ -211,12 +211,13 @@ class ApiService {
     required int postId,
     required int viewerUserId,
   }) async {
+    // NOTE: ฝั่ง backend ของคุณอาจใช้ query key เป็น userId / viewer_id
     final uri = Uri.parse(
       '$_posts/$postId',
     ).replace(queryParameters: {'userId': '$viewerUserId'});
     final r = await http.get(uri);
     _ensureOk(r);
-    return _decode(r.body); // { post, hasAccess }
+    return _decode(r.body); // คาดหวังอย่างน้อย { post, hasAccess|has_access }
   }
 
   static Future<List<dynamic>> getFeed(int userId) async {
@@ -359,6 +360,16 @@ class ApiService {
     throw Exception('getSubjects failed: ${resp.statusCode}');
   }
 
+  static Future<List<dynamic>> getPurchasedPosts(int userId) async {
+  final uri = Uri.parse('$_posts/purchased')
+      .replace(queryParameters: {'user_id': '$userId'});
+  final res = await http.get(uri);
+  _ensureOk(res);
+  final data = jsonDecode(res.body);
+  return (data as List).cast<dynamic>();
+}
+
+
   static Future<List<dynamic>> getPostsByUser({
     required int profileUserId,
     required int viewerId,
@@ -376,8 +387,6 @@ class ApiService {
   static Future<Map<String, dynamic>> getUserProfile(int userId) async {
     final url = Uri.parse('$_auth/user/$userId');
     final resp = await http.get(url);
-    // debug ชั่วคราว
-    // print('GET $url -> ${resp.statusCode} ${resp.body}');
     if (resp.statusCode == 200) {
       return jsonDecode(resp.body) as Map<String, dynamic>;
     }
@@ -445,12 +454,89 @@ class ApiService {
   // ======================= Purchases =======================
   // =========================================================
 
-  /// เริ่มคำสั่งซื้อ → { purchase, qrPngDataUrl }
+  /// (ของเดิม) เริ่มคำสั่งซื้อ → โครงตอบกลับอาจเป็น { purchase, qr_payload } หรืออื่นๆ
   static Future<Map<String, dynamic>> startPurchase({
     required int postId,
     required int buyerId,
   }) async {
     return postJson('/api/purchases', {'postId': postId, 'buyerId': buyerId});
+  }
+
+  /// เมธอดใหม่ที่หน้า UI เรียกใช้: คืนรูปแบบ normalized
+  /// { id, amount_satang, qr_payload, expires_at }
+  static Future<Map<String, dynamic>?> createPurchase({
+    required int postId,
+    required int buyerId,
+  }) async {
+    Future<Map<String, dynamic>> _call(String path) async {
+      final uri = Uri.parse('$host$path');
+      final body = jsonEncode({
+        // ส่งทั้งสองแบบกันหลังบ้านใช้ชื่อไม่เหมือนกัน
+        'postId': postId,
+        'buyerId': buyerId,
+        'post_id': postId,
+        'buyer_id': buyerId,
+      });
+
+      final r = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: body,
+      );
+
+      // ถ้า error ให้โยนข้อความจริงเพื่อดีบัก
+      if (r.statusCode < 200 || r.statusCode >= 300) {
+        throw HttpException(
+          'HTTP ${r.statusCode} ${r.reasonPhrase}: ${r.body}',
+        );
+      }
+      return _decode(r.body);
+    }
+
+    Map<String, dynamic> _normalize(Map<String, dynamic> data) {
+      // รับหลายรูปแบบ response แล้ว normalize ให้เหลือรูปเดียว
+      final purchase = (data['purchase'] is Map)
+          ? (data['purchase'] as Map).cast<String, dynamic>()
+          : <String, dynamic>{};
+
+      final id = data['id'] ?? purchase['id'] ?? data['purchase_id'];
+      final amt =
+          data['amount_satang'] ??
+          data['amountSatang'] ??
+          purchase['amount_satang'] ??
+          purchase['amountSatang'] ??
+          0;
+      final qr =
+          data['qr_payload'] ??
+          data['qrPayload'] ??
+          purchase['qr_payload'] ??
+          purchase['qrPayload'];
+      final exp =
+          data['expires_at'] ?? data['expiresAt'] ?? purchase['expires_at'];
+
+      // ถ้ารูปแบบยังไม่ชัด ให้คืน data เดิมไปก่อน (เผื่อ debug)
+      if (id == null || qr == null) return data;
+
+      return {
+        'id': id is int ? id : int.tryParse('$id') ?? id,
+        'amount_satang': amt is int ? amt : int.tryParse('$amt') ?? 0,
+        'qr_payload': '$qr',
+        'expires_at': exp,
+      };
+    }
+
+    try {
+      // เรียก path หลัก
+      final data = await _call('/api/purchases');
+      return _normalize(data);
+    } on HttpException catch (e) {
+      // ถ้า 404 ลอง fallback เป็น singular
+      if (e.toString().contains('404')) {
+        final data = await _call('/api/purchases');
+        return _normalize(data);
+      }
+      rethrow; // โยนต่อให้ UI แสดง error จริง
+    }
   }
 
   /// ดึงรายละเอียดออเดอร์ → { purchase }

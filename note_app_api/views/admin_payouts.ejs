@@ -1,0 +1,26 @@
+<h3>Payouts (<%= status %>)</h3>
+<table role="grid">
+  <thead>
+    <tr>
+      <th>ID</th><th>User</th><th>PromptPay</th>
+      <th>Gross</th><th>Net</th><th>Requested</th><th>Action</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% rows.forEach(r => { %>
+      <tr>
+        <td><%= r.id %></td>
+        <td><%= r.username %> (#<%= r.user_id %>)</td>
+        <td><code><%= r.promptpay_mobile %></code></td>
+        <td>฿<%= (r.amount_satang/100).toFixed(2) %></td>
+        <td>฿<%= (r.amount_satang_net/100).toFixed(2) %></td>
+        <td><%= new Date(r.created_at).toLocaleString() %></td>
+        <td>
+          <form method="post" action="/admin/payouts/<%= r.id %>/mark-paid">
+            <button type="submit">Mark paid</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+  </tbody>
+</table>

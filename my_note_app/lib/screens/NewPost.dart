@@ -28,9 +28,9 @@ class NewPostScreen extends StatefulWidget {
 class _NewPostScreenState extends State<NewPostScreen> {
   final TextEditingController _detailController = TextEditingController();
 
-  // ---- เพิ่มสำหรับราคา ----
+  // ---- ราคา/ประเภทโพสต์ ----
   String _priceType = 'free'; // 'free' | 'paid'
-  final TextEditingController _priceCtrl = TextEditingController(); // บาท
+  final TextEditingController _priceCtrl = TextEditingController(); // ราคาหน่วย "บาท" (ผู้ใช้พิมพ์)
 
   // header user
   String _username = '';
@@ -42,10 +42,14 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
   // รูปหลายรูป (สูงสุด 10)
   final ImagePicker _picker = ImagePicker();
+  final int _maxImages = 10;
   List<XFile> _images = []; // preview
+
   // แนบไฟล์อื่น 1 ชิ้น
   File? _file;
   String? _fileName;
+
+  bool _submitting = false; // กันการกดซ้ำตอนกำลังโพสต์
 
   final List<String> years = ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4', 'วิชาเฉพาะเลือก'];
 
@@ -118,15 +122,37 @@ class _NewPostScreenState extends State<NewPostScreen> {
   @override
   void dispose() {
     _detailController.dispose();
-    _priceCtrl.dispose(); // <- เพิ่ม dispose
+    _priceCtrl.dispose();
     super.dispose();
   }
 
+  // --------- Utils ----------
+
+  /// แปลงสตริงราคา (บาท) → สตางค์ (int) อย่างปลอดภัย
+  /// รองรับ "29", "29.0", "29.00", "1,234.56"
+  int _parseBahtToSatang(String input) {
+    final normalized = input.trim().replaceAll(',', '');
+    if (normalized.isEmpty) return 0;
+    final d = double.tryParse(normalized);
+    if (d == null) return 0;
+    // ปัดเป็นสตางค์ (เลี่ยงปัญหา floating)
+    return (d * 100).round();
+  }
+
+  void _toast(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
   // --------- Pickers ----------
+
   Future<void> _pickImages() async {
     final files = await _picker.pickMultiImage(imageQuality: 85);
+    if (files.isEmpty) return;
     final merged = [..._images, ...files];
-    setState(() => _images = merged.take(10).toList());
+    if (merged.length > _maxImages) {
+      _toast('เลือกรูปได้สูงสุด $_maxImages รูป');
+    }
+    setState(() => _images = merged.take(_maxImages).toList());
   }
 
   Future<void> _pickFile() async {
@@ -142,25 +168,30 @@ class _NewPostScreenState extends State<NewPostScreen> {
     }
   }
 
+  // --------- Post handler ----------
+
   Future<void> _handlePost() async {
+    if (_submitting) return;
+
     if (selectedSubject == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('กรุณาเลือกรายวิชา')));
+      _toast('กรุณาเลือกรายวิชา');
       return;
     }
 
     // ตรวจราคาเมื่อเลือกแบบเสียเงิน
-    double? priceBaht;
+    int? priceSatang;
     if (_priceType == 'paid') {
-      priceBaht = double.tryParse(_priceCtrl.text.trim());
-      if (priceBaht == null || priceBaht <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('กรุณาใส่ราคาเป็นจำนวนที่มากกว่า 0')),
-        );
+      final input = _priceCtrl.text;
+      final satang = _parseBahtToSatang(input);
+      if (satang <= 0) {
+        _toast('กรุณาใส่ราคามากกว่า 0 บาท');
         return;
       }
+      // บางระบบจะกำหนดขั้นต่ำ เช่น 1 บาท = 100 สตางค์
+      priceSatang = satang;
     }
 
+    setState(() => _submitting = true);
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -168,6 +199,11 @@ class _NewPostScreenState extends State<NewPostScreen> {
     );
 
     try {
+      // หมายเหตุ:
+      // - ApiService.createPost ของคุณเดิมรับ priceType & priceBaht
+      //   ถ้ารองรับ price_amount_satang ด้วย ให้ส่งแบบนี้แทน (แต่อย่าเดา signature):
+      //   priceAmountSatang: priceSatang
+      //   ที่นี่ผมส่งให้ตามสัญญาเดิม + แนบ satang ไปด้วยใน extraFields (ถ้า service คุณรองรับ)
       final res = await ApiService.createPost(
         userId: widget.userId,
         text: _detailController.text.trim(),
@@ -175,18 +211,19 @@ class _NewPostScreenState extends State<NewPostScreen> {
         subject: selectedSubject,
         images: _images.map((x) => File(x.path)).toList(),
         file: _file,
-
-        // ---- ส่งราคาตามแบบใหม่ ----
-        priceType: _priceType,   // 'free' หรือ 'paid'
-        priceBaht: priceBaht,    // null ถ้า free
+        priceType: _priceType,                // 'free' | 'paid'
+        priceBaht: _priceType == 'paid'
+            ? (_priceCtrl.text.trim().isEmpty ? null : double.tryParse(_priceCtrl.text.replaceAll(',', '')))
+            : null,
+        // หากใน ApiService.createPost มีช่องให้ส่ง "extraFields" สำหรับ multipart:
+        // extraFields: priceSatang != null ? {'price_amount_satang': '$priceSatang'} : {},
       );
 
       if (!mounted) return;
       Navigator.pop(context); // ปิด loading
 
       if (res.statusCode == 201 || res.statusCode == 200) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('โพสต์สำเร็จ')));
+        _toast('โพสต์สำเร็จ');
         setState(() {
           _detailController.clear();
           _priceType = 'free';
@@ -198,16 +235,14 @@ class _NewPostScreenState extends State<NewPostScreen> {
           selectedSubject = subjects.isNotEmpty ? subjects.first : null;
         });
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('โพสต์ไม่สำเร็จ (${res.statusCode})')),
-        );
+        _toast('โพสต์ไม่สำเร็จ (${res.statusCode})');
       }
     } catch (e) {
       if (!mounted) return;
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')),
-      );
+      _toast('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
     }
   }
 
@@ -219,6 +254,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
   }
 
   // --------- เปิดหน้าเขียนโน้ต realtime ----------
+
   String _slugify(String s) {
     final t = s
         .toLowerCase()
@@ -239,13 +275,11 @@ class _NewPostScreenState extends State<NewPostScreen> {
         body: jsonEncode({'roomId': roomId, 'name': title}),
       );
       if (r.statusCode != 200) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('สร้างห้องไม่สำเร็จ (${r.statusCode})')),
-        );
+        _toast('สร้างห้องไม่สำเร็จ (${r.statusCode})');
         return;
       }
 
-      // parse response to get actual roomId (server returns roomId)
+      // parse response
       String createdRoomId = roomId;
       try {
         final Map<String, dynamic> j = jsonDecode(r.body) as Map<String, dynamic>;
@@ -254,7 +288,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
         }
       } catch (_) {}
 
-      // create socket and join room to enable realtime saving/loading
+      // connect socket
       final socket = IO.io(
         ApiService.host,
         IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
@@ -276,9 +310,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
       );
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('เชื่อมต่อเซิร์ฟเวอร์ realtime ไม่ได้')),
-      );
+      _toast('เชื่อมต่อเซิร์ฟเวอร์ realtime ไม่ได้');
     }
   }
 
@@ -331,6 +363,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
         .map((e) => DropdownMenuItem<String>(value: e, child: Text(e)))
         .toList();
 
+    final isPaid = _priceType == 'paid';
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('NewPost'),
@@ -377,15 +411,13 @@ class _NewPostScreenState extends State<NewPostScreen> {
                           isExpanded: true,
                           value: selectedYear,
                           items: years
-                              .map((e) =>
-                                  DropdownMenuItem(value: e, child: Text(e)))
+                              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                               .toList(),
                           onChanged: (val) {
                             if (val == null) return;
                             setState(() {
                               selectedYear = val;
-                              selectedSubject =
-                                  subjects.isNotEmpty ? subjects.first : null;
+                              selectedSubject = subjects.isNotEmpty ? subjects.first : null;
                             });
                           },
                         ),
@@ -406,41 +438,34 @@ class _NewPostScreenState extends State<NewPostScreen> {
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           isExpanded: true,
-                          value: subjects.contains(selectedSubject)
-                              ? selectedSubject
-                              : null,
+                          value: subjects.contains(selectedSubject) ? selectedSubject : null,
                           hint: const Text('รายวิชา'),
                           items: subjectItems,
                           selectedItemBuilder: (context) => subjects.map((e) {
-                            return Text(
-                              e,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            );
+                            return Text(e, maxLines: 1, overflow: TextOverflow.ellipsis);
                           }).toList(),
-                          onChanged: (val) =>
-                              setState(() => selectedSubject = val),
+                          onChanged: (val) => setState(() => selectedSubject = val),
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   ElevatedButton(
-                    onPressed: _handlePost,
+                    onPressed: _submitting ? null : _handlePost,
                     style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 12),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
-                    child: const Text('โพสต์'),
+                    child: _submitting
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                        : const Text('โพสต์'),
                   ),
                 ],
               ),
 
               const SizedBox(height: 16),
 
-              // ---- ส่วนกำหนดราคา (ใหม่) ----
+              // ---- ส่วนกำหนดราคา ----
               Row(
                 children: [
                   const Text('ราคา:'),
@@ -456,14 +481,20 @@ class _NewPostScreenState extends State<NewPostScreen> {
                     selected: _priceType == 'paid',
                     onSelected: (_) => setState(() => _priceType = 'paid'),
                   ),
+                  const SizedBox(width: 12),
+                  if (isPaid)
+                    Text(
+                      // แสดงคร่าว ๆ ให้คนโพสต์เห็นว่าสุดท้ายเป็นสตางค์เท่าไร
+                      '→ ${_priceCtrl.text.trim().isEmpty ? '' : _parseBahtToSatang(_priceCtrl.text).toString()} สต.',
+                      style: TextStyle(color: Colors.grey.shade700),
+                    ),
                 ],
               ),
-              if (_priceType == 'paid') ...[
+              if (isPaid) ...[
                 const SizedBox(height: 8),
                 TextField(
                   controller: _priceCtrl,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
                     labelText: 'ใส่ราคา (บาท)',
                     prefixText: '฿ ',
@@ -479,14 +510,16 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 children: [
                   IconButton(
                     icon: const Icon(Icons.image),
-                    onPressed: _pickImages,
+                    onPressed: _submitting ? null : _pickImages,
                     tooltip: 'เลือกรูปภาพ (หลายรูป)',
                   ),
                   IconButton(
                     icon: const Icon(Icons.attach_file),
-                    onPressed: _pickFile,
+                    onPressed: _submitting ? null : _pickFile,
                     tooltip: 'แนบไฟล์',
                   ),
+                  const SizedBox(width: 8),
+                  Text('รูป ${_images.length}/$_maxImages', style: TextStyle(color: Colors.grey.shade700)),
                 ],
               ),
               const SizedBox(height: 8),
@@ -496,8 +529,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 maxLines: 5,
                 decoration: InputDecoration(
                   hintText: 'รายละเอียดโพสต์',
-                  border:
-                      OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -518,11 +550,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                       const Icon(Icons.insert_drive_file, size: 20),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(
-                          _fileName!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
+                        child: Text(_fileName!, maxLines: 1, overflow: TextOverflow.ellipsis),
                       ),
                       const SizedBox(width: 8),
                       const Icon(Icons.check_circle, color: Colors.green),
@@ -534,7 +562,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
               Center(
                 child: ElevatedButton(
-                  onPressed: _openHandwriteRealtime,
+                  onPressed: _submitting ? null : _openHandwriteRealtime,
                   child: const Text('เขียนโน้ตด้วยลายมือ'),
                 ),
               ),
@@ -550,24 +578,15 @@ class _NewPostScreenState extends State<NewPostScreen> {
         onTap: (index) async {
           if (index == 0) {
             if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const homescreen()),
-            );
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const homescreen()));
           } else if (index == 1) {
             if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const SearchScreen()),
-            );
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const SearchScreen()));
           } else if (index == 2) {
             if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const DocumentsScreen()),
-            );
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const DocumentsScreen()));
           } else if (index == 3) {
-            // อยู่หน้า Add แล้ว ไม่ต้องทำอะไร
+            // อยู่หน้า Add แล้ว
           } else if (index == 4) {
             // ไปหน้าโปรไฟล์ถ้ามี
           }

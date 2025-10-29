@@ -41,6 +41,7 @@ dependencies:
   socket_io_client: ^2.0.3
   file_picker: ^8.0.0 
   open_file: ^3.2.1
+  qr_flutter: ^4.1.0
 
 
 dev_dependencies:

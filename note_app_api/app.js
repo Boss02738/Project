@@ -13,6 +13,9 @@ const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const dayjs = require("dayjs");
 const QRCode = require("qrcode");
+const session = require('express-session');
+const expressLayouts = require('express-ejs-layouts');
+
 
 // ====== DB POOL ======
 const pool = require("./models/db");
@@ -21,6 +24,8 @@ const pool = require("./models/db");
 const authRoutes = require("./routes/authRoutes");
 const postRoutes = require("./routes/postRoutes");
 const searchRoutes = require("./routes/searchRoutes");
+const adminRoutes = require('./routes/admin');
+const userRoutes = require('./routes/user');
 
 // ====== APP/HTTP SERVER/IO ======
 const app = express();
@@ -29,9 +34,19 @@ const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } 
 
 // ====== MIDDLEWARE ======
 app.use(cors());
+app.set('view engine', 'ejs');
+app.set('views', path.join(process.cwd(), 'views'));
 app.use(express.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ extended: true, limit: "50mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'devsecret',
+  resave: false,
+  saveUninitialized: false
+}));
+app.use(express.urlencoded({ extended: true }));
+app.use(expressLayouts);
+app.set('layout', 'layouts/main'); 
 
 // ====== MULTER (อัปโหลดสลิป + สื่ออื่น) ======
 const storage = multer.diskStorage({
@@ -51,6 +66,10 @@ const upload = multer({ storage });
 app.use("/api/auth", authRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/search", searchRoutes);
+app.use('/api/admin', adminRoutes);
+app.use('/api', userRoutes);
+app.use(require('./routes/purchases'));
+app.use(require('./routes/admin'));
 
 // ========== HEALTH ==========
 app.get("/", (_req, res) => res.send("NoteCoLab server ok (merged in note_app_api)"));

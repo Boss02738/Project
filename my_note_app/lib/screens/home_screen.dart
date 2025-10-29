@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/NewPost.dart';
 import 'package:my_note_app/screens/login_screen.dart';
 import 'package:my_note_app/screens/search_screen.dart';
-import 'package:my_note_app/widgets/post_card.dart';
 import 'package:my_note_app/screens/profile_screen.dart';
-import 'package:my_note_app/screens/payment_screen.dart';
+import 'package:my_note_app/screens/purchase_screen.dart';
+
+import 'package:my_note_app/widgets/post_card.dart';
+import 'package:my_note_app/widgets/purchased_overlay.dart';
 
 class homescreen extends StatefulWidget {
   const homescreen({super.key});
@@ -22,9 +25,6 @@ class _HomeState extends State<homescreen> {
   int? _userId;
   String? _username;
   bool _loadingUser = true;
-
-  // เก็บ id โพสต์ที่กำลัง “ขยายข้อความ”
-  final Set<int> _expandedPosts = {};
 
   @override
   void initState() {
@@ -55,26 +55,105 @@ class _HomeState extends State<homescreen> {
   }
 
   Future<void> _reload() async {
+    if (_userId == null) return;
     setState(() => _futureFeed = ApiService.getFeed(_userId!));
   }
 
-  // เวลาแบบย่อ
-  String _timeAgo(String? iso) {
-    if (iso == null || iso.isEmpty) return '';
-    DateTime dt;
+  // ---------- helpers แปลงชนิด ----------
+  int _asInt(dynamic v, {int fallback = 0}) {
+    if (v is int) return v;
+    if (v is String) return int.tryParse(v) ?? fallback;
+    return fallback;
+  }
+
+  String _asStr(dynamic v, {String fallback = ''}) {
+    if (v == null) return fallback;
+    return v.toString();
+  }
+
+  DateTime _asDate(dynamic v) {
     try {
-      dt = DateTime.parse(iso).toLocal();
+      return DateTime.parse(v.toString());
     } catch (_) {
-      return '';
+      return DateTime.now().add(const Duration(minutes: 10));
     }
-    final diff = DateTime.now().difference(dt);
-    if (diff.inSeconds < 60) return '${diff.inSeconds} วิ.';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} นาที';
-    if (diff.inHours < 24) return '${diff.inHours} ชม.';
-    if (diff.inDays < 7) return '${diff.inDays} วัน';
-    final m = dt.month.toString().padLeft(2, '0');
-    final d = dt.day.toString().padLeft(2, '0');
-    return '${dt.year}/$m/$d';
+  }
+
+  // ===== กด “ซื้อ” ที่แถวราคา =====
+  Future<void> _handleBuy({
+    required int postId,
+    required int amountSatang,
+  }) async {
+    if (_userId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('กรุณาเข้าสู่ระบบก่อนซื้อโพสต์')),
+      );
+      return;
+    }
+
+    Map<String, dynamic>? created;
+    try {
+      // ใช้เมธอดที่ประกาศใน ApiService (คืน {id, amount_satang, qr_payload, expires_at})
+      created = await ApiService.startPurchase(
+        postId: postId,
+        buyerId: _userId!,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('สร้างคำสั่งซื้อไม่สำเร็จ : $e')));
+      return;
+    }
+
+    if (created == null ||
+        created['id'] == null ||
+        created['qr_payload'] == null ||
+        created['expires_at'] == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('สร้างคำสั่งซื้อไม่สำเร็จ')),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PurchaseScreen(
+          purchaseId: _asInt(created!['id']),
+          amountSatang:
+              _asInt(created!['amount_satang'], fallback: amountSatang),
+          qrPayload: _asStr(created!['qr_payload']),
+          expiresAt: _asDate(created!['expires_at']),
+        ),
+      ),
+    );
+
+    await _reload();
+  }
+
+  // แถบ “ราคา + ปุ่มซื้อ”
+  Widget _paidBar({required int postId, required int amountSatang}) {
+    final priceBaht = amountSatang / 100.0;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      child: Row(
+        children: [
+          Text(
+            '฿${priceBaht.toStringAsFixed(2)}',
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const Spacer(),
+          OutlinedButton(
+            onPressed: () =>
+                _handleBuy(postId: postId, amountSatang: amountSatang),
+            child: const Text('ซื้อ'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -84,6 +163,7 @@ class _HomeState extends State<homescreen> {
     }
 
     final screens = [
+      // ===================== HOME (ฟีด) =====================
       FutureBuilder<List<dynamic>>(
         future: _futureFeed,
         builder: (context, snap) {
@@ -123,26 +203,22 @@ class _HomeState extends State<homescreen> {
               itemBuilder: (_, i) {
                 final p = feed[i] as Map<String, dynamic>;
 
-                // อ่านชนิดราคาและราคา (บาท) จากโพสต์
                 final String priceType = (p['price_type'] ?? 'free').toString();
                 final bool isPaid = priceType == 'paid';
-                final int satang = (p['price_amount_satang'] ?? 0) is int
+                final int amountSatang = (p['price_amount_satang'] ?? 0) is int
                     ? p['price_amount_satang'] as int
                     : int.tryParse('${p['price_amount_satang']}') ?? 0;
-                final double priceBaht = satang / 100.0;
 
-                // postId เป็น int
-                final int postId = p['id'] is int ? p['id'] as int : int.parse('${p['id']}');
+                final int postId = p['id'] is int
+                    ? p['id'] as int
+                    : int.parse('${p['id']}');
 
-                // การ์ดโพสต์ "เดิม" (ไม่แตะโค้ดข้างใน)
                 final postCard = PostCard(post: p);
 
-                // ถ้าเป็นโพสต์ฟรี แสดงแค่การ์ดเดิม
-                if (!isPaid) {
-                  return postCard;
-                }
+                // โพสต์ฟรี → แสดงการ์ดปกติ
+                if (!isPaid) return postCard;
 
-                // เป็นโพสต์เสียเงิน → เช็คสิทธิ์ (hasAccess) เฉพาะเมื่อเป็น paid
+                // โพสต์เสียเงิน → ตรวจ hasAccess ภายใน FutureBuilder
                 return FutureBuilder<Map<String, dynamic>>(
                   future: ApiService.getPostDetail(
                     postId: postId,
@@ -152,42 +228,32 @@ class _HomeState extends State<homescreen> {
                     final bool hasAccess =
                         (detailSnap.data?['hasAccess'] == true);
 
-                    // แถว “ราคา + ปุ่มซื้อ” ใต้การ์ด เฉพาะกรณี paid และยังไม่มีสิทธิ์
-                    final priceBar = (!hasAccess)
-                        ? Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                            child: Row(
-                              children: [
-                                Text(
-                                  '${priceBaht.toStringAsFixed(2)} ฿',
-                                  style: const TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                                const Spacer(),
-                                OutlinedButton(
-                                  onPressed: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (_) => PaymentScreen(
-                                          postId: postId,
-                                          buyerId: _userId!,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  child: const Text('ซื้อ'),
-                                ),
-                              ],
-                            ),
-                          )
-                        : const SizedBox.shrink();
+                    // ระหว่างโหลดสิทธิ์ แสดงการ์ดปกติ
+                    if (detailSnap.connectionState ==
+                        ConnectionState.waiting) {
+                      return postCard;
+                    }
 
-                    // รวมเป็นหนึ่งบล็อค โดย "ไม่แก้หน้าตา PostCard"
+                    if (hasAccess) {
+                      // มีสิทธิ์แล้ว → ครอบป้าย "ซื้อแล้ว"
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          PurchasedOverlay(child: postCard),
+                          const SizedBox(height: 8),
+                        ],
+                      );
+                    }
+
+                    // ยังไม่มีสิทธิ์ → แสดงราคา + ปุ่มซื้อ
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         postCard,
-                        priceBar,
+                        _paidBar(
+                          postId: postId,
+                          amountSatang: amountSatang,
+                        ),
                       ],
                     );
                   },
@@ -197,26 +263,30 @@ class _HomeState extends State<homescreen> {
           );
         },
       ),
+
+      // ===================== SEARCH =====================
       const SearchScreen(),
+
+      // ===================== ADD =====================
       const Center(child: Text('Add Screen')),
-      // show profile screen as one of the tab pages; pass current _userId (may be null)
+
+      // ===================== PROFILE =====================
       ProfileScreen(userId: _userId),
     ];
 
     return Scaffold(
       appBar: (_currentIndex == 3)
-    ? null // ❌ ซ่อน AppBar ตอนอยู่หน้า Profile
-    : AppBar(
-        title: Text(
-          _currentIndex == 1
-              ? 'Search'
-              : _currentIndex == 0
-                  ? 'Home'
-                  : 'Note app',
-        ),
-        automaticallyImplyLeading: false,
-      ),
-
+          ? null
+          : AppBar(
+              title: Text(
+                _currentIndex == 1
+                    ? 'Search'
+                    : _currentIndex == 0
+                        ? 'Home'
+                        : 'Note app',
+              ),
+              automaticallyImplyLeading: false,
+            ),
       body: Column(children: [Expanded(child: screens[_currentIndex])]),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
@@ -225,13 +295,15 @@ class _HomeState extends State<homescreen> {
         type: BottomNavigationBarType.fixed,
         onTap: (index) async {
           if (index == 2) {
-            await Navigator.push(
+            if (_userId == null) return;
+            final changed = await Navigator.push<bool>(
               context,
               MaterialPageRoute(
                 builder: (_) =>
                     NewPostScreen(userId: _userId!, username: _username ?? ''),
               ),
             );
+            if (changed == true) await _reload();
           } else if (index == 1) {
             await Navigator.push(
               context,

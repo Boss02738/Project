@@ -1,0 +1,36 @@
+<h3>Purchases (<%= status %>)</h3>
+<table role="grid">
+  <thead>
+    <tr>
+      <th>ID</th><th>Buyer</th><th>Seller</th><th>Post</th>
+      <th>Amount</th><th>Slip</th><th>Created</th><th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    <% rows.forEach(r => { %>
+      <tr>
+        <td><%= r.id %></td>
+        <td><%= r.buyer_name %> (#<%= r.buyer_id %>)</td>
+        <td><%= r.seller_name %> (#<%= r.seller_id %>)</td>
+        <td style="max-width:320px"><%= (r.post_text||'').slice(0,120) %></td>
+        <td class="price">฿<%= (r.amount_satang/100).toFixed(2) %></td>
+        <td>
+          <% if (r.slip_path) { %>
+            <a href="<%= r.slip_path %>" target="_blank">
+              <img class="slip" src="<%= r.slip_path %>" />
+            </a>
+          <% } else { %><em>no slip</em><% } %>
+        </td>
+        <td><%= new Date(r.created_at).toLocaleString() %></td>
+        <td>
+          <form method="post" action="/admin/purchases/<%= r.id %>/approve" style="display:inline">
+            <button type="submit">Approve</button>
+          </form>
+          <form method="post" action="/admin/purchases/<%= r.id %>/reject" style="display:inline">
+            <button type="submit" class="secondary">Reject</button>
+          </form>
+        </td>
+      </tr>
+    <% }) %>
+  </tbody>
+</table>

@@ -406,6 +406,27 @@ const getPostDetail = async (req, res) => {
   }
 };
 
+exports.getPostDetail = async (req, res) => {
+  const postId = req.params.id;
+  const viewerId = Number(req.query.viewer_id || 0);
+
+  const { rows } = await pool.query(
+    `SELECT p.*,
+            CASE
+              WHEN p.price_type='free' THEN true
+              WHEN p.user_id=$2 THEN true
+              WHEN EXISTS (SELECT 1 FROM post_access pa WHERE pa.post_id=p.id AND pa.user_id=$2)
+                THEN true
+              ELSE false
+            END AS has_access
+       FROM posts p
+      WHERE p.id=$1`,
+    [postId, viewerId]
+  );
+  if (!rows.length) return res.status(404).json({ error:'not found' });
+  res.json(rows[0]);
+};
+
 module.exports = {
   createPost,
   getFeed,

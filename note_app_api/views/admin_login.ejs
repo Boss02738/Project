@@ -1,0 +1,10 @@
+<h3>Admin login</h3>
+<form method="post" action="/admin/login">
+  <label>Password
+    <input type="password" name="password" required />
+  </label>
+  <% if (error) { %>
+    <small style="color:crimson"><%= error %></small>
+  <% } %>
+  <button type="submit">Sign in</button>
+</form>
