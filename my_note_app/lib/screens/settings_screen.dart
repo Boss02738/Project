@@ -10,6 +10,7 @@ import 'package:my_note_app/screens/liked_posts_screen.dart';
 import 'package:my_note_app/screens/deleted_posts_screen.dart';
 import 'package:my_note_app/screens/purchased_posts_feed_screen.dart';
 import 'package:my_note_app/screens/login_screen.dart';
+import 'package:my_note_app/screens/change_password_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -141,6 +142,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
+                    _SettingsItem(
+  icon: Icons.lock_outline,
+  title: 'Change Password',
+  onTap: () {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChangePasswordScreen(userId: _userId!),
+      ),
+    );
+  },
+),
 
                     _SettingsItem(
                       icon: Icons.logout,

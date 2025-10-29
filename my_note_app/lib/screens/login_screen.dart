@@ -6,6 +6,8 @@ import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/register_screen.dart';
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/create_profile_screen.dart';
+import 'package:my_note_app/screens/reset_password_screen.dart';
+
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -68,9 +70,9 @@ class _LoginScreenState extends State<LoginScreen> {
         }
 
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('เข้าสู่ระบบสำเร็จ')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('เข้าสู่ระบบสำเร็จ')));
 
         if (needProfile) {
           // ครั้งแรกหลังสมัคร → ไปสร้างโปรไฟล์
@@ -153,17 +155,26 @@ class _LoginScreenState extends State<LoginScreen> {
                           decoration: _input(
                             'Password',
                             suffix: IconButton(
-                              icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
-                              onPressed: () => setState(() => _obscure = !_obscure),
+                              icon: Icon(
+                                _obscure
+                                    ? Icons.visibility
+                                    : Icons.visibility_off,
+                              ),
+                              onPressed: () =>
+                                  setState(() => _obscure = !_obscure),
                             ),
                           ),
-                          validator: (v) => (v == null || v.isEmpty) ? 'กรอกรหัสผ่าน' : null,
+                          validator: (v) =>
+                              (v == null || v.isEmpty) ? 'กรอกรหัสผ่าน' : null,
                         ),
                         const SizedBox(height: 10),
                         TextButton(
                           onPressed: () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('ยังไม่ทำลืมรหัสผ่าน')),
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const ResetPasswordScreen(),
+                              ),
                             );
                           },
                           child: const Text('Forget the password?'),
@@ -185,7 +196,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     onPressed: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => const RegisterScreen(),
+                        ),
                       );
                     },
                     child: const Text('Don’t have an account? Sign up'),

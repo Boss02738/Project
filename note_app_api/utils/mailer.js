@@ -10,6 +10,9 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// =============================
+// ฟังก์ชันส่ง OTP สำหรับ "สมัครสมาชิก"
+// =============================
 async function sendOTP(to, otp, minutes = 5) {
   return transporter.sendMail({
     from: process.env.MAIL_FROM,
@@ -18,12 +21,34 @@ async function sendOTP(to, otp, minutes = 5) {
     html: `
       <div style="font-family:Segoe UI,Arial">
         <h2>ยืนยันอีเมลสำหรับสมัครสมาชิก</h2>
-        <p>รหัส OTP ของคุณ:</p>
+        <p>รหัส OTP ของคุณคือ:</p>
         <p style="font-size:24px;letter-spacing:2px"><b>${otp}</b></p>
+        <p>กรุณานำรหัสนี้ไปกรอกในหน้าแอปเพื่อยืนยันบัญชีของคุณ</p>
         <p>รหัสจะหมดอายุใน ${minutes} นาที</p>
       </div>
     `,
   });
 }
 
-module.exports = { sendOTP };
+// =============================
+// ฟังก์ชันส่ง OTP สำหรับ "รีเซ็ตรหัสผ่าน"
+// =============================
+async function sendOTP_ResetPassword(to, otp, minutes = 5) {
+  return transporter.sendMail({
+    from: process.env.MAIL_FROM,
+    to,
+    subject: `OTP สำหรับรีเซ็ตรหัสผ่าน (หมดอายุใน ${minutes} นาที)`,
+    html: `
+      <div style="font-family:Segoe UI,Arial">
+        <h2>คำขอรีเซ็ตรหัสผ่าน</h2>
+        <p>คุณได้รับอีเมลนี้เพราะมีการร้องขอให้รีเซ็ตรหัสผ่านบัญชีของคุณ</p>
+        <p>รหัส OTP สำหรับยืนยันตัวตนคือ:</p>
+        <p style="font-size:24px;letter-spacing:2px"><b>${otp}</b></p>
+        <p>รหัสนี้จะหมดอายุใน ${minutes} นาที</p>
+        <p>หากคุณไม่ได้ร้องขอรีเซ็ตรหัสผ่าน โปรดเพิกเฉยต่ออีเมลนี้</p>
+      </div>
+    `,
+  });
+}
+
+module.exports = { sendOTP, sendOTP_ResetPassword };

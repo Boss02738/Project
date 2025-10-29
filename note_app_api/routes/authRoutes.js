@@ -16,6 +16,9 @@ const {
   getUserBrief,
   updateProfileById,
   uploadAvatarById,
+  startResetPassword,
+  resetPassword,
+  changePassword,
 } = require('../controllers/authController');
 
 // ---------- เตรียมโฟลเดอร์อัปโหลดเฉพาะอวาตาร์ ----------
@@ -47,15 +50,20 @@ const uploadAvatarMulter = multer({
 
 // ---------- Auth / OTP ----------
 router.post('/register/request-otp', startRegister);
-router.post('/register/verify',       verifyRegister);
-router.post('/register/resend-otp',   resendOtp);
+router.post('/register/verify', verifyRegister);
+router.post('/register/resend-otp', resendOtp);
 
 // ---------- Login ----------
 router.post('/login', login);
+// reset password
+router.post('/password/request-otp', startResetPassword);
+router.post('/password/reset', resetPassword);
+router.post('/change-password', changePassword);
+
 
 // ---------- Profile ----------
-router.post('/profile/update',  updateProfile);
-router.post('/profile/avatar',  uploadAvatarMulter.single('avatar'), uploadAvatar);
+router.post('/profile/update', updateProfile);
+router.post('/profile/avatar', uploadAvatarMulter.single('avatar'), uploadAvatar);
 router.post('/profile/update-by-id', updateProfileById); // << เพิ่ม
 router.post('/profile/avatar-by-id',
   uploadAvatarMulter.single('avatar'),
