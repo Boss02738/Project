@@ -100,7 +100,8 @@ class _GalleryViewerState extends State<GalleryViewer> {
 // ====================== Post Card ======================
 class PostCard extends StatefulWidget {
   final Map<String, dynamic> post;
-  const PostCard({super.key, required this.post});
+  final VoidCallback? onDeleted; // callback เมื่อ archive สำเร็จ
+  const PostCard({super.key, required this.post, this.onDeleted});
 
   @override
   State<PostCard> createState() => _PostCardState();
@@ -118,7 +119,6 @@ class _PostCardState extends State<PostCard> {
     try {
       final response = await http.get(Uri.parse(url));
       if (response.statusCode == 200) {
-        // First try: save to public Downloads on Android so user can access file easily
         if (Platform.isAndroid) {
           try {
             final externalDir = Directory('/sdcard/Download');
@@ -127,13 +127,8 @@ class _PostCardState extends State<PostCard> {
             final publicFile = File(publicPath);
             await publicFile.writeAsBytes(response.bodyBytes);
             return publicFile.path;
-          } catch (e) {
-            // ignore and fallback to app directory
-            debugPrint('Write to external Download failed, fallback: $e');
-          }
+          } catch (_) {}
         }
-
-        // Fallback: save inside app documents directory
         final dir = await getApplicationDocumentsDirectory();
         final filePath = '${dir.path}/$fileName';
         final file = await File(filePath).writeAsBytes(response.bodyBytes);
@@ -204,7 +199,7 @@ class _PostCardState extends State<PostCard> {
       setState(() => _savedByMe = saved);
     } catch (_) {}
   }
-  // ---------- Comments ----------
+
   Future<void> _openComments() async {
     final postId = widget.post['id'] as int?;
     if (postId == null) return;
@@ -265,6 +260,46 @@ class _PostCardState extends State<PostCard> {
     return '${dt.year}/${dt.month}/${dt.day}';
   }
 
+Future<void> _confirmAndArchive() async {
+  final postId = widget.post['id'] as int?;
+  if (postId == null || _userId == null) return;
+
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('ลบโพสต์ (เก็บไว้ส่วนตัว)'),
+      content: const Text('ย้ายโพสต์นี้ไปยังรายการลบ (สามารถกู้คืนได้ใน Settings) ?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
+        ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('ยืนยัน')),
+      ],
+    ),
+  );
+  if (ok != true) return;
+
+  try {
+    final success = await ApiService().archivePost(postId, _userId!);
+    if (!mounted) return;
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ย้ายไปที่ Deleted แล้ว')),
+      );
+      // ใช้อันไหนก็ได้ตามที่ตั้งไว้ใน widget
+      widget.onDeleted?.call();
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('ล้มเหลว: server ไม่ยอมรับคำสั่ง')),
+      );
+    }
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('ล้มเหลว: $e')),
+    );
+  }
+}
+
+
   @override
   Widget build(BuildContext context) {
     final p = widget.post;
@@ -285,6 +320,16 @@ class _PostCardState extends State<PostCard> {
 
     final showSeeMore = text.trim().length > 80;
 
+    // ตรวจว่าเจ้าของโพสต์ใช่เราหรือไม่ (รองรับทั้ง author_id/user_id)
+    int? ownerId;
+    final rawOwner = p['author_id'] ?? p['user_id'];
+    if (rawOwner is int) ownerId = rawOwner;
+    else if (rawOwner != null) {
+      final parsed = int.tryParse('$rawOwner');
+      if (parsed != null) ownerId = parsed;
+    }
+    final canDelete = (ownerId != null && _userId != null && ownerId == _userId);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
@@ -296,31 +341,37 @@ class _PostCardState extends State<PostCard> {
               radius: 22,
               backgroundImage: avatar.isNotEmpty
                   ? NetworkImage('${ApiService.host}$avatar')
-                  : const AssetImage('assets/default_avatar.png')
-                      as ImageProvider,
+                  : const AssetImage('assets/default_avatar.png') as ImageProvider,
             ),
             title: Row(
               children: [
                 Expanded(
-                  child: Text(name,
-                      style: const TextStyle(fontWeight: FontWeight.bold)),
+                  child: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
                 ),
                 if (year.isNotEmpty)
                   Container(
                     margin: const EdgeInsets.only(left: 6),
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                        color: const Color(0xFFEFF4FF),
-                        borderRadius: BorderRadius.circular(999)),
-                    child: Text(year,
-                        style: const TextStyle(
-                            fontSize: 11, color: Color(0xFF335CFF))),
+                      color: const Color(0xFFEFF4FF),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(year, style: const TextStyle(fontSize: 11, color: Color(0xFF335CFF))),
                   ),
               ],
             ),
             subtitle: Text(subject, overflow: TextOverflow.ellipsis),
-            trailing: const Icon(Icons.more_horiz),
+            trailing: canDelete
+                ? PopupMenuButton<String>(
+                    onSelected: (v) {
+                      if (v == 'delete') _confirmAndArchive();
+                    },
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(value: 'delete', child: Text('Delete post')),
+                    ],
+                    icon: const Icon(Icons.more_horiz),
+                  )
+                : const Icon(Icons.more_horiz),
           ),
 
           // Images Grid
@@ -347,7 +398,6 @@ class _PostCardState extends State<PostCard> {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('ไฟล์ถูกดาวน์โหลดไปที่ $savePath')),
                     );
-                    // เปิดไฟล์ทันที
                     try {
                       await OpenFile.open(savePath);
                     } catch (e) {
@@ -355,7 +405,7 @@ class _PostCardState extends State<PostCard> {
                     }
                   } else {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('ดาวน์โหลดไฟล์ไม่สำเร็จ')),
+                      const SnackBar(content: Text('ดาวน์โหลดไฟล์ไม่สำเร็จ')),
                     );
                   }
                 },
@@ -385,8 +435,8 @@ class _PostCardState extends State<PostCard> {
                           color: const Color(0xFFEFF4FF),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: Row(
-                          children: const [
+                        child: const Row(
+                          children: [
                             Icon(Icons.download_rounded, size: 18, color: Color(0xFF335CFF)),
                             SizedBox(width: 2),
                             Text('ดาวน์โหลด', style: TextStyle(fontSize: 12, color: Color(0xFF335CFF))),
@@ -404,22 +454,19 @@ class _PostCardState extends State<PostCard> {
             padding: const EdgeInsets.only(left: 6, right: 6, top: 6),
             child: Row(children: [
               IconButton(
-                icon: Icon(
-                    _likedByMe ? Icons.favorite : Icons.favorite_border),
+                icon: Icon(_likedByMe ? Icons.favorite : Icons.favorite_border),
                 onPressed: _toggleLike,
               ),
               Text('$_likeCount'),
               const SizedBox(width: 12),
-               IconButton(
-                  icon: const Icon(Icons.mode_comment_outlined),
-                  onPressed: _openComments,
-                ),
+              IconButton(
+                icon: const Icon(Icons.mode_comment_outlined),
+                onPressed: _openComments,
+              ),
               Text('$_commentCount'),
               const Spacer(),
               IconButton(
-                icon: Icon(_savedByMe
-                    ? Icons.bookmark
-                    : Icons.bookmark_border_outlined),
+                icon: Icon(_savedByMe ? Icons.bookmark : Icons.bookmark_border_outlined),
                 onPressed: _toggleSave,
               ),
             ]),
@@ -429,39 +476,30 @@ class _PostCardState extends State<PostCard> {
           if (text.trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text.rich(
-                      TextSpan(children: [
-                        TextSpan(
-                            text: '$name ',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                color: Colors.black)),
-                        TextSpan(
-                            text: text,
-                            style: const TextStyle(color: Colors.black87))
-                      ]),
-                      maxLines: isExpanded ? null : 2,
-                      overflow: isExpanded
-                          ? TextOverflow.visible
-                          : TextOverflow.ellipsis,
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text.rich(
+                  TextSpan(children: [
+                    TextSpan(
+                      text: '$name ',
+                      style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black),
                     ),
-                    if (showSeeMore)
-                      TextButton(
-                        onPressed: () =>
-                            setState(() => isExpanded = !isExpanded),
-                        child: Text(isExpanded ? 'ย่อ' : 'ดูเพิ่มเติม'),
-                      )
+                    TextSpan(text: text, style: const TextStyle(color: Colors.black87))
                   ]),
+                  maxLines: isExpanded ? null : 2,
+                  overflow: isExpanded ? TextOverflow.visible : TextOverflow.ellipsis,
+                ),
+                if (showSeeMore)
+                  TextButton(
+                    onPressed: () => setState(() => isExpanded = !isExpanded),
+                    child: Text(isExpanded ? 'ย่อ' : 'ดูเพิ่มเติม'),
+                  )
+              ]),
             ),
 
           // Time
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-            child:
-                Text(_timeAgo(created), style: const TextStyle(color: Colors.grey)),
+            child: Text(_timeAgo(created), style: const TextStyle(color: Colors.grey)),
           ),
         ],
       ),
@@ -474,8 +512,7 @@ class _SmartImageGrid extends StatelessWidget {
   final int postId;
   final List<String> images;
   final void Function(int index)? onTap;
-  const _SmartImageGrid(
-      {required this.postId, required this.images, this.onTap});
+  const _SmartImageGrid({required this.postId, required this.images, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -484,29 +521,26 @@ class _SmartImageGrid extends StatelessWidget {
     final remaining = total > 6 ? total - 5 : 0;
 
     if (showCount == 5) {
-      // เคส 5 รูป
       return Column(children: [
         _RowGap(
           gap: 6,
-          children: List.generate(
-              3,
-              (i) => _ImageTile(
-                  url: images[i],
-                  tag: 'post_img_${postId}_$i',
-                  onTap: () => onTap?.call(i))),
+          children: List.generate(3, (i) => _ImageTile(
+                url: images[i],
+                tag: 'post_img_${postId}_$i',
+                onTap: () => onTap?.call(i),
+              )),
         ),
         const SizedBox(height: 6),
         _RowGap(
           gap: 6,
-          children: List.generate(
-              2,
-              (i) {
-                final idx = 3 + i;
-                return _ImageTile(
-                    url: images[idx],
-                    tag: 'post_img_${postId}_$idx',
-                    onTap: () => onTap?.call(idx));
-              }),
+          children: List.generate(2, (i) {
+            final idx = 3 + i;
+            return _ImageTile(
+              url: images[idx],
+              tag: 'post_img_${postId}_$idx',
+              onTap: () => onTap?.call(idx),
+            );
+          }),
         )
       ]);
     }
@@ -526,10 +560,11 @@ class _SmartImageGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       itemCount: showCount,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: crossAxisCount,
-          mainAxisSpacing: 6,
-          crossAxisSpacing: 6,
-          childAspectRatio: 1),
+        crossAxisCount: crossAxisCount,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
+        childAspectRatio: 1,
+      ),
       itemBuilder: (_, i) {
         final isLast = total > 6 && i == 5;
         final url = images[i];
@@ -540,17 +575,14 @@ class _SmartImageGrid extends StatelessWidget {
             Container(
               color: Colors.black45,
               alignment: Alignment.center,
-              child: Text('+$remaining',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold)),
+              child: Text(
+                '+$remaining',
+                style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold),
+              ),
             )
           ]);
         }
-        return GestureDetector(
-            onTap: () => onTap?.call(i),
-            child: Hero(tag: tag, child: _Thumb(url: url)));
+        return GestureDetector(onTap: () => onTap?.call(i), child: Hero(tag: tag, child: _Thumb(url: url)));
       },
     );
   }
@@ -587,11 +619,14 @@ class _Thumb extends StatelessWidget {
   @override
   Widget build(BuildContext context) => ClipRRect(
         borderRadius: BorderRadius.circular(10),
-        child: Image.network(url, fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) =>
-                const Icon(Icons.broken_image_outlined, size: 32)),
+        child: Image.network(
+          url,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, size: 32),
+        ),
       );
 }
+
 // ====================== BottomSheet: Comments ======================
 class _CommentsSheet extends StatefulWidget {
   final int postId;
@@ -633,19 +668,13 @@ class _CommentsSheetState extends State<_CommentsSheet> {
     final t = _controller.text.trim();
     if (t.isEmpty || _userId == null) return;
     try {
-      await ApiService.addComment(
-        postId: widget.postId,
-        userId: _userId!,
-        text: t,
-      );
+      await ApiService.addComment(postId: widget.postId, userId: _userId!, text: t);
       _controller.clear();
       widget.onCommentAdded();
       await _refresh();
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('ส่งคอมเมนต์ไม่สำเร็จ')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('ส่งคอมเมนต์ไม่สำเร็จ')));
     }
   }
 
@@ -653,18 +682,13 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   Widget build(BuildContext context) {
     return SafeArea(
       child: Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
+        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
         child: SizedBox(
           height: MediaQuery.of(context).size.height * 0.6,
           child: Column(
             children: [
               const SizedBox(height: 8),
-              const Text(
-                'ความคิดเห็น',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
+              const Text('ความคิดเห็น', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Expanded(
                 child: _loading
@@ -680,7 +704,6 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                           final text = c['text'] ?? '';
                           final createdAt = c['created_at'] ?? '';
 
-                          // เวลาแบบย่อด้านขวาหลังชื่อ
                           String timeLabel = '';
                           if (createdAt.toString().isNotEmpty) {
                             try {
@@ -704,30 +727,19 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                             leading: CircleAvatar(
                               backgroundImage: avatar.toString().isNotEmpty
                                   ? NetworkImage('${ApiService.host}$avatar')
-                                  : const AssetImage(
-                                          'assets/default_avatar.png',
-                                        )
-                                        as ImageProvider,
+                                  : const AssetImage('assets/default_avatar.png') as ImageProvider,
                             ),
                             title: Row(
                               children: [
                                 Expanded(
                                   child: Text(
                                     name,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                                    style: const TextStyle(fontWeight: FontWeight.w600),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                                 const SizedBox(width: 6),
-                                Text(
-                                  timeLabel,
-                                  style: const TextStyle(
-                                    color: Colors.grey,
-                                    fontSize: 12,
-                                  ),
-                                ),
+                                Text(timeLabel, style: const TextStyle(color: Colors.grey, fontSize: 12)),
                               ],
                             ),
                             subtitle: Text(text),

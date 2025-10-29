@@ -82,4 +82,12 @@ router.get ('/posts/:id/save/status', post.getSavedStatus);
 router.get ('/saved',                 post.getSavedPosts);
 //Profile 
 router.get('/user/:id', post.getPostsByUser);
+
+
+//delete post
+// ✅ เส้นทางเก็บโพสต์
+router.post('/:id/archive', post.archivePost);        // /api/posts/:id/archive
+router.post('/:id/unarchive', post.unarchivePost);    // /api/posts/:id/unarchive
+router.get('/archived', post.getArchivedPosts);       // /api/posts/archived
+router.delete('/:id', post.hardDeletePost);      
 module.exports = router;
