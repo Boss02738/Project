@@ -1,7 +1,7 @@
 const bcrypt = require('bcrypt');
 const pool = require('../models/db');
 const { genOTP } = require('../utils/otp');
-const { sendOTP } = require('../utils/mailer');
+const { sendOTP, sendOTP_ResetPassword } = require('../utils/mailer');
 
 // เวลา OTP หมดอายุ (นาที)
 const OTP_EXPIRE_MIN = Number(process.env.OTP_EXPIRE_MIN || 5);
@@ -221,7 +221,7 @@ const updateProfile = async (req, res) => {
   const { email, bio, gender } = req.body;
   if (!email) return res.status(400).json({ message: 'ต้องมี email' });
 
-  const allow = new Set(['male','female','other']);
+  const allow = new Set(['male', 'female', 'other']);
   if (gender && !allow.has(String(gender).toLowerCase())) {
     return res.status(400).json({ message: 'ค่า gender ไม่ถูกต้อง' });
   }
@@ -355,5 +355,109 @@ const uploadAvatarById = async (req, res) => {
     return res.status(500).json({ message: 'อัปโหลดรูปไม่สำเร็จ' });
   }
 };
+const startResetPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'ต้องใส่ email' });
+    if (!isValidKuEmail(email)) {
+      return res.status(400).json({ message: 'อนุญาตเฉพาะอีเมล @ku.th เท่านั้น' });
+    }
 
-module.exports = { startRegister, verifyRegister, resendOtp, login, updateProfile, uploadAvatar, getUserBrief, updateProfileById, uploadAvatarById };
+    // ต้องมี user นี้อยู่
+    const u = await pool.query('SELECT id_user FROM public.users WHERE email=$1', [email]);
+    if (u.rowCount === 0) return res.status(404).json({ message: 'ไม่พบบัญชีนี้' });
+
+    // คูลดาวน์
+    const last = await pool.query(`
+      SELECT created_at FROM public.verification_password
+      WHERE email=$1 AND purpose='reset'
+      ORDER BY created_at DESC LIMIT 1`, [email]);
+    if (last.rowCount > 0) {
+      const diff = (Date.now() - new Date(last.rows[0].created_at).getTime()) / 1000;
+      if (diff < RESEND_COOLDOWN) {
+        return res.status(429).json({
+          message: `ขอ OTP ได้อีกใน ${Math.ceil(RESEND_COOLDOWN - diff)} วิ`,
+          retry_after_sec: Math.ceil(RESEND_COOLDOWN - diff)
+        });
+      }
+    }
+
+    // สร้าง/เก็บ OTP
+    const otp = genOTP(6);
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + OTP_EXPIRE_MIN * 60 * 1000);
+
+    await pool.query(`DELETE FROM public.verification_password WHERE email=$1 AND purpose='reset'`, [email]);
+    await pool.query(`
+      INSERT INTO public.verification_password(email, otp, purpose, expires_at)
+      VALUES ($1,$2,'reset',$3)`, [email, otp, expiresAt]);
+
+    await sendOTP_ResetPassword(email, otp, OTP_EXPIRE_MIN);
+    return res.json({
+      message: 'ส่ง OTP สำหรับรีเซ็ตรหัสผ่านแล้ว',
+      email,
+      ttl_min: OTP_EXPIRE_MIN,
+      resend_after_sec: RESEND_COOLDOWN
+    });
+  } catch (err) {
+    console.error('startResetPassword error:', err);
+    return res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
+  }
+};
+
+const resetPassword = async (req, res) => {
+  try {
+    const { email, otp, new_password } = req.body;
+    if (!email || !otp || !new_password) {
+      return res.status(400).json({ message: 'กรอก email, otp, new_password ให้ครบ' });
+    }
+    if (!isValidKuEmail(email)) {
+      return res.status(400).json({ message: 'อนุญาตเฉพาะอีเมล @ku.th เท่านั้น' });
+    }
+    if (String(otp).length !== 6) {
+      return res.status(400).json({ message: 'OTP ไม่ถูกต้อง' });
+    }
+
+    // ตรวจ OTP
+    const q = await pool.query(`
+      SELECT id, expires_at FROM public.verification_password
+      WHERE email=$1 AND otp=$2 AND purpose='reset'
+      ORDER BY created_at DESC LIMIT 1`, [email, otp]);
+    if (q.rowCount === 0) return res.status(400).json({ message: 'OTP ไม่ถูกต้อง' });
+    if (new Date(q.rows[0].expires_at).getTime() < Date.now()) {
+      return res.status(400).json({ message: 'OTP หมดอายุแล้ว' });
+    }
+
+    // เปลี่ยนรหัสผ่าน
+    const hash = await bcrypt.hash(new_password, 10);
+    const u = await pool.query('UPDATE public.users SET password=$2 WHERE email=$1 RETURNING id_user', [email, hash]);
+    if (u.rowCount === 0) return res.status(404).json({ message: 'ไม่พบบัญชีนี้' });
+
+    // ลบ OTP ที่ใช้แล้ว
+    await pool.query('DELETE FROM public.verification_password WHERE id=$1', [q.rows[0].id]);
+
+    return res.json({ message: 'รีเซ็ตรหัสผ่านสำเร็จ' });
+  } catch (err) {
+    console.error('resetPassword error:', err);
+    return res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในระบบ' });
+  }
+};
+const changePassword = async (req, res) => {
+  try {
+    const { user_id, old_password, new_password } = req.body;
+    const user = await pool.query('SELECT password FROM users WHERE id_user=$1', [user_id]);
+    if (!user.rows.length) return res.status(404).json({ message: 'ไม่พบบัญชีผู้ใช้' });
+
+    const valid = await bcrypt.compare(old_password, user.rows[0].password);
+    if (!valid) return res.status(400).json({ message: 'รหัสผ่านเดิมไม่ถูกต้อง' });
+
+    const newHash = await bcrypt.hash(new_password, 10);
+    await pool.query('UPDATE users SET password=$1 WHERE id_user=$2', [newHash, user_id]);
+    res.json({ message: 'เปลี่ยนรหัสผ่านสำเร็จ' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'เกิดข้อผิดพลาดภายในเซิร์ฟเวอร์' });
+  }
+};
+
+module.exports = { startRegister, verifyRegister, resendOtp, login, updateProfile, uploadAvatar, getUserBrief, updateProfileById, uploadAvatarById, startResetPassword, resetPassword, changePassword };

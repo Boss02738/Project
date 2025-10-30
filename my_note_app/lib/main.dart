@@ -20,7 +20,11 @@ class MyApp extends StatelessWidget {
           foregroundColor: Colors.white,
         ),
       ),
-      home: LoginScreen(), // ใช้ชื่อคลาสที่ถูกต้อง
+       initialRoute: '/login',
+      routes: {
+        '/login': (_) => const LoginScreen(),
+        // เพิ่ม routes อื่น ๆ ตามโปรเจกต์
+      },// ใช้ชื่อคลาสที่ถูกต้อง
     );
   }
 }
