@@ -209,16 +209,11 @@ class _HomeState extends State<homescreen> {
                     ? p['price_amount_satang'] as int
                     : int.tryParse('${p['price_amount_satang']}') ?? 0;
 
-                // postId เป็น int
                 final int postId = p['id'] is int
                     ? p['id'] as int
                     : int.parse('${p['id']}');
 
-                // การ์ดโพสต์ "เดิม" (ไม่แตะโค้ดข้างใน)
-                final postCard = PostCard(
-                  post: p,
-                  onDeleted: _reload, // ✅ ลบแล้วรีโหลดฟีด
-                );
+                final postCard = PostCard(post: p,onDeleted: _reload);
 
                 // โพสต์ฟรี → แสดงการ์ดปกติ
                 if (!isPaid) return postCard;

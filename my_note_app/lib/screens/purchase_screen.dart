@@ -38,6 +38,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
     _expired = _remain.isNegative;
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       final d = widget.expiresAt.difference(DateTime.now());
+      if (!mounted) return;
       setState(() {
         _remain = d;
         _expired = d.isNegative;
@@ -61,41 +62,44 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
 
     return Scaffold(
       appBar: AppBar(title: const Text('ชำระเงิน')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Card(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    Text('ยอดที่ต้องโอน', style: Theme.of(context).textTheme.titleMedium),
-                    const SizedBox(height: 6),
-                    Text(amountText, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 14),
-                    QrImageView(
-                      data: widget.qrPayload,
-                      size: 220,
-                    ),
-                    const SizedBox(height: 10),
-                    _expired
-                        ? const Text('หมดเวลา QR แล้ว', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
-                        : Text('เวลาที่เหลือ: $mm:$ss', style: const TextStyle(fontWeight: FontWeight.w600)),
-                  ],
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min, // center vertically
+            children: [
+              Card(
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    children: [
+                      Text('ยอดที่ต้องโอน', style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 6),
+                      Text(amountText, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 14),
+                      QrImageView(
+                        data: widget.qrPayload,
+                        size: 220,
+                      ),
+                      const SizedBox(height: 10),
+                      _expired
+                          ? const Text('หมดเวลา QR แล้ว', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
+                          : Text('เวลาที่เหลือ: $mm:$ss', style: const TextStyle(fontWeight: FontWeight.w600)),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _expired || _uploading ? null : _pickAndUploadSlip,
-              icon: const Icon(Icons.upload),
-              label: const Text('อัปโหลดสลิปโอนเงิน'),
-            ),
-            const SizedBox(height: 8),
-            const Text('หลังอัปโหลดสลิปแล้ว กรุณารอแอดมินตรวจสอบ/อนุมัติ', textAlign: TextAlign.center),
-          ],
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _expired || _uploading ? null : _pickAndUploadSlip,
+                icon: _uploading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.upload),
+                label: const Text('อัปโหลดสลิปโอนเงิน'),
+              ),
+              const SizedBox(height: 8),
+              const Text('หลังอัปโหลดสลิปแล้ว กรุณารอแอดมินตรวจสอบ/อนุมัติ', textAlign: TextAlign.center),
+            ],
+          ),
         ),
       ),
     );
@@ -118,14 +122,26 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         final data = jsonDecode(res.body);
         if (data['ok'] == true) {
           if (!mounted) return;
-          showDialog(
+          // show confirmation dialog then navigate to app home (pop to first route)
+          await showDialog(
             context: context,
             builder: (_) => AlertDialog(
               title: const Text('ส่งสลิปแล้ว'),
               content: const Text('รอแอดมินตรวจสอบและอนุมัติ'),
-              actions: [TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('ตกลง'))],
+              actions: [
+                TextButton(
+                  onPressed: () {
+                    Navigator.of(context).pop(); // close dialog
+                  },
+                  child: const Text('ตกลง'),
+                ),
+              ],
             ),
           );
+          // after dialog closed, navigate to home (root)
+          if (!mounted) return;
+          Navigator.of(context).popUntil((route) => route.isFirst);
+          return;
         } else {
           _toast('อัปโหลดไม่สำเร็จ');
         }

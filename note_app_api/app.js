@@ -26,6 +26,9 @@ const postRoutes = require("./routes/postRoutes");
 const searchRoutes = require("./routes/searchRoutes");
 const adminRoutes = require('./routes/admin');
 const userRoutes = require('./routes/user');
+const walletRouter = require('./routes/wallet');
+const withdrawalsRouter = require('./routes/withdrawals');
+const purchasesRouter = require('./routes/purchases');
 
 // ====== APP/HTTP SERVER/IO ======
 const app = express();
@@ -46,7 +49,8 @@ app.use(session({
 }));
 app.use(express.urlencoded({ extended: true }));
 app.use(expressLayouts);
-app.set('layout', 'layouts/main'); 
+app.set('layout', 'layouts/main');
+
 
 // ====== MULTER (อัปโหลดสลิป + สื่ออื่น) ======
 const storage = multer.diskStorage({
@@ -68,8 +72,12 @@ app.use("/api/posts", postRoutes);
 app.use("/api/search", searchRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api', userRoutes);
-app.use(require('./routes/purchases'));
 app.use(require('./routes/admin'));
+app.use(withdrawalsRouter);
+app.use(walletRouter);
+app.use(purchasesRouter);
+app.use((req,res,next)=>{ console.log(req.method, req.originalUrl); next(); });
+
 
 // ========== HEALTH ==========
 app.get("/", (_req, res) => res.send("NoteCoLab server ok (merged in note_app_api)"));
@@ -648,11 +656,16 @@ app.post("/api/admin/purchases/:id/decision", async (req, res) => {
     if (!pr.rowCount) return res.status(404).json({ error: "Not found" });
 
     if (decision === "approved") {
-      const { post_id, buyer_id } = pr.rows[0];
+      const { post_id, buyer_id, seller_id, amount_satang } = pr.rows[0];
       await pool.query(
         `INSERT INTO post_access (post_id,user_id)
          VALUES ($1,$2) ON CONFLICT (post_id,user_id) DO NOTHING`,
         [post_id, buyer_id]
+      );
+      // เพิ่มเหรียญให้ seller
+      await pool.query(
+        `UPDATE users SET coins = COALESCE(coins,0) + $1 WHERE id = $2`,
+        [Math.floor(amount_satang / 100), seller_id]
       );
     }
     const up = await pool.query(
