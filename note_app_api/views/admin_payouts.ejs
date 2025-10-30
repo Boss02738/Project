@@ -1,21 +1,54 @@
+<!-- views/admin_payouts.ejs -->
 <h3>Payouts (<%= status %>)</h3>
+
 <table role="grid">
   <thead>
     <tr>
-      <th>ID</th><th>User</th><th>PromptPay</th>
-      <th>Gross</th><th>Net</th><th>Requested</th><th>Action</th>
+      <th>ID</th>
+      <th>User</th>
+      <th>QR / PromptPay</th>
+      <th>Gross</th>
+      <th>Net</th>
+      <th>Requested</th>
+      <th>Action</th>
     </tr>
   </thead>
   <tbody>
+    <% if ((rows || []).length === 0) { %>
+      <tr><td colspan="7" style="text-align:center;opacity:.7">No items</td></tr>
+    <% } %>
+
     <% rows.forEach(r => { %>
       <tr>
         <td><%= r.id %></td>
+
+        <!-- admin.js ควร SELECT u.username AS username, w.user_id AS user_id -->
         <td><%= r.username %> (#<%= r.user_id %>)</td>
-        <td><code><%= r.promptpay_mobile %></code></td>
-        <td>฿<%= (r.amount_satang/100).toFixed(2) %></td>
-        <td>฿<%= (r.amount_satang_net/100).toFixed(2) %></td>
-        <td><%= new Date(r.created_at).toLocaleString() %></td>
+
+        <!-- withdrawals ไม่มี promptpay_mobile ให้แสดงไฟล์ QR ที่แนบมาแทน -->
         <td>
+          <% if (r.bank_qr_file) { %>
+            <a href="<%= r.bank_qr_file %>" target="_blank" rel="noopener">
+              <img src="<%= r.bank_qr_file %>" alt="QR" style="height:48px;border-radius:6px" />
+            </a>
+          <% } else { %>
+            -
+          <% } %>
+        </td>
+
+        <!-- amount_satang เป็นจำนวนสตางค์ -->
+        <td>฿<%= ((r.amount_satang || 0) / 100).toFixed(2) %></td>
+
+        <!-- ถ้าไม่มีระบบหักค่าธรรมเนียม Net = Gross -->
+        <td>฿<%= ((r.amount_satang || 0) / 100).toFixed(2) %></td>
+
+        <td>
+          <% const d = r.created_at ? new Date(r.created_at) : null; %>
+          <%= d ? d.toLocaleString() : '-' %>
+        </td>
+
+        <td>
+          <!-- เส้นทางตาม admin.js ที่แก้ให้ทำงานกับ withdrawals แล้ว -->
           <form method="post" action="/admin/payouts/<%= r.id %>/mark-paid">
             <button type="submit">Mark paid</button>
           </form>
