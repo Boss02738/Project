@@ -483,6 +483,21 @@ class ApiService {
     return '$_posts/$postId/file/download?user_id=$viewerUserId';
   }
 
+  static Future<dynamic> _getJson(String url) async {
+    final resp = await http.get(Uri.parse(url));
+    if (resp.statusCode >= 200 && resp.statusCode < 300) {
+      // รองรับ utf8
+      final body = utf8.decode(resp.bodyBytes);
+      return jsonDecode(body);
+    }
+    throw Exception('GET $url -> ${resp.statusCode} ${resp.reasonPhrase}');
+  }
+
+  Future<List<String>> fetchPostImages(int postId, int viewerUserId) async {
+  final list = await _getJson('$host/api/posts/$postId/images?user_id=$viewerUserId');
+  return (list as List).cast<String>();
+}
+
   // ============== Purchases ==============
   static Future<Map<String, dynamic>> startPurchase({
     required int postId,
@@ -702,6 +717,38 @@ class ApiService {
         .map<Map<String, dynamic>>((e) => (e as Map).cast<String, dynamic>())
         .toList();
     return items;
+  }
+}
+
+// ===== Report Post API =====
+Future<void> reportPost({
+  required int postId,
+  required int userId,
+  required String reason,
+  String? details,
+}) async {
+  // ถ้าในคลาสมีตัวแปร host อยู่แล้ว เช่น: static String host = 'http://...';
+  // ให้เรียกผ่าน ApiService.host เพื่อกันชื่อซ้ำ/scope ผิด
+  final uri = Uri.parse('${ApiService.host}/api/reports');
+
+  final payload = <String, dynamic>{
+    'post_id': postId,
+    'reporter_id': userId,
+    'reason': reason,
+    if ((details ?? '').trim().isNotEmpty) 'details': (details ?? '').trim(),
+  };
+
+  final r = await http
+      .post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      )
+      .timeout(const Duration(seconds: 20)); // แทน _reqTimeout
+
+  // ถ้าไฟล์นี้ไม่มี _ensureOk ให้ใช้เช็คสถานะแบบนี้
+  if (r.statusCode < 200 || r.statusCode >= 300) {
+    throw Exception('HTTP ${r.statusCode}: ${r.body}');
   }
 }
 

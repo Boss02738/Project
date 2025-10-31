@@ -1,0 +1,57 @@
+<% /* views/reports.ejs  (ใช้ร่วมกับ layouts/_layout.ejs) */ %>
+<section style="max-width:1100px;margin:0 auto;padding:24px">
+  <h1 style="margin:0 0 16px 0">Reports (<%= status %>)</h1>
+
+  <div style="margin:0 0 16px 0; display:flex; gap:12px;">
+    <a href="/admin/reports?status=pending">Pending</a>
+    <a href="/admin/reports?status=approved">Approved</a>
+    <a href="/admin/reports?status=rejected">Rejected</a>
+  </div>
+
+  <% if (!items || !items.length) { %>
+    <p style="opacity:.7">No items</p>
+  <% } else { %>
+    <table style="width:100%; border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">ID</th>
+          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Post</th>
+          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Reporter</th>
+          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Reason</th>
+          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Details</th>
+          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Created</th>
+          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% items.forEach(it => { %>
+          <tr>
+            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;">#<%= it.id %></td>
+            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;">
+              P:<%= it.post_id %>
+              <% if (it.post_is_banned) { %>
+                <span style="margin-left:6px; padding:2px 8px; border:1px solid #334155; border-radius:8px; font-size:12px;">banned</span>
+              <% } %>
+            </td>
+            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;"><%= it.reporter_name || '-' %></td>
+            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;"><%= it.reason %></td>
+            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;"><%= it.details || '-' %></td>
+            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;"><%= new Date(it.created_at).toLocaleString('th-TH') %></td>
+            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;">
+              <% if (status === 'pending') { %>
+                <form action="/admin/reports/<%= it.id %>/approve" method="post" style="display:inline">
+                  <button type="submit" style="padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#0b5; color:#fff; cursor:pointer;">Approve & Ban</button>
+                </form>
+                <form action="/admin/reports/<%= it.id %>/reject" method="post" style="display:inline; margin-left:6px;">
+                  <button type="submit" style="padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#933; color:#fff; cursor:pointer;">Reject</button>
+                </form>
+              <% } else { %>
+                <span style="opacity:.75"><%= status %></span>
+              <% } %>
+            </td>
+          </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</section>

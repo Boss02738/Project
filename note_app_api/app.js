@@ -23,20 +23,24 @@ const pool = require("./models/db");
 const authRoutes = require("./routes/authRoutes");
 const postRoutes = require("./routes/postRoutes");
 const searchRoutes = require("./routes/searchRoutes");
-const adminRoutes = require("./routes/admin");          // [FIX] router นี้มี path เริ่มด้วย /admin อยู่แล้ว
+const adminRoutes = require("./routes/admin"); // [FIX] router นี้มี path เริ่มด้วย /admin อยู่แล้ว
 const userRoutes = require("./routes/user");
 const walletRouter = require("./routes/wallet");
 const withdrawalsRouter = require("./routes/withdrawals");
 const purchasesRouter = require("./routes/purchases");
+const reportRoutes = require("./routes/reportRoutes");
 
 /* ================= APP/HTTP/IO ================= */
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
+const io = new Server(server, {
+  cors: { origin: "*", methods: ["GET", "POST"] },
+});
 
 /* ================= MIDDLEWARE ================= */
 app.use(cors());
-app.use((req, _res, next) => {                          // [FIX] ย้าย logger ไว้ก่อน routes
+app.use((req, _res, next) => {
+  // [FIX] ย้าย logger ไว้ก่อน routes
   console.log(req.method, req.originalUrl);
   next();
 });
@@ -55,6 +59,7 @@ app.use(
 app.use(express.urlencoded({ extended: true }));
 app.use(expressLayouts);
 app.set("layout", "layouts/main");
+app.use("/api/reports", reportRoutes);
 
 /* ================= MULTER (สลิป/ไฟล์อัปโหลด) ================= */
 const storage = multer.diskStorage({
@@ -84,7 +89,9 @@ app.use(purchasesRouter);
 app.use(adminRoutes);
 
 /* ================= HEALTH ================= */
-app.get("/", (_req, res) => res.send("NoteCoLab server ok (merged in note_app_api)"));
+app.get("/", (_req, res) =>
+  res.send("NoteCoLab server ok (merged in note_app_api)")
+);
 
 /* ===================================================================
    SCHEMA HELPERS (NoteCoLab + Pricing/Payments)
@@ -149,7 +156,9 @@ async function ensureSchema3Tables() {
 // [FIX] ให้ schema ด้าน “ซื้อโพสต์” ใช้ INT อ้างอิง posts(id) / users(id_user)
 async function ensurePricingPaymentsSchema() {
   // users.phone (สำหรับ PromptPay)
-  await pool.query(`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS phone VARCHAR(20);`);
+  await pool.query(
+    `ALTER TABLE public.users ADD COLUMN IF NOT EXISTS phone VARCHAR(20);`
+  );
 
   // posts ราคา
   await pool.query(`
@@ -301,16 +310,20 @@ async function getSnapshot(boardId, pageIndex) {
 async function deletePageAndReindex(boardId, pageIndex) {
   const count = await getPageCount(boardId);
   if (count <= 1) return { ok: false, reason: "only_one_page" };
-  if (pageIndex < 0 || pageIndex > count - 1) return { ok: false, reason: "out_of_range" };
+  if (pageIndex < 0 || pageIndex > count - 1)
+    return { ok: false, reason: "out_of_range" };
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`DELETE FROM board_pages WHERE board_id=$1 AND page_index=$2`, [boardId, pageIndex]);
-    await client.query(`UPDATE board_pages SET page_index = page_index - 1 WHERE board_id=$1 AND page_index > $2`, [
-      boardId,
-      pageIndex,
-    ]);
+    await client.query(
+      `DELETE FROM board_pages WHERE board_id=$1 AND page_index=$2`,
+      [boardId, pageIndex]
+    );
+    await client.query(
+      `UPDATE board_pages SET page_index = page_index - 1 WHERE board_id=$1 AND page_index > $2`,
+      [boardId, pageIndex]
+    );
     await client.query("COMMIT");
     return { ok: true };
   } catch (e) {
@@ -394,7 +407,8 @@ app.post("/documents", async (req, res) => {
     const owner_id = body.owner_id ?? body.ownerId ?? null;
     const pages = body.pages;
 
-    if (!Array.isArray(pages)) return res.status(400).json({ error: "pages_required" });
+    if (!Array.isArray(pages))
+      return res.status(400).json({ error: "pages_required" });
 
     const pagesClean = pages.map((p) => {
       const idx = Number.isFinite(+p.index) ? +p.index : 0;
@@ -402,12 +416,16 @@ app.post("/documents", async (req, res) => {
       const lines = Array.isArray(data.lines) ? data.lines : [];
       const texts = Array.isArray(data.texts) ? data.texts : [];
       const images = Array.isArray(data.images) ? data.images : [];
-      const imagesClean = images.map((im) => ({ ...im, bytesB64: cleanB64(im.bytesB64) }));
+      const imagesClean = images.map((im) => ({
+        ...im,
+        bytesB64: cleanB64(im.bytesB64),
+      }));
       return { index: idx, data: { lines, texts, images: imagesClean } };
     });
 
     const boardVal =
-      typeof boardIdRaw === "string" && boardIdRaw.trim().toLowerCase() === "offline"
+      typeof boardIdRaw === "string" &&
+      boardIdRaw.trim().toLowerCase() === "offline"
         ? null
         : typeof boardIdRaw === "string"
         ? boardIdRaw.trim()
@@ -433,7 +451,14 @@ app.post("/documents", async (req, res) => {
          cover_png=COALESCE(EXCLUDED.cover_png, documents.cover_png),
          owner_id=COALESCE(EXCLUDED.owner_id, documents.owner_id),
          updated_at=now()`,
-      [docId, title || "Untitled", boardVal, JSON.stringify(pagesClean), cleanB64(coverRaw) || null, normInt(owner_id) || null]
+      [
+        docId,
+        title || "Untitled",
+        boardVal,
+        JSON.stringify(pagesClean),
+        cleanB64(coverRaw) || null,
+        normInt(owner_id) || null,
+      ]
     );
     res.json({ ok: true, id: docId });
   } catch (e) {
@@ -450,8 +475,12 @@ app.delete("/documents/:id", async (req, res) => {
       return res.status(400).json({ error: "invalid_user_id" });
 
     if (userId != null) {
-      const r = await pool.query(`DELETE FROM documents WHERE id=$1 AND owner_id=$2`, [id, userId]);
-      if (r.rowCount === 0) return res.status(404).json({ error: "not_found_or_not_owner" });
+      const r = await pool.query(
+        `DELETE FROM documents WHERE id=$1 AND owner_id=$2`,
+        [id, userId]
+      );
+      if (r.rowCount === 0)
+        return res.status(404).json({ error: "not_found_or_not_owner" });
       return res.json({ ok: true });
     }
 
@@ -474,7 +503,7 @@ app.post("/api/users/:id/profile", async (req, res) => {
       `UPDATE public.users
          SET bio = COALESCE($1,bio),
              phone = COALESCE($2,phone)
-       WHERE id_user = $3`,                                // [FIX] users.id_user
+       WHERE id_user = $3`, // [FIX] users.id_user
       [bio ?? null, phone ?? null, id]
     );
     res.json({ ok: true });
@@ -506,16 +535,23 @@ function crc16(payload) {
 }
 function generatePromptPayPayload(phoneOrID, amountBaht) {
   const target = normalizeThaiPhone(phoneOrID);
-  const merchantAccInfo = "0016A000000677010111" + "02" + String(target.length).padStart(2, "0") + target;
-  const merchantInfo = "29" + String(merchantAccInfo.length).padStart(2, "0") + merchantAccInfo;
-  const amountStr = typeof amountBaht === "number" ? amountBaht.toFixed(2) : null;
+  const merchantAccInfo =
+    "0016A000000677010111" +
+    "02" +
+    String(target.length).padStart(2, "0") +
+    target;
+  const merchantInfo =
+    "29" + String(merchantAccInfo.length).padStart(2, "0") + merchantAccInfo;
+  const amountStr =
+    typeof amountBaht === "number" ? amountBaht.toFixed(2) : null;
 
   let payload = "";
   payload += "00" + "02" + "01";
   payload += "01" + "02" + "11";
   payload += merchantInfo;
   payload += "53" + "03" + "764";
-  if (amountStr) payload += "54" + String(amountStr.length).padStart(2, "0") + amountStr;
+  if (amountStr)
+    payload += "54" + String(amountStr.length).padStart(2, "0") + amountStr;
   payload += "58" + "02" + "TH";
   payload += "59" + "02" + "NA";
   payload += "60" + "02" + "TH";
@@ -546,8 +582,10 @@ app.post("/api/purchases", async (req, res) => {
     if (!pr.rowCount) return res.status(404).json({ error: "post_not_found" });
 
     const post = pr.rows[0];
-    if (post.price_type !== "paid") return res.status(400).json({ error: "post_is_free" });
-    if (!post.seller_phone) return res.status(400).json({ error: "seller_no_phone" });
+    if (post.price_type !== "paid")
+      return res.status(400).json({ error: "post_is_free" });
+    if (!post.seller_phone)
+      return res.status(400).json({ error: "seller_no_phone" });
 
     const amountBaht = post.price_amount_satang / 100.0;
     const payload = generatePromptPayPayload(post.seller_phone, amountBaht);
@@ -558,7 +596,14 @@ app.post("/api/purchases", async (req, res) => {
          (post_id, buyer_id, seller_id, amount_satang, currency, status, qr_payload, expires_at)
        VALUES ($1,$2,$3,$4,'THB','pending',$5,$6)
        RETURNING *`,
-      [postId, buyerId, post.seller_id, post.price_amount_satang, payload, expiresAt]
+      [
+        postId,
+        buyerId,
+        post.seller_id,
+        post.price_amount_satang,
+        payload,
+        expiresAt,
+      ]
     );
 
     const qrPngDataUrl = await QRCode.toDataURL(payload);
@@ -573,12 +618,21 @@ app.post("/api/purchases", async (req, res) => {
 app.get("/api/purchases/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const r = await pool.query(`SELECT * FROM public.purchases WHERE id = $1`, [id]);
+    const r = await pool.query(`SELECT * FROM public.purchases WHERE id = $1`, [
+      id,
+    ]);
     if (!r.rowCount) return res.status(404).json({ error: "not_found" });
 
     const purchase = r.rows[0];
-    if (purchase.status === "pending" && purchase.expires_at && dayjs().isAfter(purchase.expires_at)) {
-      const up = await pool.query(`UPDATE public.purchases SET status='expired' WHERE id=$1 RETURNING *`, [id]);
+    if (
+      purchase.status === "pending" &&
+      purchase.expires_at &&
+      dayjs().isAfter(purchase.expires_at)
+    ) {
+      const up = await pool.query(
+        `UPDATE public.purchases SET status='expired' WHERE id=$1 RETURNING *`,
+        [id]
+      );
       return res.json({ purchase: up.rows[0] });
     }
     res.json({ purchase });
@@ -594,13 +648,20 @@ app.post("/api/purchases/:id/slip", upload.single("slip"), async (req, res) => {
     const { id } = req.params;
     if (!req.file) return res.status(400).json({ error: "missing_slip_file" });
 
-    const pr = await pool.query(`SELECT * FROM public.purchases WHERE id=$1`, [id]);
-    if (!pr.rowCount) return res.status(404).json({ error: "purchase_not_found" });
-    if (pr.rows[0].status === "expired") return res.status(400).json({ error: "purchase_expired" });
+    const pr = await pool.query(`SELECT * FROM public.purchases WHERE id=$1`, [
+      id,
+    ]);
+    if (!pr.rowCount)
+      return res.status(404).json({ error: "purchase_not_found" });
+    if (pr.rows[0].status === "expired")
+      return res.status(400).json({ error: "purchase_expired" });
 
     await pool.query(
       `INSERT INTO public.payment_slips (purchase_id, file_path) VALUES ($1,$2)`,
-      [id, "/" + path.relative(process.cwd(), req.file.path).replace(/\\/g, "/")]
+      [
+        id,
+        "/" + path.relative(process.cwd(), req.file.path).replace(/\\/g, "/"),
+      ]
     );
     const up = await pool.query(
       `UPDATE public.purchases SET status='slip_uploaded' WHERE id=$1 RETURNING *`,
@@ -642,13 +703,22 @@ io.on("connection", (socket) => {
   socket.on("join", async ({ boardId, password }) => {
     try {
       const board = await getBoard(boardId);
-      if (!board) return socket.emit("join_error", { message: "Room not found" });
+      if (!board)
+        return socket.emit("join_error", { message: "Room not found" });
 
       if (board.password_hash) {
         const hasPwd = typeof password === "string" && password.length > 0;
-        if (!hasPwd) return socket.emit("join_error", { message: "Password required", needPassword: true });
+        if (!hasPwd)
+          return socket.emit("join_error", {
+            message: "Password required",
+            needPassword: true,
+          });
         const ok = await bcrypt.compare(password ?? "", board.password_hash);
-        if (!ok) return socket.emit("join_error", { message: "Invalid password", needPassword: true });
+        if (!ok)
+          return socket.emit("join_error", {
+            message: "Invalid password",
+            needPassword: true,
+          });
       }
 
       socket.join(boardId);
@@ -673,7 +743,12 @@ io.on("connection", (socket) => {
       });
     } catch (e) {
       console.error("init_page error", e);
-      socket.emit("init_data", { snapshot: null, strokes: [], events: [], page: page ?? 0 });
+      socket.emit("init_data", {
+        snapshot: null,
+        strokes: [],
+        events: [],
+        page: page ?? 0,
+      });
     }
   });
 
@@ -707,7 +782,10 @@ io.on("connection", (socket) => {
       io.to(boardId).emit("page_deleted", { deletedPage: p });
       const count = await getPageCount(boardId);
       io.to(boardId).emit("pages_meta", { count });
-      socket.emit("delete_page_result", { ok: result.ok, reason: result.reason ?? null });
+      socket.emit("delete_page_result", {
+        ok: result.ok,
+        reason: result.reason ?? null,
+      });
     } catch (e) {
       console.error("delete_page error", e);
       socket.emit("delete_page_result", { ok: false, reason: "server_error" });

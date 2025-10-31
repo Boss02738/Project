@@ -1,3 +1,8 @@
+// lib/widgets/post_card.dart  (หรือไฟล์ที่คุณวาง PostCard อยู่)
+
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
@@ -5,10 +10,12 @@ import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
-import 'dart:io';
 import 'package:open_file/open_file.dart';
 
-// ====== Fullscreen Gallery (swipe + zoom ได้) ======
+// ถ้ามี dialog เลือกเหตุผลรายงาน
+import 'package:my_note_app/widgets/report_post_dialog.dart';
+
+/// ======================= Fullscreen Gallery =======================
 class GalleryViewer extends StatefulWidget {
   final List<String> urls;
   final int initialIndex;
@@ -97,7 +104,7 @@ class _GalleryViewerState extends State<GalleryViewer> {
   }
 }
 
-// ====================== Post Card ======================
+/// ============================ Post Card ============================
 class PostCard extends StatefulWidget {
   final Map<String, dynamic> post;
   final VoidCallback? onDeleted; // callback เมื่อ archive สำเร็จ
@@ -114,31 +121,6 @@ class _PostCardState extends State<PostCard> {
   int _commentCount = 0;
   bool _likedByMe = false;
   bool _savedByMe = false;
-
-  Future<String?> _downloadFile(String url, String fileName) async {
-    try {
-      final response = await http.get(Uri.parse(url));
-      if (response.statusCode == 200) {
-        if (Platform.isAndroid) {
-          try {
-            final externalDir = Directory('/sdcard/Download');
-            if (!await externalDir.exists()) await externalDir.create(recursive: true);
-            final publicPath = '${externalDir.path}/$fileName';
-            final publicFile = File(publicPath);
-            await publicFile.writeAsBytes(response.bodyBytes);
-            return publicFile.path;
-          } catch (_) {}
-        }
-        final dir = await getApplicationDocumentsDirectory();
-        final filePath = '${dir.path}/$fileName';
-        final file = await File(filePath).writeAsBytes(response.bodyBytes);
-        return file.path;
-      }
-    } catch (e) {
-      debugPrint('Download error: $e');
-    }
-    return null;
-  }
 
   @override
   void initState() {
@@ -248,7 +230,6 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  // NEW: แจ้งเตือนให้ไปซื้อโพสต์
   void _promptPurchase() {
     showDialog(
       context: context,
@@ -257,7 +238,6 @@ class _PostCardState extends State<PostCard> {
         content: const Text('ซื้อโพสต์นี้เพื่อดูรูปทั้งหมดและดาวน์โหลดไฟล์แนบ'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text('ปิด')),
-          // TODO: เปลี่ยนเป็นไปหน้า/ฟลว์ชำระเงินจริงของคุณ
           TextButton(
             onPressed: () {
               Navigator.pop(context);
@@ -282,6 +262,31 @@ class _PostCardState extends State<PostCard> {
     if (diff.inDays < 1) return '${diff.inHours} ชม.';
     if (diff.inDays < 7) return '${diff.inDays} วัน';
     return '${dt.year}/${dt.month}/${dt.day}';
+  }
+
+  Future<String?> _downloadFile(String url, String fileName) async {
+    try {
+      final response = await http.get(Uri.parse(url));
+      if (response.statusCode == 200) {
+        if (Platform.isAndroid) {
+          try {
+            final externalDir = Directory('/sdcard/Download');
+            if (!await externalDir.exists()) await externalDir.create(recursive: true);
+            final publicPath = '${externalDir.path}/$fileName';
+            final publicFile = File(publicPath);
+            await publicFile.writeAsBytes(response.bodyBytes);
+            return publicFile.path;
+          } catch (_) {}
+        }
+        final dir = await getApplicationDocumentsDirectory();
+        final filePath = '${dir.path}/$fileName';
+        final file = await File(filePath).writeAsBytes(response.bodyBytes);
+        return file.path;
+      }
+    } catch (e) {
+      debugPrint('Download error: $e');
+    }
+    return null;
   }
 
   Future<void> _confirmAndArchive() async {
@@ -322,14 +327,163 @@ class _PostCardState extends State<PostCard> {
     }
   }
 
+  /// ===== ยิงรีพอร์ตตรงผ่าน HTTP (ไม่พึ่ง ApiService.reportPost) =====
+  Future<void> _sendReportDirect({
+    required int postId,
+    required int userId,
+    required String reason,
+    String? details,
+  }) async {
+    final uri = Uri.parse('${ApiService.host}/api/reports');
+    final payload = <String, dynamic>{
+      'post_id': postId,
+      'reporter_id': userId,
+      'reason': reason,
+      if ((details ?? '').trim().isNotEmpty) 'details': (details ?? '').trim(),
+    };
+
+    final r = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 20));
+
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('HTTP ${r.statusCode}: ${r.body}');
+    }
+  }
+
+  // ===== Handler ส่งรีพอร์ต =====
+  Future<void> _handleReportSubmit({
+    required String reason,
+    String? details,
+  }) async {
+    final postId = widget.post['id'] as int?;
+    if (postId == null) return;
+
+    int? uid = _userId;
+    if (uid == null) {
+      final sp = await SharedPreferences.getInstance();
+      uid = sp.getInt('user_id');
+      if (mounted) setState(() => _userId = uid);
+    }
+    if (uid == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('กรุณาเข้าสู่ระบบก่อนรายงานโพสต์')),
+      );
+      return;
+    }
+
+    await _sendReportDirect(
+      postId: postId,
+      userId: uid,
+      reason: reason,
+      details: details,
+    );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('ส่งรายงานแล้ว ขอบคุณที่ช่วยดูแลชุมชน')),
+    );
+  }
+
+  // เปิด dialog เลือกเหตุผลรายงาน
+  Future<void> _openReportDialog() async {
+    final postId = widget.post['id'] as int?;
+    if (postId == null) return;
+
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => ReportPostDialog(
+        postId: postId,
+        userId: _userId ?? -1,
+        onSubmit: _handleReportSubmit,
+      ),
+    );
+  }
+
+  // ===== Action Sheet (เมนูสวย ๆ แทน Popup) =====
+  Future<void> _openActionsSheet(bool canDelete) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: false,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // drag handle
+                Container(
+                  width: 44,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.black12,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                Row(
+                  children: const [
+                    Icon(Icons.tune, size: 18, color: Colors.black54),
+                    SizedBox(width: 8),
+                    Text('การทำรายการกับโพสต์',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+
+                _ActionItem(
+                  icon: Icons.flag_outlined,
+                  label: 'รายงานโพสต์',
+                  subtitle: 'แจ้งเนื้อหาไม่เหมาะสมให้ผู้ดูแลทราบ',
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _openReportDialog();
+                  },
+                ),
+
+                if (canDelete) ...[
+                  const SizedBox(height: 4),
+                  const Divider(height: 1),
+                  const SizedBox(height: 4),
+                  _ActionItem(
+                    icon: Icons.delete_outline,
+                    label: 'Delete post',
+                    subtitle: 'ย้ายไปยังรายการลบ (กู้คืนได้ใน Settings)',
+                    danger: true,
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      await _confirmAndArchive();
+                    },
+                  ),
+                ],
+                const SizedBox(height: 4),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.post;
 
-    // CHANGED: สร้าง URL ให้ถูก (รองรับทั้ง /uploads และ http)
-    List<String> _fixUrls(List<String> arr) => arr
-        .map((e) => e.startsWith('http') ? e : '${ApiService.host}$e')
-        .toList();
+    // Normalize URL (/uploads -> http)
+    List<String> _fixUrls(List<String> arr) =>
+        arr.map((e) => e.startsWith('http') ? e : '${ApiService.host}$e').toList();
 
     final avatar = (p['avatar_url'] as String?) ?? '';
     final file = (p['file_url'] as String?) ?? '';
@@ -339,47 +493,51 @@ class _PostCardState extends State<PostCard> {
     final subject = p['subject'] as String? ?? '';
     final year = p['year_label'] as String? ?? '';
     final created = p['created_at'] as String?;
+
+    // images (รวม legacy)
     final List<String> images = (p['images'] as List?)?.cast<String>() ?? [];
     final legacy = p['image_url'] as String?;
-    final allImagesRaw = [
-      ...images,
-      if ((legacy ?? '').isNotEmpty && images.isEmpty) legacy!,
-    ];
-    final allImages = _fixUrls(allImagesRaw); // CHANGED
+    final allImagesRaw = [...images, if ((legacy ?? '').isNotEmpty && images.isEmpty) legacy!];
+    final allImages = _fixUrls(allImagesRaw);
 
-    // ตรวจว่าเจ้าของโพสต์ใช่เราหรือไม่ (รองรับทั้ง author_id/user_id)
+    // owner id (รองรับ author_id/user_id)
     int? ownerId;
-    final rawOwner = p['author_id'] ?? p['user_id'];
-    if (rawOwner is int) ownerId = rawOwner;
-    else if (rawOwner != null) {
+    final rawOwner = p['author_id'] ?? p['owner_id'] ?? p['created_by'] ?? p['user_id'];
+    if (rawOwner is int) {
+      ownerId = rawOwner;
+    } else if (rawOwner != null) {
       final parsed = int.tryParse('$rawOwner');
       if (parsed != null) ownerId = parsed;
     }
 
-    // NEW: ตรวจสิทธิ์การเข้าถึงเต็ม
-    final priceType = (p['price_type'] ?? 'free').toString();
-    final isPaid = priceType != 'free';
-    bool purchased = (p['is_purchased'] == true);
-    if (ownerId != null && _userId != null && ownerId == _userId) {
-      purchased = true; // เจ้าของดูได้เต็ม
-    }
-    final canSeeAll = !isPaid || purchased;
-    final canDownload = !isPaid || purchased;
+    // ===== ACCESS LOGIC =====
+    final myId = _userId;
+    final isOwner = (ownerId != null && myId != null && ownerId == myId);
 
-    // NEW: ถ้ายังไม่ซื้อ → ตัดเหลือแค่รูปแรก
-    final imagesToShow = canSeeAll
-        ? allImages
-        : (allImages.isNotEmpty ? [allImages.first] : <String>[]);
+    final priceType = (p['price_type'] ?? 'free').toString().toLowerCase().trim();
+    final isPaid = priceType != 'free';
+
+    final purchased =
+        (p['purchased'] == true) ||
+        (p['is_purchased'] == true) ||
+        (p['purchased_by_me'] == true) ||
+        (p['granted_at'] != null);
+
+    final hasAccess = isOwner || purchased;
+    final canSeeAll = !isPaid || hasAccess;
+    final canDownload = !isPaid || hasAccess;
+
+    final imagesToShow = canSeeAll ? allImages : (allImages.isNotEmpty ? [allImages.first] : <String>[]);
 
     final showSeeMore = text.trim().length > 80;
-    final canDelete = (ownerId != null && _userId != null && ownerId == _userId);
+    final canDelete = isOwner;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
+          // -------- Header --------
           ListTile(
             leading: CircleAvatar(
               radius: 22,
@@ -389,9 +547,7 @@ class _PostCardState extends State<PostCard> {
             ),
             title: Row(
               children: [
-                Expanded(
-                  child: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                ),
+                Expanded(child: Text(name, style: const TextStyle(fontWeight: FontWeight.bold))),
                 if (year.isNotEmpty)
                   Container(
                     margin: const EdgeInsets.only(left: 6),
@@ -405,20 +561,15 @@ class _PostCardState extends State<PostCard> {
               ],
             ),
             subtitle: Text(subject, overflow: TextOverflow.ellipsis),
-            trailing: canDelete
-                ? PopupMenuButton<String>(
-                    onSelected: (v) {
-                      if (v == 'delete') _confirmAndArchive();
-                    },
-                    itemBuilder: (_) => [
-                      const PopupMenuItem(value: 'delete', child: Text('Delete post')),
-                    ],
-                    icon: const Icon(Icons.more_horiz),
-                  )
-                : const Icon(Icons.more_horiz),
+
+            // ✅ ปุ่มเปิด Action Sheet
+            trailing: IconButton(
+              icon: const Icon(Icons.more_horiz),
+              onPressed: () => _openActionsSheet(canDelete),
+            ),
           ),
 
-          // Images Grid (ห่อด้วย Stack เพื่อแปะป้ายล็อก)
+          // -------- Images + Lock --------
           if (imagesToShow.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -427,9 +578,9 @@ class _PostCardState extends State<PostCard> {
                   _SmartImageGrid(
                     postId: p['id'] as int,
                     images: imagesToShow,
-                    onTap: (i) => _openGallery(imagesToShow, i, p['id'] as int), // CHANGED
+                    onTap: (i) => _openGallery(imagesToShow, i, p['id'] as int),
                   ),
-                  if (!canSeeAll && allImages.length > 1) // NEW: ป้ายล็อก
+                  if (!canSeeAll && allImages.length > 1)
                     const Positioned(
                       right: 8,
                       top: 8,
@@ -439,7 +590,7 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
 
-          // File download UI
+          // -------- File download (secure) --------
           if (file.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
@@ -447,10 +598,9 @@ class _PostCardState extends State<PostCard> {
                 borderRadius: BorderRadius.circular(12),
                 onTap: () async {
                   if (!canDownload) {
-                    _promptPurchase(); // NEW
+                    _promptPurchase();
                     return;
                   }
-                  // NEW: ดาวน์โหลดผ่านเอ็นด์พอยน์ต์ที่เช็คสิทธิ์
                   final sp = await SharedPreferences.getInstance();
                   final uid = _userId ?? sp.getInt('user_id');
                   if (uid == null) {
@@ -463,10 +613,7 @@ class _PostCardState extends State<PostCard> {
                     postId: (p['id'] as int),
                     viewerUserId: uid,
                   );
-                  final savePath = await _downloadFile(
-                    secureUrl,
-                    fileName ?? 'downloaded_file',
-                  );
+                  final savePath = await _downloadFile(secureUrl, fileName ?? 'downloaded_file');
                   if (savePath != null) {
                     if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
@@ -494,7 +641,7 @@ class _PostCardState extends State<PostCard> {
                   child: Row(
                     children: [
                       Icon(
-                        canDownload ? Icons.insert_drive_file : Icons.lock, // CHANGED
+                        canDownload ? Icons.insert_drive_file : Icons.lock,
                         size: 20,
                         color: const Color(0xFF335CFF),
                       ),
@@ -517,13 +664,13 @@ class _PostCardState extends State<PostCard> {
                         child: Row(
                           children: [
                             Icon(
-                              canDownload ? Icons.download_rounded : Icons.lock, // CHANGED
+                              canDownload ? Icons.download_rounded : Icons.lock,
                               size: 18,
                               color: const Color(0xFF335CFF),
                             ),
                             const SizedBox(width: 2),
                             Text(
-                              canDownload ? 'ดาวน์โหลด' : 'ปลดล็อกเพื่อดาวน์โหลด', // CHANGED
+                              canDownload ? 'ดาวน์โหลด' : 'ปลดล็อกเพื่อดาวน์โหลด',
                               style: const TextStyle(fontSize: 12, color: Color(0xFF335CFF)),
                             ),
                           ],
@@ -535,7 +682,7 @@ class _PostCardState extends State<PostCard> {
               ),
             ),
 
-          // Actions
+          // -------- Actions --------
           Padding(
             padding: const EdgeInsets.only(left: 6, right: 6, top: 6),
             child: Row(children: [
@@ -558,7 +705,7 @@ class _PostCardState extends State<PostCard> {
             ]),
           ),
 
-          // Text
+          // -------- Text --------
           if (text.trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
@@ -582,7 +729,7 @@ class _PostCardState extends State<PostCard> {
               ]),
             ),
 
-          // Time
+          // -------- Time --------
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: Text(_timeAgo(created), style: const TextStyle(color: Colors.grey)),
@@ -593,7 +740,7 @@ class _PostCardState extends State<PostCard> {
   }
 }
 
-// ============ Smart Grid Layout ============
+/// ======================= Smart Grid Layout =======================
 class _SmartImageGrid extends StatelessWidget {
   final int postId;
   final List<String> images;
@@ -668,7 +815,10 @@ class _SmartImageGrid extends StatelessWidget {
             )
           ]);
         }
-        return GestureDetector(onTap: () => onTap?.call(i), child: Hero(tag: tag, child: _Thumb(url: url)));
+        return GestureDetector(
+          onTap: () => onTap?.call(i),
+          child: Hero(tag: tag, child: _Thumb(url: url)),
+        );
       },
     );
   }
@@ -713,7 +863,7 @@ class _Thumb extends StatelessWidget {
       );
 }
 
-// NEW: ป้ายล็อกเล็ก ๆ มุมขวาบน
+/// ------------------------- Lock Pill -------------------------
 class _LockPill extends StatelessWidget {
   final String label;
   const _LockPill({required this.label});
@@ -737,7 +887,7 @@ class _LockPill extends StatelessWidget {
   }
 }
 
-// ====================== BottomSheet: Comments ======================
+/// ====================== BottomSheet: Comments ======================
 class _CommentsSheet extends StatefulWidget {
   final int postId;
   final VoidCallback onCommentAdded;
@@ -876,6 +1026,80 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                   ],
                 ),
               ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ========= ชิ้นส่วน UI ของแผ่นล่าง =========
+class _ActionItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? subtitle;
+  final bool danger;
+  final VoidCallback onTap;
+
+  const _ActionItem({
+    Key? key,
+    required this.icon,
+    required this.label,
+    this.subtitle,
+    this.danger = false,
+    required this.onTap,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    final color = danger ? Colors.red : const Color(0xFF1F2937); // slate-800
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            crossAxisAlignment:
+                subtitle == null ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: danger ? Colors.red.withOpacity(.08) : const Color(0xFFF3F4F6),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 15,
+                          color: color,
+                        )),
+                    if (subtitle != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          subtitle!,
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            color: Color(0xFF6B7280), // slate-500
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: Colors.black26),
             ],
           ),
         ),
