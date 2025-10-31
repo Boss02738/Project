@@ -1,6 +1,6 @@
 // Project/note_app_api/app.js  (COMBINED: API หลัก + NoteCoLab realtime + Pricing/Payments)
 
-// ====== CORE & THIRD-PARTY ======
+/* ================= CORE & THIRD-PARTY ================= */
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
@@ -13,51 +13,55 @@ const bcrypt = require("bcrypt");
 const crypto = require("crypto");
 const dayjs = require("dayjs");
 const QRCode = require("qrcode");
-const session = require('express-session');
-const expressLayouts = require('express-ejs-layouts');
+const session = require("express-session");
+const expressLayouts = require("express-ejs-layouts");
 
-
-// ====== DB POOL ======
+/* ================= DB ================= */
 const pool = require("./models/db");
 
-// ====== ROUTES (ระบบเดิม) ======
+/* ================= ROUTES (ของระบบ) ================= */
 const authRoutes = require("./routes/authRoutes");
 const postRoutes = require("./routes/postRoutes");
 const searchRoutes = require("./routes/searchRoutes");
-const adminRoutes = require('./routes/admin');
-const userRoutes = require('./routes/user');
-const walletRouter = require('./routes/wallet');
-const withdrawalsRouter = require('./routes/withdrawals');
-const purchasesRouter = require('./routes/purchases');
+const adminRoutes = require("./routes/admin");          // [FIX] router นี้มี path เริ่มด้วย /admin อยู่แล้ว
+const userRoutes = require("./routes/user");
+const walletRouter = require("./routes/wallet");
+const withdrawalsRouter = require("./routes/withdrawals");
+const purchasesRouter = require("./routes/purchases");
 
-// ====== APP/HTTP SERVER/IO ======
+/* ================= APP/HTTP/IO ================= */
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
 
-// ====== MIDDLEWARE ======
+/* ================= MIDDLEWARE ================= */
 app.use(cors());
-app.set('view engine', 'ejs');
-app.set('views', path.join(process.cwd(), 'views'));
+app.use((req, _res, next) => {                          // [FIX] ย้าย logger ไว้ก่อน routes
+  console.log(req.method, req.originalUrl);
+  next();
+});
+app.set("view engine", "ejs");
+app.set("views", path.join(process.cwd(), "views"));
 app.use(express.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ extended: true, limit: "50mb" }));
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-app.use(session({
-  secret: process.env.SESSION_SECRET || 'devsecret',
-  resave: false,
-  saveUninitialized: false
-}));
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "devsecret",
+    resave: false,
+    saveUninitialized: false,
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 app.use(expressLayouts);
-app.set('layout', 'layouts/main');
+app.set("layout", "layouts/main");
 
-
-// ====== MULTER (อัปโหลดสลิป + สื่ออื่น) ======
+/* ================= MULTER (สลิป/ไฟล์อัปโหลด) ================= */
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
+  destination: function (_req, _file, cb) {
     cb(null, path.join(__dirname, "uploads/"));
   },
-  filename: function (req, file, cb) {
+  filename: function (_req, file, cb) {
     const fileExt = path.extname(file.originalname);
     const fileBase = path.basename(file.originalname, fileExt);
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
@@ -66,20 +70,20 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-// ====== ROUTES เดิม (prefix /api/*) ======
+/* ================= ROUTES MOUNT ================= */
+// API prefix
 app.use("/api/auth", authRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/search", searchRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api', userRoutes);
-app.use(require('./routes/admin'));
+app.use("/api", userRoutes);
 app.use(withdrawalsRouter);
 app.use(walletRouter);
 app.use(purchasesRouter);
-app.use((req,res,next)=>{ console.log(req.method, req.originalUrl); next(); });
 
+// [FIX] mount admin router ครั้งเดียว โดยไม่ใส่ prefix ซ้ำ (เพราะไฟล์ routes/admin.js เริ่มด้วย /admin อยู่แล้ว)
+app.use(adminRoutes);
 
-// ========== HEALTH ==========
+/* ================= HEALTH ================= */
 app.get("/", (_req, res) => res.send("NoteCoLab server ok (merged in note_app_api)"));
 
 /* ===================================================================
@@ -110,12 +114,12 @@ async function ensureSchema3Tables() {
       board_id TEXT,
       pages JSONB NOT NULL,
       cover_png TEXT,
+      owner_id INTEGER,
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );
   `);
 
-  // [FIX] ensure default snapshot มี images เสมอ
   await pool.query(`
     ALTER TABLE boards      ADD COLUMN IF NOT EXISTS password_hash TEXT;
     ALTER TABLE boards      ADD COLUMN IF NOT EXISTS name          TEXT;
@@ -142,45 +146,61 @@ async function ensureSchema3Tables() {
   `);
 }
 
-// Pricing/Payments schema (เดิม)
+// [FIX] ให้ schema ด้าน “ซื้อโพสต์” ใช้ INT อ้างอิง posts(id) / users(id_user)
 async function ensurePricingPaymentsSchema() {
-  await pool.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(20);`);
+  // users.phone (สำหรับ PromptPay)
+  await pool.query(`ALTER TABLE public.users ADD COLUMN IF NOT EXISTS phone VARCHAR(20);`);
 
+  // posts ราคา
   await pool.query(`
-    ALTER TABLE posts
+    ALTER TABLE public.posts
     ADD COLUMN IF NOT EXISTS price_type VARCHAR(10) NOT NULL DEFAULT 'free',
     ADD COLUMN IF NOT EXISTS price_amount_satang INT NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS price_currency VARCHAR(3) NOT NULL DEFAULT 'THB';
   `);
 
+  // purchases / payment_slips / post_access / purchased_posts เป็น INT FK
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS purchases (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-      buyer_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      seller_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    CREATE TABLE IF NOT EXISTS public.purchases (
+      id SERIAL PRIMARY KEY,
+      post_id INT NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+      buyer_id INT NOT NULL REFERENCES public.users(id_user) ON DELETE CASCADE,
+      seller_id INT NOT NULL REFERENCES public.users(id_user) ON DELETE CASCADE,
       amount_satang INT NOT NULL,
       currency VARCHAR(3) NOT NULL DEFAULT 'THB',
-      status VARCHAR(16) NOT NULL DEFAULT 'pending',
+      status VARCHAR(16) NOT NULL DEFAULT 'pending', -- pending|slip_uploaded|approved|rejected|expired|paid
       qr_payload TEXT,
       expires_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ DEFAULT now()
     );
 
-    CREATE TABLE IF NOT EXISTS payment_slips (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      purchase_id UUID NOT NULL REFERENCES purchases(id) ON DELETE CASCADE,
+    CREATE TABLE IF NOT EXISTS public.payment_slips (
+      id SERIAL PRIMARY KEY,
+      purchase_id INT NOT NULL REFERENCES public.purchases(id) ON DELETE CASCADE,
       file_path TEXT NOT NULL,
       uploaded_at TIMESTAMPTZ DEFAULT now()
     );
 
-    CREATE TABLE IF NOT EXISTS post_access (
-      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-      post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
-      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    CREATE TABLE IF NOT EXISTS public.post_access (
+      id SERIAL PRIMARY KEY,
+      post_id INT NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES public.users(id_user) ON DELETE CASCADE,
       granted_at TIMESTAMPTZ DEFAULT now(),
       UNIQUE (post_id, user_id)
     );
+
+    CREATE TABLE IF NOT EXISTS public.purchased_posts (
+      post_id INT NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
+      user_id INT NOT NULL REFERENCES public.users(id_user) ON DELETE CASCADE,
+      granted_at TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (post_id, user_id)
+    );
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_purchases_status_created ON public.purchases(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_post_access_user ON public.post_access(user_id, granted_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_purchased_posts_user ON public.purchased_posts(user_id, granted_at DESC);
   `);
 }
 
@@ -194,8 +214,6 @@ function slugify(name) {
     .replace(/^-+|-+$/g, "");
   return s ? (s.length <= 64 ? s : s.slice(0, 64)) : `room_${Date.now()}`;
 }
-
-// [NEW] base64 cleaner
 function cleanB64(s) {
   if (typeof s !== "string") return s;
   return s.replace(/^data:image\/[^;]+;base64,/, "");
@@ -230,7 +248,6 @@ async function upsertBoard({ id, name, password }) {
     );
   }
 }
-
 async function getBoard(id) {
   const { rows } = await pool.query(
     `SELECT id, name, password_hash FROM boards WHERE id=$1`,
@@ -238,7 +255,6 @@ async function getBoard(id) {
   );
   return rows[0] || null;
 }
-
 async function getPageCount(boardId) {
   const { rows } = await pool.query(
     `SELECT COALESCE(MAX(page_index),-1) AS max_page FROM board_pages WHERE board_id=$1`,
@@ -247,7 +263,6 @@ async function getPageCount(boardId) {
   const max = Number(rows[0]?.max_page ?? -1);
   return max + 1;
 }
-
 async function ensurePageExists(boardId, pageIndex) {
   await pool.query(
     `INSERT INTO board_pages (board_id, page_index)
@@ -256,7 +271,6 @@ async function ensurePageExists(boardId, pageIndex) {
     [boardId, pageIndex]
   );
 }
-
 async function setPageSnapshot(boardId, pageIndex, snapshotJson) {
   await ensurePageExists(boardId, pageIndex);
   await pool.query(
@@ -266,7 +280,6 @@ async function setPageSnapshot(boardId, pageIndex, snapshotJson) {
     [boardId, pageIndex, snapshotJson]
   );
 }
-
 async function clearPage(boardId, pageIndex) {
   await ensurePageExists(boardId, pageIndex);
   await pool.query(
@@ -278,7 +291,6 @@ async function clearPage(boardId, pageIndex) {
     [boardId, pageIndex]
   );
 }
-
 async function getSnapshot(boardId, pageIndex) {
   const { rows } = await pool.query(
     `SELECT snapshot, version FROM board_pages WHERE board_id=$1 AND page_index=$2`,
@@ -286,7 +298,6 @@ async function getSnapshot(boardId, pageIndex) {
   );
   return rows[0] || null;
 }
-
 async function deletePageAndReindex(boardId, pageIndex) {
   const count = await getPageCount(boardId);
   if (count <= 1) return { ok: false, reason: "only_one_page" };
@@ -295,15 +306,11 @@ async function deletePageAndReindex(boardId, pageIndex) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(
-      `DELETE FROM board_pages WHERE board_id=$1 AND page_index=$2`,
-      [boardId, pageIndex]
-    );
-    await client.query(
-      `UPDATE board_pages SET page_index = page_index - 1
-       WHERE board_id=$1 AND page_index > $2`,
-      [boardId, pageIndex]
-    );
+    await client.query(`DELETE FROM board_pages WHERE board_id=$1 AND page_index=$2`, [boardId, pageIndex]);
+    await client.query(`UPDATE board_pages SET page_index = page_index - 1 WHERE board_id=$1 AND page_index > $2`, [
+      boardId,
+      pageIndex,
+    ]);
     await client.query("COMMIT");
     return { ok: true };
   } catch (e) {
@@ -315,10 +322,8 @@ async function deletePageAndReindex(boardId, pageIndex) {
 }
 
 /* ===================================================================
-   REST: NoteCoLab
+   REST: NoteCoLab (rooms/documents)
    =================================================================== */
-
-// สร้าง/อัปเดตห้อง (รองรับ password)
 app.post("/rooms", async (req, res) => {
   try {
     const { roomId, name, password } = req.body || {};
@@ -332,7 +337,6 @@ app.post("/rooms", async (req, res) => {
   }
 });
 
-// รายการเอกสาร
 app.get("/documents", async (req, res) => {
   try {
     const userId = req.query.user_id ? Number(req.query.user_id) : null;
@@ -364,7 +368,6 @@ app.get("/documents", async (req, res) => {
   }
 });
 
-// อ่านเอกสาร
 app.get("/documents/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -381,48 +384,41 @@ app.get("/documents/:id", async (req, res) => {
   }
 });
 
-// [FIX] สร้าง/อัปเดตเอกสาร (sanitize base64 + บังคับโครงสร้าง pages)
 app.post("/documents", async (req, res) => {
   try {
     const body = req.body || {};
     const id = body.id;
     const title = body.title;
-    // accept both camelCase and snake_case for board and cover
     const boardIdRaw = body.boardId ?? body.board_id ?? null;
     const coverRaw = body.coverPng ?? body.cover_png ?? null;
     const owner_id = body.owner_id ?? body.ownerId ?? null;
     const pages = body.pages;
 
-    if (!Array.isArray(pages))
-      return res.status(400).json({ error: "pages_required" });
+    if (!Array.isArray(pages)) return res.status(400).json({ error: "pages_required" });
 
-    // sanitize pages
     const pagesClean = pages.map((p) => {
       const idx = Number.isFinite(+p.index) ? +p.index : 0;
       const data = p.data && typeof p.data === "object" ? p.data : {};
-      const lines  = Array.isArray(data.lines)  ? data.lines  : [];
-      const texts  = Array.isArray(data.texts)  ? data.texts  : [];
+      const lines = Array.isArray(data.lines) ? data.lines : [];
+      const texts = Array.isArray(data.texts) ? data.texts : [];
       const images = Array.isArray(data.images) ? data.images : [];
-      const imagesClean = images.map((im) => ({
-        ...im,
-        bytesB64: cleanB64(im.bytesB64),
-      }));
+      const imagesClean = images.map((im) => ({ ...im, bytesB64: cleanB64(im.bytesB64) }));
       return { index: idx, data: { lines, texts, images: imagesClean } };
     });
 
-    // normalize boardId: treat special 'offline' and empty as null
-    const boardVal = (typeof boardIdRaw === 'string' && boardIdRaw.trim().toLowerCase() === 'offline')
-      ? null
-      : (typeof boardIdRaw === 'string' ? boardIdRaw.trim() : null);
+    const boardVal =
+      typeof boardIdRaw === "string" && boardIdRaw.trim().toLowerCase() === "offline"
+        ? null
+        : typeof boardIdRaw === "string"
+        ? boardIdRaw.trim()
+        : null;
 
-    // if board provided, ensure board record exists so clients can join
     if (boardVal) {
       try {
         await upsertBoard({ id: boardVal, name: null, password: null });
         await ensurePageExists(boardVal, 0);
       } catch (e) {
-        // non-fatal; continue
-        console.error('ensure board failed', e);
+        console.error("ensure board failed", e);
       }
     }
 
@@ -437,14 +433,7 @@ app.post("/documents", async (req, res) => {
          cover_png=COALESCE(EXCLUDED.cover_png, documents.cover_png),
          owner_id=COALESCE(EXCLUDED.owner_id, documents.owner_id),
          updated_at=now()`,
-      [
-        docId,
-        title || "Untitled",
-        boardVal,
-        JSON.stringify(pagesClean),
-        cleanB64(coverRaw) || null,
-        normInt(owner_id) || null,
-      ]
+      [docId, title || "Untitled", boardVal, JSON.stringify(pagesClean), cleanB64(coverRaw) || null, normInt(owner_id) || null]
     );
     res.json({ ok: true, id: docId });
   } catch (e) {
@@ -453,7 +442,6 @@ app.post("/documents", async (req, res) => {
   }
 });
 
-// ลบเอกสาร
 app.delete("/documents/:id", async (req, res) => {
   try {
     const { id } = req.params;
@@ -462,12 +450,8 @@ app.delete("/documents/:id", async (req, res) => {
       return res.status(400).json({ error: "invalid_user_id" });
 
     if (userId != null) {
-      const r = await pool.query(
-        `DELETE FROM documents WHERE id=$1 AND owner_id=$2`,
-        [id, userId]
-      );
-      if (r.rowCount === 0)
-        return res.status(404).json({ error: "not_found_or_not_owner" });
+      const r = await pool.query(`DELETE FROM documents WHERE id=$1 AND owner_id=$2`, [id, userId]);
+      if (r.rowCount === 0) return res.status(404).json({ error: "not_found_or_not_owner" });
       return res.json({ ok: true });
     }
 
@@ -480,14 +464,17 @@ app.delete("/documents/:id", async (req, res) => {
 });
 
 /* ===================================================================
-   USERS (เพิ่ม phone ถัดจาก bio)
+   USERS (เพิ่ม phone สำหรับ PromptPay)
    =================================================================== */
 app.post("/api/users/:id/profile", async (req, res) => {
   try {
     const { id } = req.params;
     const { bio, phone } = req.body;
     await pool.query(
-      `UPDATE users SET bio = COALESCE($1,bio), phone = COALESCE($2,phone) WHERE id = $3`,
+      `UPDATE public.users
+         SET bio = COALESCE($1,bio),
+             phone = COALESCE($2,phone)
+       WHERE id_user = $3`,                                // [FIX] users.id_user
       [bio ?? null, phone ?? null, id]
     );
     res.json({ ok: true });
@@ -519,10 +506,7 @@ function crc16(payload) {
 }
 function generatePromptPayPayload(phoneOrID, amountBaht) {
   const target = normalizeThaiPhone(phoneOrID);
-  const merchantAccInfo =
-    "0016A000000677010111" +
-    "02" + String(target.length).padStart(2, "0") + target;
-
+  const merchantAccInfo = "0016A000000677010111" + "02" + String(target.length).padStart(2, "0") + target;
   const merchantInfo = "29" + String(merchantAccInfo.length).padStart(2, "0") + merchantAccInfo;
   const amountStr = typeof amountBaht === "number" ? amountBaht.toFixed(2) : null;
 
@@ -542,7 +526,7 @@ function generatePromptPayPayload(phoneOrID, amountBaht) {
 }
 
 /* ===================================================================
-   PAYMENTS FLOW
+   PAYMENTS FLOW (ปรับเป็นสคีมา INT)
    =================================================================== */
 
 // เริ่มคำสั่งซื้อ → สร้าง PromptPay QR (หมดอายุ 10 นาที)
@@ -550,25 +534,30 @@ app.post("/api/purchases", async (req, res) => {
   try {
     const { postId, buyerId } = req.body;
 
+    // [FIX] posts.user_id → users.id_user
     const pr = await pool.query(
-      `SELECT p.*, u.id AS seller_id, u.phone AS seller_phone
-       FROM posts p JOIN users u ON u.id = p.author_id
-       WHERE p.id = $1`,
+      `SELECT p.id, p.user_id AS seller_id, p.price_type, p.price_amount_satang,
+              u.phone AS seller_phone
+         FROM public.posts p
+         JOIN public.users u ON u.id_user = p.user_id
+        WHERE p.id = $1`,
       [postId]
     );
-    if (!pr.rowCount) return res.status(404).json({ error: "Post not found" });
+    if (!pr.rowCount) return res.status(404).json({ error: "post_not_found" });
 
     const post = pr.rows[0];
-    if (post.price_type !== "paid") return res.status(400).json({ error: "This post is free." });
-    if (!post.seller_phone) return res.status(400).json({ error: "Seller has no phone." });
+    if (post.price_type !== "paid") return res.status(400).json({ error: "post_is_free" });
+    if (!post.seller_phone) return res.status(400).json({ error: "seller_no_phone" });
 
     const amountBaht = post.price_amount_satang / 100.0;
     const payload = generatePromptPayPayload(post.seller_phone, amountBaht);
     const expiresAt = dayjs().add(10, "minute").toISOString();
 
     const ins = await pool.query(
-      `INSERT INTO purchases (post_id,buyer_id,seller_id,amount_satang,currency,status,qr_payload,expires_at)
-       VALUES ($1,$2,$3,$4,'THB','pending',$5,$6) RETURNING *`,
+      `INSERT INTO public.purchases
+         (post_id, buyer_id, seller_id, amount_satang, currency, status, qr_payload, expires_at)
+       VALUES ($1,$2,$3,$4,'THB','pending',$5,$6)
+       RETURNING *`,
       [postId, buyerId, post.seller_id, post.price_amount_satang, payload, expiresAt]
     );
 
@@ -584,15 +573,12 @@ app.post("/api/purchases", async (req, res) => {
 app.get("/api/purchases/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const r = await pool.query(`SELECT * FROM purchases WHERE id = $1`, [id]);
-    if (!r.rowCount) return res.status(404).json({ error: "Not found" });
+    const r = await pool.query(`SELECT * FROM public.purchases WHERE id = $1`, [id]);
+    if (!r.rowCount) return res.status(404).json({ error: "not_found" });
 
     const purchase = r.rows[0];
     if (purchase.status === "pending" && purchase.expires_at && dayjs().isAfter(purchase.expires_at)) {
-      const up = await pool.query(
-        `UPDATE purchases SET status='expired' WHERE id=$1 RETURNING *`,
-        [id]
-      );
+      const up = await pool.query(`UPDATE public.purchases SET status='expired' WHERE id=$1 RETURNING *`, [id]);
       return res.json({ purchase: up.rows[0] });
     }
     res.json({ purchase });
@@ -606,75 +592,45 @@ app.get("/api/purchases/:id", async (req, res) => {
 app.post("/api/purchases/:id/slip", upload.single("slip"), async (req, res) => {
   try {
     const { id } = req.params;
-    if (!req.file) return res.status(400).json({ error: "Missing slip file" });
+    if (!req.file) return res.status(400).json({ error: "missing_slip_file" });
 
-    const pr = await pool.query(`SELECT * FROM purchases WHERE id=$1`, [id]);
-    if (!pr.rowCount) return res.status(404).json({ error: "Purchase not found" });
-    if (pr.rows[0].status === "expired") return res.status(400).json({ error: "Purchase expired" });
+    const pr = await pool.query(`SELECT * FROM public.purchases WHERE id=$1`, [id]);
+    if (!pr.rowCount) return res.status(404).json({ error: "purchase_not_found" });
+    if (pr.rows[0].status === "expired") return res.status(400).json({ error: "purchase_expired" });
 
     await pool.query(
-      `INSERT INTO payment_slips (purchase_id, file_path) VALUES ($1,$2)`,
-      [id, req.file.path]
+      `INSERT INTO public.payment_slips (purchase_id, file_path) VALUES ($1,$2)`,
+      [id, "/" + path.relative(process.cwd(), req.file.path).replace(/\\/g, "/")]
     );
     const up = await pool.query(
-      `UPDATE purchases SET status='slip_uploaded' WHERE id=$1 RETURNING *`,
+      `UPDATE public.purchases SET status='slip_uploaded' WHERE id=$1 RETURNING *`,
       [id]
     );
-    res.json({ purchase: up.rows[0], slipPath: `/${req.file.path}` });
+    res.json({ purchase: up.rows[0] });
   } catch (e) {
     console.error("POST /api/purchases/:id/slip", e);
     res.status(500).json({ error: "internal_error" });
   }
 });
 
-/* ===================== ADMIN ===================== */
+/* (OPTIONAL) API สำหรับแอดมินตรวจสลิปแบบ JSON */
 app.get("/api/admin/pending-slips", async (_req, res) => {
   try {
     const r = await pool.query(`
-      SELECT pu.*, ps.file_path, p.title,
-             u_buyer.email AS buyer_email, u_seller.email AS seller_email
-      FROM purchases pu
-        JOIN posts p ON p.id = pu.post_id
-        JOIN users u_buyer ON u_buyer.id = pu.buyer_id
-        JOIN users u_seller ON u_seller.id = pu.seller_id
-        LEFT JOIN payment_slips ps ON ps.purchase_id = pu.id
-      WHERE pu.status = 'slip_uploaded'
-      ORDER BY pu.created_at DESC
+      SELECT pu.*, ps.file_path,
+             p.text AS post_text,
+             ub.username AS buyer_name, us.username AS seller_name
+        FROM public.purchases pu
+        JOIN public.posts p  ON p.id = pu.post_id
+        JOIN public.users ub ON ub.id_user = pu.buyer_id
+        JOIN public.users us ON us.id_user = pu.seller_id
+   LEFT JOIN public.payment_slips ps ON ps.purchase_id = pu.id
+       WHERE pu.status = 'slip_uploaded'
+       ORDER BY pu.created_at DESC
     `);
     res.json({ items: r.rows });
   } catch (e) {
     console.error("GET /api/admin/pending-slips", e);
-    res.status(500).json({ error: "internal_error" });
-  }
-});
-
-app.post("/api/admin/purchases/:id/decision", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { decision } = req.body; // 'approved' | 'rejected'
-    const pr = await pool.query(`SELECT * FROM purchases WHERE id=$1`, [id]);
-    if (!pr.rowCount) return res.status(404).json({ error: "Not found" });
-
-    if (decision === "approved") {
-      const { post_id, buyer_id, seller_id, amount_satang } = pr.rows[0];
-      await pool.query(
-        `INSERT INTO post_access (post_id,user_id)
-         VALUES ($1,$2) ON CONFLICT (post_id,user_id) DO NOTHING`,
-        [post_id, buyer_id]
-      );
-      // เพิ่มเหรียญให้ seller
-      await pool.query(
-        `UPDATE users SET coins = COALESCE(coins,0) + $1 WHERE id = $2`,
-        [Math.floor(amount_satang / 100), seller_id]
-      );
-    }
-    const up = await pool.query(
-      `UPDATE purchases SET status=$2 WHERE id=$1 RETURNING *`,
-      [id, decision === "approved" ? "approved" : "rejected"]
-    );
-    res.json({ purchase: up.rows[0] });
-  } catch (e) {
-    console.error("POST /api/admin/purchases/:id/decision", e);
     res.status(500).json({ error: "internal_error" });
   }
 });
@@ -690,9 +646,7 @@ io.on("connection", (socket) => {
 
       if (board.password_hash) {
         const hasPwd = typeof password === "string" && password.length > 0;
-        if (!hasPwd) {
-          return socket.emit("join_error", { message: "Password required", needPassword: true });
-        }
+        if (!hasPwd) return socket.emit("join_error", { message: "Password required", needPassword: true });
         const ok = await bcrypt.compare(password ?? "", board.password_hash);
         if (!ok) return socket.emit("join_error", { message: "Invalid password", needPassword: true });
       }

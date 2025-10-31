@@ -248,6 +248,30 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
+  // NEW: แจ้งเตือนให้ไปซื้อโพสต์
+  void _promptPurchase() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('ปลดล็อกเนื้อหา'),
+        content: const Text('ซื้อโพสต์นี้เพื่อดูรูปทั้งหมดและดาวน์โหลดไฟล์แนบ'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('ปิด')),
+          // TODO: เปลี่ยนเป็นไปหน้า/ฟลว์ชำระเงินจริงของคุณ
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('ไปหน้าซื้อโพสต์…')),
+              );
+            },
+            child: const Text('ซื้อโพสต์'),
+          ),
+        ],
+      ),
+    );
+  }
+
   String _timeAgo(String? iso) {
     if (iso == null) return '';
     final dt = DateTime.tryParse(iso)?.toLocal();
@@ -260,49 +284,53 @@ class _PostCardState extends State<PostCard> {
     return '${dt.year}/${dt.month}/${dt.day}';
   }
 
-Future<void> _confirmAndArchive() async {
-  final postId = widget.post['id'] as int?;
-  if (postId == null || _userId == null) return;
+  Future<void> _confirmAndArchive() async {
+    final postId = widget.post['id'] as int?;
+    if (postId == null || _userId == null) return;
 
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (_) => AlertDialog(
-      title: const Text('ลบโพสต์ (เก็บไว้ส่วนตัว)'),
-      content: const Text('ย้ายโพสต์นี้ไปยังรายการลบ (สามารถกู้คืนได้ใน Settings) ?'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
-        ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('ยืนยัน')),
-      ],
-    ),
-  );
-  if (ok != true) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('ลบโพสต์ (เก็บไว้ส่วนตัว)'),
+        content: const Text('ย้ายโพสต์นี้ไปยังรายการลบ (สามารถกู้คืนได้ใน Settings) ?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('ยกเลิก')),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), child: const Text('ยืนยัน')),
+        ],
+      ),
+    );
+    if (ok != true) return;
 
-  try {
-    final success = await ApiService().archivePost(postId, _userId!);
-    if (!mounted) return;
-    if (success) {
+    try {
+      final success = await ApiService().archivePost(postId, _userId!);
+      if (!mounted) return;
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ย้ายไปที่ Deleted แล้ว')),
+        );
+        widget.onDeleted?.call();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ล้มเหลว: server ไม่ยอมรับคำสั่ง')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ย้ายไปที่ Deleted แล้ว')),
-      );
-      // ใช้อันไหนก็ได้ตามที่ตั้งไว้ใน widget
-      widget.onDeleted?.call();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ล้มเหลว: server ไม่ยอมรับคำสั่ง')),
+        SnackBar(content: Text('ล้มเหลว: $e')),
       );
     }
-  } catch (e) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('ล้มเหลว: $e')),
-    );
   }
-}
-
 
   @override
   Widget build(BuildContext context) {
     final p = widget.post;
+
+    // CHANGED: สร้าง URL ให้ถูก (รองรับทั้ง /uploads และ http)
+    List<String> _fixUrls(List<String> arr) => arr
+        .map((e) => e.startsWith('http') ? e : '${ApiService.host}$e')
+        .toList();
+
     final avatar = (p['avatar_url'] as String?) ?? '';
     final file = (p['file_url'] as String?) ?? '';
     final fileName = file.isNotEmpty ? file.split('/').last : null;
@@ -313,12 +341,11 @@ Future<void> _confirmAndArchive() async {
     final created = p['created_at'] as String?;
     final List<String> images = (p['images'] as List?)?.cast<String>() ?? [];
     final legacy = p['image_url'] as String?;
-    final allImages = [
+    final allImagesRaw = [
       ...images,
       if ((legacy ?? '').isNotEmpty && images.isEmpty) legacy!,
-    ].map((e) => '${ApiService.host}$e').toList();
-
-    final showSeeMore = text.trim().length > 80;
+    ];
+    final allImages = _fixUrls(allImagesRaw); // CHANGED
 
     // ตรวจว่าเจ้าของโพสต์ใช่เราหรือไม่ (รองรับทั้ง author_id/user_id)
     int? ownerId;
@@ -328,6 +355,23 @@ Future<void> _confirmAndArchive() async {
       final parsed = int.tryParse('$rawOwner');
       if (parsed != null) ownerId = parsed;
     }
+
+    // NEW: ตรวจสิทธิ์การเข้าถึงเต็ม
+    final priceType = (p['price_type'] ?? 'free').toString();
+    final isPaid = priceType != 'free';
+    bool purchased = (p['is_purchased'] == true);
+    if (ownerId != null && _userId != null && ownerId == _userId) {
+      purchased = true; // เจ้าของดูได้เต็ม
+    }
+    final canSeeAll = !isPaid || purchased;
+    final canDownload = !isPaid || purchased;
+
+    // NEW: ถ้ายังไม่ซื้อ → ตัดเหลือแค่รูปแรก
+    final imagesToShow = canSeeAll
+        ? allImages
+        : (allImages.isNotEmpty ? [allImages.first] : <String>[]);
+
+    final showSeeMore = text.trim().length > 80;
     final canDelete = (ownerId != null && _userId != null && ownerId == _userId);
 
     return Padding(
@@ -374,14 +418,24 @@ Future<void> _confirmAndArchive() async {
                 : const Icon(Icons.more_horiz),
           ),
 
-          // Images Grid
-          if (allImages.isNotEmpty)
+          // Images Grid (ห่อด้วย Stack เพื่อแปะป้ายล็อก)
+          if (imagesToShow.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: _SmartImageGrid(
-                postId: p['id'] as int,
-                images: allImages,
-                onTap: (i) => _openGallery(allImages, i, p['id'] as int),
+              child: Stack(
+                children: [
+                  _SmartImageGrid(
+                    postId: p['id'] as int,
+                    images: imagesToShow,
+                    onTap: (i) => _openGallery(imagesToShow, i, p['id'] as int), // CHANGED
+                  ),
+                  if (!canSeeAll && allImages.length > 1) // NEW: ป้ายล็อก
+                    const Positioned(
+                      right: 8,
+                      top: 8,
+                      child: _LockPill(label: 'ปลดล็อกดูรูปทั้งหมด'),
+                    ),
+                ],
               ),
             ),
 
@@ -392,9 +446,29 @@ Future<void> _confirmAndArchive() async {
               child: InkWell(
                 borderRadius: BorderRadius.circular(12),
                 onTap: () async {
-                  final url = '${ApiService.host}$file';
-                  final savePath = await _downloadFile(url, fileName ?? 'downloaded_file');
+                  if (!canDownload) {
+                    _promptPurchase(); // NEW
+                    return;
+                  }
+                  // NEW: ดาวน์โหลดผ่านเอ็นด์พอยน์ต์ที่เช็คสิทธิ์
+                  final sp = await SharedPreferences.getInstance();
+                  final uid = _userId ?? sp.getInt('user_id');
+                  if (uid == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('กรุณาเข้าสู่ระบบก่อนดาวน์โหลด')),
+                    );
+                    return;
+                  }
+                  final secureUrl = ApiService.buildSecureDownloadUrl(
+                    postId: (p['id'] as int),
+                    viewerUserId: uid,
+                  );
+                  final savePath = await _downloadFile(
+                    secureUrl,
+                    fileName ?? 'downloaded_file',
+                  );
                   if (savePath != null) {
+                    if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('ไฟล์ถูกดาวน์โหลดไปที่ $savePath')),
                     );
@@ -404,6 +478,7 @@ Future<void> _confirmAndArchive() async {
                       debugPrint('Open file error: $e');
                     }
                   } else {
+                    if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       const SnackBar(content: Text('ดาวน์โหลดไฟล์ไม่สำเร็จ')),
                     );
@@ -418,7 +493,11 @@ Future<void> _confirmAndArchive() async {
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.insert_drive_file, size: 20, color: Color(0xFF335CFF)),
+                      Icon(
+                        canDownload ? Icons.insert_drive_file : Icons.lock, // CHANGED
+                        size: 20,
+                        color: const Color(0xFF335CFF),
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -435,11 +514,18 @@ Future<void> _confirmAndArchive() async {
                           color: const Color(0xFFEFF4FF),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const Row(
+                        child: Row(
                           children: [
-                            Icon(Icons.download_rounded, size: 18, color: Color(0xFF335CFF)),
-                            SizedBox(width: 2),
-                            Text('ดาวน์โหลด', style: TextStyle(fontSize: 12, color: Color(0xFF335CFF))),
+                            Icon(
+                              canDownload ? Icons.download_rounded : Icons.lock, // CHANGED
+                              size: 18,
+                              color: const Color(0xFF335CFF),
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              canDownload ? 'ดาวน์โหลด' : 'ปลดล็อกเพื่อดาวน์โหลด', // CHANGED
+                              style: const TextStyle(fontSize: 12, color: Color(0xFF335CFF)),
+                            ),
                           ],
                         ),
                       ),
@@ -625,6 +711,30 @@ class _Thumb extends StatelessWidget {
           errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, size: 32),
         ),
       );
+}
+
+// NEW: ป้ายล็อกเล็ก ๆ มุมขวาบน
+class _LockPill extends StatelessWidget {
+  final String label;
+  const _LockPill({required this.label});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.lock, color: Colors.white, size: 16),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(color: Colors.white, fontSize: 12)),
+        ],
+      ),
+    );
+  }
 }
 
 // ====================== BottomSheet: Comments ======================

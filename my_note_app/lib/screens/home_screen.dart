@@ -239,7 +239,7 @@ class _HomeState extends State<homescreen> {
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          PurchasedOverlay(child: postCard),
+                          postCard,
                           const SizedBox(height: 8),
                         ],
                       );

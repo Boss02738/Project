@@ -1,15 +1,18 @@
 // controllers/postController.js
-const pool = require('../models/db');
+const fs = require("fs");
+const path = require("path");
+const pool = require("../models/db");
 
+/* ----------------------- helpers ----------------------- */
 const normalizeImagePaths = (files = []) =>
-  (files || []).map(f => `/uploads/post_images/${f.filename}`);
+  (files || []).map((f) => `/uploads/post_images/${f.filename}`);
 
-/** ===================== CREATE POST ===================== */
-const createPost = async (req, res) => {
+/* ===================== CREATE POST ===================== */
+async function createPost(req, res) {
   const client = await pool.connect();
   try {
     const { user_id, text, year_label, subject } = req.body;
-    if (!user_id) return res.status(400).json({ message: 'ต้องมี user_id' });
+    if (!user_id) return res.status(400).json({ message: "ต้องมี user_id" });
 
     // รูป/ไฟล์แนบ
     const images = normalizeImagePaths(req.files?.images);
@@ -19,10 +22,13 @@ const createPost = async (req, res) => {
     }
     const firstImage = images.length ? images[0] : null;
 
-    // ----- ราคา (กันเหนียว normalize อีกรอบ) -----
-    let priceType = String(req.body.price_type || '').toLowerCase() === 'paid' ? 'paid' : 'free';
+    // ราคา
+    let priceType =
+      String(req.body.price_type || "").trim().toLowerCase() === "paid"
+        ? "paid"
+        : "free";
     let priceAmountSatang = 0;
-    if (priceType === 'paid') {
+    if (priceType === "paid") {
       if (req.body.price_amount_satang != null) {
         priceAmountSatang = parseInt(req.body.price_amount_satang, 10) || 0;
       } else if (req.body.price_baht != null || req.body.priceBaht != null) {
@@ -31,17 +37,15 @@ const createPost = async (req, res) => {
       }
     }
 
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
-    const insertPost = `
+    const insertSql = `
       INSERT INTO public.posts
         (user_id, text, year_label, subject, image_url, file_url,
          price_type, price_amount_satang, created_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8, NOW())
-      RETURNING id, user_id, text, year_label, subject, image_url, file_url,
-                price_type, price_amount_satang, created_at
-    `;
-    const p = await client.query(insertPost, [
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
+      RETURNING id`;
+    const ins = await client.query(insertSql, [
       user_id,
       text || null,
       year_label || null,
@@ -51,25 +55,25 @@ const createPost = async (req, res) => {
       priceType,
       priceAmountSatang,
     ]);
-    const post = p.rows[0];
+    const newId = ins.rows[0].id;
 
     if (images.length) {
       const values = [];
       const params = [];
       images.forEach((img, i) => {
-        params.push(`($1, $${i + 2})`);
+        params.push(`($1,$${i + 2})`);
         values.push(img);
       });
       await client.query(
-        `INSERT INTO public.post_images (post_id, image_url) VALUES ${params.join(',')}`,
-        [post.id, ...values]
+        `INSERT INTO public.post_images (post_id, image_url) VALUES ${params.join(",")}`,
+        [newId, ...values]
       );
     }
 
-    await client.query('COMMIT');
+    await client.query("COMMIT");
 
     // ส่งกลับโพสต์พร้อม images[]
-    const r = await client.query(
+    const r = await pool.query(
       `SELECT p.*,
               COALESCE(json_agg(pi.image_url ORDER BY pi.id)
                        FILTER (WHERE pi.id IS NOT NULL), '[]') AS images
@@ -77,202 +81,255 @@ const createPost = async (req, res) => {
          LEFT JOIN public.post_images pi ON pi.post_id = p.id
         WHERE p.id = $1
         GROUP BY p.id`,
-      [post.id]
+      [newId]
     );
-
-    res.status(201).json(r.rows[0]);
+    return res.status(201).json(r.rows[0]);
   } catch (e) {
-    await client.query('ROLLBACK');
-    console.error('createPost error:', e);
-    res.status(500).json({ message: 'internal error' });
+    await pool.query("ROLLBACK");
+    console.error("createPost error:", e);
+    return res.status(500).json({ message: "internal error" });
   } finally {
     client.release();
   }
-};
+}
 
-/** ===================== FEED ===================== */
-const getFeed = async (req, res) => {
+/* ========================= FEED ======================== */
+// UPDATED: ใส่ liked_by_me, like_count, comment_count และ normalize price_type + ใช้พารามิเตอร์
+async function getFeed(req, res) {
   try {
-    const viewerId = Number(req.query.user_id) || 0;
+    const viewerId = Number(req.query.user_id || 0);
 
-    const q = `
-      SELECT 
-        p.*,
+    const sql = `
+      SELECT
+        p.id,
+        p.user_id,
         u.username,
         COALESCE(u.avatar_url,'') AS avatar_url,
-        COALESCE(json_agg(pi.image_url) FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
+        p.text, p.subject, p.year_label,
+        LOWER(TRIM(p.price_type)) AS price_type,
+        p.price_amount_satang,
+        p.file_url,
+        p.created_at,
+
+        CASE
+          WHEN $1 = 0 THEN false
+          WHEN EXISTS (
+            SELECT 1 FROM public.purchased_posts pp
+            WHERE pp.post_id = p.id AND pp.user_id = $1
+          ) THEN true
+          ELSE false
+        END AS is_purchased,
+
         (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
         (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
-        EXISTS (
-          SELECT 1 FROM public.likes l 
-          WHERE l.post_id = p.id AND l.user_id = $1
-        ) AS liked_by_me
+
+        CASE
+          WHEN $1 = 0 THEN false
+          WHEN EXISTS (
+            SELECT 1 FROM public.likes l
+            WHERE l.post_id = p.id AND l.user_id = $1
+          ) THEN true
+          ELSE false
+        END AS liked_by_me,
+
+        COALESCE(
+          json_agg(pi.image_url ORDER BY pi.id)
+            FILTER (WHERE pi.id IS NOT NULL),
+          '[]'
+        ) AS images
+
       FROM public.posts p
       JOIN public.users u ON u.id_user = p.user_id
- LEFT JOIN public.post_images pi ON pi.post_id = p.id
- WHERE COALESCE(p.is_archived,false) = false
- GROUP BY p.id, u.username, u.avatar_url
- ORDER BY p.created_at DESC
+      LEFT JOIN public.post_images pi ON pi.post_id = p.id
+      WHERE COALESCE(p.is_archived,false) = false
+      GROUP BY p.id, u.id_user, u.username, u.avatar_url
+      ORDER BY p.created_at DESC
+      LIMIT 50
     `;
-    const { rows } = await pool.query(q, [viewerId]);
-    res.json(rows);
-  } catch (err) {
-    console.error('getFeed error:', err);
-    res.status(500).json({ message: 'Error loading feed' });
-  }
-};
 
-/** ===================== BY SUBJECT ===================== */
-const getPostsBySubject = async (req, res) => {
+    const { rows } = await pool.query(sql, [viewerId]);
+    res.json(rows);
+  } catch (e) {
+    console.error('getFeed error', e);
+    res.status(500).json({ message: 'Server error' });
+  }
+}
+
+/* ===================== BY SUBJECT ===================== */
+// UPDATED: alias is_purchased ให้ตรงฟรอนต์ + normalize price_type
+async function getPostsBySubject(req, res) {
   const { subject } = req.query;
   const viewerId = Number(req.query.user_id) || 0;
-
   try {
     const q = `
       SELECT 
         p.*,
         u.username,
         COALESCE(u.avatar_url,'') AS avatar_url,
+        LOWER(TRIM(p.price_type)) AS price_type,
         COALESCE(json_agg(pi.image_url ORDER BY pi.id)
-                 FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
+                FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
         (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
         (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
         EXISTS (
           SELECT 1 FROM public.likes l 
           WHERE l.post_id = p.id AND l.user_id = $2
-        ) AS liked_by_me
+        ) AS liked_by_me,
+        EXISTS (
+          SELECT 1 FROM public.purchased_posts pp
+          WHERE pp.post_id = p.id
+            AND pp.user_id = $2
+        ) AS is_purchased
       FROM public.posts p
       JOIN public.users u ON u.id_user = p.user_id
- LEFT JOIN public.post_images pi ON pi.post_id = p.id
- WHERE COALESCE(p.is_archived,false) = false
-   AND ($1::text IS NULL OR p.subject = $1)  GROUP BY p.id, u.username, u.avatar_url
-  ORDER BY p.created_at DESC
+      LEFT JOIN public.post_images pi ON pi.post_id = p.id
+      WHERE COALESCE(p.is_archived,false) = false
+        AND ($1::text IS NULL OR p.subject = $1)
+      GROUP BY p.id, u.username, u.avatar_url
+      ORDER BY p.created_at DESC
     `;
     const r = await pool.query(q, [subject || null, viewerId]);
     res.json(r.rows);
   } catch (e) {
-    console.error('getPostsBySubject error:', e);
-    res.status(500).json({ message: 'internal error' });
+    console.error("getPostsBySubject error:", e);
+    res.status(500).json({ message: "internal error" });
   }
-};
+}
 
-/** ===================== LIKE/UNLIKE ===================== */
-const toggleLike = async (req, res) => {
+/* ===================== LIKE/UNLIKE ===================== */
+async function toggleLike(req, res) {
   const postId = Number(req.params.id);
   const userId = Number(req.body.user_id);
-  if (!postId || !userId) return res.status(400).json({ message: 'missing post_id/user_id' });
-  const chk = await pool.query('SELECT COALESCE(is_archived,false) AS a FROM public.posts WHERE id=$1',[postId]);
-  if (!chk.rowCount) return res.status(404).json({ message: 'post_not_found' });
-  if (chk.rows[0].a)  return res.status(400).json({ message: 'post_archived' });
+  if (!postId || !userId)
+    return res.status(400).json({ message: "missing post_id/user_id" });
+
+  const chk = await pool.query(
+    "SELECT COALESCE(is_archived,false) a FROM public.posts WHERE id=$1",
+    [postId]
+  );
+  if (!chk.rowCount) return res.status(404).json({ message: "post_not_found" });
+  if (chk.rows[0].a) return res.status(400).json({ message: "post_archived" });
+
   try {
-    const existing = await pool.query(
-      'SELECT id FROM public.likes WHERE post_id=$1 AND user_id=$2',
+    const ex = await pool.query(
+      "SELECT id FROM public.likes WHERE post_id=$1 AND user_id=$2",
       [postId, userId]
     );
-    if (existing.rowCount > 0) {
-      await pool.query('DELETE FROM public.likes WHERE id=$1', [existing.rows[0].id]);
+    if (ex.rowCount > 0) {
+      await pool.query("DELETE FROM public.likes WHERE id=$1", [ex.rows[0].id]);
       return res.json({ liked: false });
     } else {
-      await pool.query('INSERT INTO public.likes(post_id, user_id) VALUES ($1,$2)', [postId, userId]);
+      await pool.query(
+        "INSERT INTO public.likes(post_id,user_id) VALUES ($1,$2)",
+        [postId, userId]
+      );
       return res.json({ liked: true });
     }
   } catch (e) {
-    console.error('toggleLike error:', e);
-    res.status(500).json({ message: 'internal error' });
+    console.error("toggleLike error:", e);
+    res.status(500).json({ message: "internal error" });
   }
-};
+}
 
-/** ===================== COUNTS ===================== */
-const getPostCounts = async (req, res) => {
+/* ========================= COUNTS ====================== */
+async function getPostCounts(req, res) {
   const postId = Number(req.params.id);
-  if (!postId) return res.status(400).json({ message: 'missing post_id' });
-
+  if (!postId) return res.status(400).json({ message: "missing post_id" });
   try {
-    const { rows: [a] } = await pool.query(
+    const {
+      rows: [a],
+    } = await pool.query(
       `SELECT
-         (SELECT COUNT(*)::int FROM public.likes WHERE post_id=$1) AS like_count,
+         (SELECT COUNT(*)::int FROM public.likes    WHERE post_id=$1) AS like_count,
          (SELECT COUNT(*)::int FROM public.comments WHERE post_id=$1) AS comment_count`,
       [postId]
     );
     res.json(a);
   } catch (e) {
-    console.error('getPostCounts error:', e);
-    res.status(500).json({ message: 'internal error' });
+    console.error("getPostCounts error:", e);
+    res.status(500).json({ message: "internal error" });
   }
-};
+}
 
-/** ===================== COMMENTS ===================== */
-const getComments = async (req, res) => {
+/* ========================= COMMENTS ==================== */
+async function getComments(req, res) {
   const postId = Number(req.params.id);
-  if (!postId) return res.status(400).json({ message: 'missing post id' });
-
+  if (!postId) return res.status(400).json({ message: "missing post id" });
   try {
     const r = await pool.query(
-      `SELECT c.id, c.text, c.created_at,
-              c.user_id,
+      `SELECT c.id, c.text, c.created_at, c.user_id,
               u.username,
-              COALESCE(u.avatar_url, '/uploads/avatars/default.png') AS avatar_url
-       FROM public.comments c
-       LEFT JOIN public.users u ON u.id_user = c.user_id
-       WHERE c.post_id = $1
-       ORDER BY c.created_at ASC`,
+              COALESCE(u.avatar_url,'/uploads/avatars/default.png') AS avatar_url
+         FROM public.comments c
+         LEFT JOIN public.users u ON u.id_user = c.user_id
+        WHERE c.post_id=$1
+        ORDER BY c.created_at ASC`,
       [postId]
     );
-    return res.json(r.rows);
-  } catch (err) {
-    return res.status(500).json({ message: 'server error' });
+    res.json(r.rows);
+  } catch (e) {
+    res.status(500).json({ message: "server error" });
   }
-};
+}
 
-const addComment = async (req, res) => {
+async function addComment(req, res) {
   const postId = Number(req.params.id);
   const { user_id, text } = req.body || {};
   const userId = Number(user_id);
-  if (!postId || !userId || !text || !text.trim()) {
-    return res.status(400).json({ message: 'missing fields' });
-  }
+  if (!postId || !userId || !text || !text.trim())
+    return res.status(400).json({ message: "missing fields" });
   try {
     await pool.query(
-      'INSERT INTO public.comments(post_id, user_id, text) VALUES ($1,$2,$3)',
+      "INSERT INTO public.comments(post_id,user_id,text) VALUES ($1,$2,$3)",
       [postId, userId, text.trim()]
     );
-    res.json({ message: 'ok' });
+    res.json({ message: "ok" });
   } catch (e) {
-    console.error('addComment error:', e);
-    res.status(500).json({ message: 'internal error' });
+    console.error("addComment error:", e);
+    res.status(500).json({ message: "internal error" });
   }
-};
+}
 
-/** ===================== SAVE / UNSAVE ===================== */
-const toggleSave = async (req, res) => {
+/* ======================== SAVE ========================= */
+async function toggleSave(req, res) {
   const postId = Number(req.params.id);
   const userId = Number(req.body.user_id);
-  if (!postId || !userId) return res.status(400).json({ message: 'missing post_id/user_id' });
-  const chk = await pool.query('SELECT COALESCE(is_archived,false) AS a FROM public.posts WHERE id=$1',[postId]);
-  if (!chk.rowCount) return res.status(404).json({ message: 'post_not_found' });
-  if (chk.rows[0].a)  return res.status(400).json({ message: 'post_archived' });
+  if (!postId || !userId)
+    return res.status(400).json({ message: "missing post_id/user_id" });
+
+  const chk = await pool.query(
+    "SELECT COALESCE(is_archived,false) a FROM public.posts WHERE id=$1",
+    [postId]
+  );
+  if (!chk.rowCount) return res.status(404).json({ message: "post_not_found" });
+  if (chk.rows[0].a) return res.status(400).json({ message: "post_archived" });
+
   try {
-    const existing = await pool.query(
-      'SELECT id FROM public.saves WHERE post_id=$1 AND user_id=$2',
+    const ex = await pool.query(
+      "SELECT id FROM public.saves WHERE post_id=$1 AND user_id=$2",
       [postId, userId]
     );
-    if (existing.rowCount > 0) {
-      await pool.query('DELETE FROM public.saves WHERE id=$1', [existing.rows[0].id]);
+    if (ex.rowCount > 0) {
+      await pool.query("DELETE FROM public.saves WHERE id=$1", [ex.rows[0].id]);
       return res.json({ saved: false });
     } else {
-      await pool.query('INSERT INTO public.saves(post_id, user_id) VALUES ($1,$2)', [postId, userId]);
+      await pool.query(
+        "INSERT INTO public.saves(post_id,user_id) VALUES ($1,$2)",
+        [postId, userId]
+      );
       return res.json({ saved: true });
     }
   } catch (e) {
-    console.error('toggleSave error:', e);
-    res.status(500).json({ message: 'internal error' });
+    console.error("toggleSave error:", e);
+    res.status(500).json({ message: "internal error" });
   }
-};
+}
 
-const getSavedStatus = async (req, res) => {
+async function getSavedStatus(req, res) {
   const postId = Number(req.params.id);
   const userId = Number(req.query.user_id);
-  if (!postId || !userId) return res.status(400).json({ message: 'missing post_id/user_id' });
+  if (!postId || !userId)
+    return res.status(400).json({ message: "missing post_id/user_id" });
 
   try {
     const r = await pool.query(
@@ -284,266 +341,404 @@ const getSavedStatus = async (req, res) => {
         LIMIT 1`,
       [postId, userId]
     );
-    res.json({ saved: r.rowCount > 0 }); // ถ้า archived จะได้ false
+    res.json({ saved: r.rowCount > 0 });
   } catch (e) {
-    console.error('getSavedStatus error:', e);
-    res.status(500).json({ message: 'internal error' });
+    console.error("getSavedStatus error:", e);
+    res.status(500).json({ message: "internal error" });
   }
-};
+}
 
-const getSavedPosts = async (req, res) => {
+async function getSavedPosts(req, res) {
   const userId = Number(req.query.user_id);
-  if (!userId) return res.status(400).json({ message: 'missing user_id' });
+  if (!userId) return res.status(400).json({ message: "missing user_id" });
 
   try {
     const q = `
-      SELECT 
-        p.*,
-        u.id_user AS user_id,
-        u.username,
-        COALESCE(u.avatar_url, '') AS avatar_url,
-        COALESCE(json_agg(pi.image_url ORDER BY pi.id)
-                 FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
-        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
-        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
-        TRUE AS saved_by_me,
-        EXISTS(SELECT 1 FROM public.likes l WHERE l.post_id = p.id AND l.user_id = $1) AS liked_by_me,
-        s.created_at AS saved_at
-      FROM public.saves s
-      JOIN public.posts p ON p.id = s.post_id
-      JOIN public.users u ON u.id_user = p.user_id
-      LEFT JOIN public.post_images pi ON pi.post_id = p.id
-      WHERE s.user_id = $1
-       AND COALESCE(p.is_archived,false) = false
-      GROUP BY p.id, u.id_user, u.username, u.avatar_url, s.created_at
-      ORDER BY s.created_at DESC
-    `;
+      SELECT p.*,
+             u.id_user AS user_id,
+             u.username,
+             COALESCE(u.avatar_url,'') AS avatar_url,
+             COALESCE(json_agg(pi.image_url ORDER BY pi.id)
+                      FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
+             (SELECT COUNT(*)::int FROM public.likes    WHERE post_id=p.id) AS like_count,
+             (SELECT COUNT(*)::int FROM public.comments WHERE post_id=p.id) AS comment_count,
+             TRUE AS saved_by_me,
+             EXISTS(SELECT 1 FROM public.likes l WHERE l.post_id=p.id AND l.user_id=$1) AS liked_by_me,
+             s.created_at AS saved_at
+        FROM public.saves s
+        JOIN public.posts p ON p.id = s.post_id
+        JOIN public.users u ON u.id_user = p.user_id
+        LEFT JOIN public.post_images pi ON pi.post_id = p.id
+       WHERE s.user_id=$1 AND COALESCE(p.is_archived,false)=false
+       GROUP BY p.id, u.id_user, u.username, u.avatar_url, s.created_at
+       ORDER BY s.created_at DESC`;
     const r = await pool.query(q, [userId]);
     res.json(r.rows);
   } catch (e) {
-    console.error('getSavedPosts error:', e);
-    res.status(500).json({ message: 'internal error' });
+    console.error("getSavedPosts error:", e);
+    res.status(500).json({ message: "internal error" });
   }
-};
+}
 
-const getPostsByUser = async (req, res) => {
+/* ===================== POSTS BY USER ==================== */
+async function getPostsByUser(req, res) {
   try {
     const uid = Number(req.params.id);
     const viewerId = Number(req.query.viewer_id) || 0;
-    if (!uid) return res.status(400).json({ message: 'missing user id' });
+    if (!uid) return res.status(400).json({ message: "missing user id" });
 
     const q = `
-      SELECT 
-        p.*,
-        u.username,
-        COALESCE(u.avatar_url,'') AS avatar_url,
-        COALESCE(json_agg(pi.image_url ORDER BY pi.id)
-                 FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
-        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
-        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
-        EXISTS (
-          SELECT 1 FROM public.likes l 
-          WHERE l.post_id = p.id AND l.user_id = $2
-        ) AS liked_by_me
-      FROM public.posts p
-      JOIN public.users u ON u.id_user = p.user_id
- LEFT JOIN public.post_images pi ON pi.post_id = p.id
-     WHERE p.user_id = $1 AND COALESCE(p.is_archived,false) = false
-  GROUP BY p.id, u.username, u.avatar_url
-  ORDER BY p.created_at DESC
-    `;
+      SELECT p.*,
+             u.username,
+             COALESCE(u.avatar_url,'') AS avatar_url,
+             LOWER(TRIM(p.price_type)) AS price_type,
+             COALESCE(json_agg(pi.image_url ORDER BY pi.id)
+                      FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
+             (SELECT COUNT(*)::int FROM public.likes    WHERE post_id=p.id) AS like_count,
+             (SELECT COUNT(*)::int FROM public.comments WHERE post_id=p.id) AS comment_count,
+             EXISTS (SELECT 1 FROM public.likes l WHERE l.post_id=p.id AND l.user_id=$2) AS liked_by_me
+        FROM public.posts p
+        JOIN public.users u ON u.id_user = p.user_id
+        LEFT JOIN public.post_images pi ON pi.post_id = p.id
+       WHERE p.user_id=$1 AND COALESCE(p.is_archived,false)=false
+       GROUP BY p.id, u.username, u.avatar_url
+       ORDER BY p.created_at DESC`;
     const r = await pool.query(q, [uid, viewerId]);
     res.json(r.rows);
   } catch (e) {
-    console.error('getPostsByUser error:', e);
-    res.status(500).json({ message: 'internal error' });
+    console.error("getPostsByUser error:", e);
+    res.status(500).json({ message: "internal error" });
   }
-};
+}
 
-/** ===================== DETAIL + ACCESS ===================== */
-const getPostDetail = async (req, res) => {
+/* ===================== DETAIL + ACCESS ================== */
+// UPDATED: ใช้ purchased_posts ให้สอดคล้องทั้งระบบ + normalize price_type
+async function getPostDetail(req, res) {
   try {
-    const postId   = Number(req.params.id);
+    const postId = Number(req.params.id);
     const viewerId = Number(req.query.userId || req.query.viewer_id) || 0;
 
     const { rows } = await pool.query(
       `SELECT id, user_id, text, year_label, subject,
               image_url, file_url,
-              price_type, price_amount_satang, created_at
+              LOWER(TRIM(price_type)) AS price_type,
+              price_amount_satang, created_at,
+              COALESCE(is_archived,false) AS is_archived
          FROM public.posts
         WHERE id=$1`,
       [postId]
     );
     const post = rows[0];
-    if (!post) return res.status(404).json({ error: 'not_found' });
+    if (!post || post.is_archived) return res.status(404).json({ error: "not_found" });
 
     let hasAccess = false;
-    if (post.price_type !== 'paid') {
+    if (post.price_type !== "paid") {
       hasAccess = true;
     } else if (viewerId && viewerId === post.user_id) {
       hasAccess = true;
-    } else {
-      // ถ้ามีตารางสิทธิ์ (post_access หรือ purchases ที่อนุมัติแล้ว) ให้เช็คที่นี่
-      try {
-        const acc = await pool.query(
-          `SELECT 1 FROM post_access WHERE post_id=$1 AND user_id=$2 LIMIT 1`,
-          [postId, viewerId]
-        );
-        hasAccess = acc.rowCount > 0;
-      } catch {
-        hasAccess = false;
-      }
+    } else if (viewerId) {
+      const acc = await pool.query(
+        `SELECT 1 FROM public.purchased_posts WHERE post_id=$1 AND user_id=$2 LIMIT 1`,
+        [postId, viewerId]
+      );
+      hasAccess = acc.rowCount > 0;
     }
 
     res.json({ post, hasAccess });
   } catch (e) {
-    console.error('getPostDetail error:', e);
-    res.status(500).json({ error: 'internal_error' });
+    console.error("getPostDetail error:", e);
+    res.status(500).json({ error: "internal_error" });
   }
-};
-const archivePost = async (req, res) => {
-  try {
-    const postId = req.params.id;
-    const userId = req.body.user_id;
+}
 
+/* ================= ARCHIVE / UNARCHIVE / DELETE ================ */
+async function archivePost(req, res) {
+  try {
+    const postId = Number(req.params.id);
+    const userId = Number(req.body.user_id);
     const { rows } = await pool.query(
-      'UPDATE posts SET is_archived = true WHERE id = $1 AND user_id = $2 RETURNING *',
+      "UPDATE posts SET is_archived=true WHERE id=$1 AND user_id=$2 RETURNING *",
       [postId, userId]
     );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'ไม่พบโพสต์หรือไม่มีสิทธิ์ลบ' });
-    }
-    res.json({ message: 'Archived', post: rows[0] });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Server error' });
+    if (!rows.length)
+      return res.status(404).json({ error: "ไม่พบโพสต์หรือไม่มีสิทธิ์ลบ" });
+    res.json({ message: "Archived", post: rows[0] });
+  } catch (e) {
+    console.error("archivePost error:", e);
+    res.status(500).json({ error: "Server error" });
   }
-};
+}
 
-const hardDeletePost = async (req, res) => {
+async function unarchivePost(req, res) {
+  try {
+    const postId = Number(req.params.id);
+    const userId = Number(req.body.user_id);
+    if (!postId || !userId)
+      return res.status(400).json({ message: "missing ids" });
+    const { rows } = await pool.query(
+      "UPDATE posts SET is_archived=false WHERE id=$1 AND user_id=$2 RETURNING *",
+      [postId, userId]
+    );
+    if (!rows.length)
+      return res.status(404).json({ message: "not_found_or_no_permission" });
+    res.json({ message: "Unarchived", post: rows[0] });
+  } catch (e) {
+    console.error("unarchivePost error:", e);
+    res.status(500).json({ message: "internal error" });
+  }
+}
+
+async function hardDeletePost(req, res) {
   const postId = Number(req.params.id);
-  if (!postId) return res.status(400).json({ message: 'missing post_id' });
+  if (!postId) return res.status(400).json({ message: "missing post_id" });
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
-    // ดึง path รูป/ไฟล์ก่อนลบ
     const { rows } = await client.query(
       `SELECT image_url, file_url FROM public.posts WHERE id=$1`,
       [postId]
     );
-
     if (!rows.length) {
-      await client.query('ROLLBACK');
-      return res.status(404).json({ message: 'post not found' });
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "post not found" });
     }
-
     const { image_url, file_url } = rows[0];
 
-    // ลบ record
     await client.query(`DELETE FROM public.posts WHERE id=$1`, [postId]);
     await client.query(`DELETE FROM public.post_images WHERE post_id=$1`, [postId]);
-    await client.query('COMMIT');
 
-    // ลบไฟล์ใน local uploads ถ้ามี
+    await client.query("COMMIT");
+
+    // ลบไฟล์บนดิสก์ (ถ้ามี)
     [image_url, file_url].filter(Boolean).forEach((p) => {
-      const filePath = path.join(__dirname, '..', p);
-      fs.unlink(filePath, (err) => {
-        if (err) console.warn('Delete file failed:', filePath);
-      });
+      const fp = path.join(process.cwd(), p);
+      fs.unlink(fp, () => {}); // เงียบถ้าลบไม่ได้
     });
 
-    res.json({ ok: true, message: 'deleted' });
+    res.json({ ok: true, message: "deleted" });
   } catch (e) {
-    await client.query('ROLLBACK');
-    console.error('hardDeletePost error:', e);
-    res.status(500).json({ message: 'internal error' });
+    await client.query("ROLLBACK");
+    console.error("hardDeletePost error:", e);
+    res.status(500).json({ message: "internal error" });
   } finally {
     client.release();
   }
-};
-const getArchivedPosts = async (req, res) => {
+}
+
+/* ===================== ARCHIVED LIST =================== */
+async function getArchivedPosts(req, res) {
   try {
     const userId = Number(req.query.user_id);
-    if (!userId) return res.status(400).json({ message: 'missing user_id' });
-        const q = `
-      SELECT 
-        p.*,
-        u.username,
-        COALESCE(u.avatar_url,'') AS avatar_url,
-        COALESCE(json_agg(pi.image_url ORDER BY pi.id)
-                 FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
-        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
-        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count
-      FROM public.posts p
-      JOIN public.users u ON u.id_user = p.user_id
-      LEFT JOIN public.post_images pi ON pi.post_id = p.id
-      WHERE p.user_id = $1 AND p.is_archived = true
-      GROUP BY p.id, u.username, u.avatar_url
-      ORDER BY p.created_at DESC`;
+    if (!userId) return res.status(400).json({ message: "missing user_id" });
+    const q = `
+      SELECT p.*,
+             u.username,
+             COALESCE(u.avatar_url,'') AS avatar_url,
+             COALESCE(json_agg(pi.image_url ORDER BY pi.id)
+                      FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
+             (SELECT COUNT(*)::int FROM public.likes    WHERE post_id=p.id) AS like_count,
+             (SELECT COUNT(*)::int FROM public.comments WHERE post_id=p.id) AS comment_count
+        FROM public.posts p
+        JOIN public.users u ON u.id_user = p.user_id
+        LEFT JOIN public.post_images pi ON pi.post_id = p.id
+       WHERE p.user_id=$1 AND p.is_archived=true
+       GROUP BY p.id, u.username, u.avatar_url
+       ORDER BY p.created_at DESC`;
     const r = await pool.query(q, [userId]);
     res.json(r.rows);
   } catch (e) {
-    console.error('getArchivedPosts error:', e);
-    res.status(500).json({ message: 'internal error' });
+    console.error("getArchivedPosts error:", e);
+    res.status(500).json({ message: "internal error" });
+  }
+}
+
+/* =================== PURCHASED FEED/LIST ================== */
+const getPurchasedFeed = async (req, res) => {
+  const userId = Number(req.query.user_id || 0);
+  if (!userId) return res.status(400).json({ error: "missing user_id" });
+
+  try {
+    const q = `
+      SELECT 
+        p.id,
+        p.user_id AS seller_id,
+        u.username,
+        COALESCE(u.avatar_url,'') AS avatar_url,
+        p.text, p.subject, p.year_label,
+        p.image_url, p.file_url,
+        LOWER(TRIM(p.price_type)) AS price_type,
+        p.price_amount_satang,
+        p.created_at,
+        COALESCE(
+          json_agg(pi.image_url ORDER BY pi.id)
+            FILTER (WHERE pi.id IS NOT NULL),
+          '[]'
+        ) AS images,
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
+        EXISTS (SELECT 1 FROM public.likes l WHERE l.post_id = p.id AND l.user_id = $1) AS liked_by_me,
+        pp.granted_at
+      FROM public.purchased_posts pp
+      JOIN public.posts p   ON p.id = pp.post_id
+      JOIN public.users u   ON u.id_user = p.user_id
+ LEFT JOIN public.post_images pi ON pi.post_id = p.id
+     WHERE pp.user_id = $1
+  GROUP BY p.id, u.username, u.avatar_url, pp.granted_at
+  ORDER BY pp.granted_at DESC NULLS LAST, p.created_at DESC
+    `;
+    const r = await pool.query(q, [userId]);
+    res.json(r.rows);
+  } catch (e) {
+    console.error("getPurchasedFeed error:", e);
+    res.status(500).json({ error: "internal_error" });
   }
 };
 
-const unarchivePost = async (req, res) => {
+const getPurchasedPosts = async (req, res) => {
+  const userId = Number(req.query.user_id || 0);
+  if (!userId) return res.status(400).json({ message: "missing user_id" });
+
+  try {
+    const q = `
+      SELECT 
+        p.*,
+        u.id_user AS user_id,                     -- author id
+        u.username,
+        COALESCE(u.avatar_url, '') AS avatar_url,
+        COALESCE(
+          json_agg(pi.image_url ORDER BY pi.id)
+          FILTER (WHERE pi.id IS NOT NULL),
+          '[]'
+        ) AS images,
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
+        TRUE AS purchased_by_me
+      FROM public.purchased_posts pp
+      JOIN public.posts p      ON p.id = pp.post_id
+      JOIN public.users u      ON u.id_user = p.user_id
+      LEFT JOIN public.post_images pi ON pi.post_id = p.id
+      WHERE pp.user_id = $1
+        AND COALESCE(p.is_archived,false) = false
+      GROUP BY p.id, u.id_user, u.username, u.avatar_url, pp.granted_at, pp.created_at
+      ORDER BY pp.granted_at DESC NULLS LAST, pp.created_at DESC NULLS LAST;
+    `;
+    const r = await pool.query(q, [userId]);
+    return res.json(r.rows);
+  } catch (e) {
+    console.error("getPurchasedPosts error:", e);
+    return res.status(500).json({ error: "internal_error" });
+  }
+};
+
+/* ============ SECURE DOWNLOAD & IMAGE ACCESS ============ */
+// UPDATED: ใส่ filename ตอนดาวน์โหลด
+async function downloadFileProtected(req, res) {
   try {
     const postId = Number(req.params.id);
-    const userId = Number(req.body.user_id);
-    if (!postId || !userId) return res.status(400).json({ message: 'missing ids' });
+    const userId = Number(req.query.user_id || 0);
+
     const { rows } = await pool.query(
-      'UPDATE posts SET is_archived = false WHERE id = $1 AND user_id = $2 RETURNING *',
-      [postId, userId]
+      `SELECT id, user_id, LOWER(TRIM(price_type)) AS price_type, file_url, COALESCE(is_archived,false) AS is_archived
+       FROM public.posts WHERE id = $1`,
+      [postId]
     );
-    if (!rows.length) return res.status(404).json({ message: 'not_found_or_no_permission' });
-    res.json({ message: 'Unarchived', post: rows[0] });
+
+    if (!rows.length || rows[0].is_archived) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+    const p = rows[0];
+    if (!p.file_url) return res.status(404).json({ message: "No file" });
+
+    // โหลดได้เมื่อ: ฟรี / เป็นเจ้าของ / ซื้อแล้ว
+    let canDownload = false;
+    if (p.price_type !== "paid") {
+      canDownload = true;
+    } else if (userId && userId === p.user_id) {
+      canDownload = true;
+    } else if (userId) {
+      const r2 = await pool.query(
+        `SELECT 1 FROM public.purchased_posts WHERE post_id=$1 AND user_id=$2 LIMIT 1`,
+        [postId, userId]
+      );
+      canDownload = r2.rowCount > 0;
+    }
+    if (!canDownload) return res.status(403).json({ message: "Not purchased" });
+
+    const rel = p.file_url.replace(/^\/?uploads\//, "");
+    const filePath = path.join(process.cwd(), "uploads", rel);
+    if (!fs.existsSync(filePath)) return res.status(404).json({ message: "File missing" });
+
+    return res.download(filePath, path.basename(filePath));
   } catch (e) {
-    console.error('unarchivePost error:', e);
-    res.status(500).json({ message: 'internal error' });
- }
-};
+    console.error("downloadFileProtected error", e);
+    res.status(500).json({ message: "Server error" });
+  }
+}
 
-exports.getPostDetail = async (req, res) => {
-  const postId = req.params.id;
-  const viewerId = Number(req.query.viewer_id || 0);
+// รูปภาพตามสิทธิ์ (ถ้ายังไม่ซื้อให้ส่งเฉพาะรูปแรก)
+async function getImagesRespectAccess(req, res) {
+  try {
+    const postId = Number(req.params.id);
+    const userId = Number(req.query.user_id || 0);
 
-  const { rows } = await pool.query(
-    `SELECT p.*,
-            CASE
-              WHEN p.price_type='free' THEN true
-              WHEN p.user_id=$2 THEN true
-              WHEN EXISTS (SELECT 1 FROM post_access pa WHERE pa.post_id=p.id AND pa.user_id=$2)
-                THEN true
-              ELSE false
-            END AS has_access
-       FROM posts p
-      WHERE p.id=$1`,
-    [postId, viewerId]
-  );
-  if (!rows.length) return res.status(404).json({ error:'not found' });
-  res.json(rows[0]);
-};
+    const pr = await pool.query(
+      `SELECT id, user_id, LOWER(TRIM(price_type)) AS price_type, COALESCE(is_archived,false) AS is_archived
+       FROM public.posts WHERE id=$1`,
+      [postId]
+    );
+    if (!pr.rows.length || pr.rows[0].is_archived) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+    const post = pr.rows[0];
 
+    const { rows: imgs } = await pool.query(
+      `SELECT id, image_url FROM public.post_images WHERE post_id=$1 ORDER BY id`,
+      [postId]
+    );
+
+    let canSeeAll = false;
+    if (post.price_type !== "paid") {
+      canSeeAll = true;
+    } else if (userId && userId === post.user_id) {
+      canSeeAll = true;
+    } else if (userId) {
+      const r2 = await pool.query(
+        `SELECT 1 FROM public.purchased_posts WHERE post_id=$1 AND user_id=$2 LIMIT 1`,
+        [postId, userId]
+      );
+      canSeeAll = r2.rowCount > 0;
+    }
+
+    const result = canSeeAll ? imgs : (imgs.length ? [imgs[0]] : []);
+    res.json(result);
+  } catch (e) {
+    console.error("getImagesRespectAccess error", e);
+    res.status(500).json({ message: "Server error" });
+  }
+}
+
+/* ======================= EXPORTS ======================= */
 module.exports = {
   createPost,
   getFeed,
   getPostsBySubject,
   toggleLike,
-  addComment,
-  getComments,
   getPostCounts,
+  getComments,
+  addComment,
   toggleSave,
   getSavedStatus,
   getSavedPosts,
   getPostsByUser,
   getPostDetail,
   archivePost,
+  unarchivePost,
   hardDeletePost,
   getArchivedPosts,
-  unarchivePost,
+  getPurchasedFeed,
+  getPurchasedPosts,
+  downloadFileProtected,
+  getImagesRespectAccess,
 };
