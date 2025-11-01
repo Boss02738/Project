@@ -1,93 +1,76 @@
 // routes/postRoutes.js
 const express = require('express');
-const router = express.Router();
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
+const ctrl = require('../controllers/postController');
 
-const post = require('../controllers/postController');
+const router = express.Router();
 
-// ---------- เตรียมโฟลเดอร์อัปโหลด ----------
-const ensureDir = (p) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
-const postImagesDir = path.join(__dirname, '..', 'uploads', 'post_images');
-const postFilesDir  = path.join(__dirname, '..', 'uploads', 'post_files');
-[postImagesDir, postFilesDir].forEach(ensureDir);
-
-// ---------- Multer ----------
+/* ---- multer สำหรับสร้างโพสต์ (images multiple + file single) ---- */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    if (file.fieldname === 'images') return cb(null, postImagesDir);
-    if (file.fieldname === 'file')   return cb(null, postFilesDir);
-    return cb(null, postImagesDir); // fallback
+    const isImage = file.fieldname === 'images';
+    cb(null, path.join(process.cwd(), isImage ? 'uploads/post_images' : 'uploads/post_files'));
   },
   filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    cb(null, `${Date.now()}_${Math.random().toString(36).slice(2)}${ext}`);
+    const ext = path.extname(file.originalname);
+    const base = path.basename(file.originalname, ext);
+    cb(null, `${base}-${Date.now()}${ext}`);
   },
 });
+const upload = multer({ storage });
 
-// ✅ สำคัญ: จำกัดเฉพาะ images ให้เป็น image/* ส่วน file ให้ผ่านได้
-const imageExts = new Set([
-  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.heic', '.heif'
-]);
-
-const fileFilter = (req, file, cb) => {
-  // ไฟล์แนบทั่วไป (pdf/doc/zip) ให้ผ่าน
-  if (file.fieldname === 'file') return cb(null, true);
-
-  // รูปภาพในฟิลด์ "images" ต้องเป็น image/*
-  if (file.fieldname === 'images') {
-    const mimeOk = (file.mimetype && file.mimetype.startsWith('image/'));
-    const extOk  = imageExts.has((require('path').extname(file.originalname || '')).toLowerCase());
-
-    if (mimeOk || extOk) return cb(null, true);
-    return cb(new Error('Only image files are allowed!'));
-  }
-
-  // ฟิลด์อื่น (ถ้ามี) ปล่อยผ่าน
-  return cb(null, true);
-};
-
-const upload = multer({
-  storage,
-  fileFilter,
-  limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB/ไฟล์
-    files: 11,                  // images(<=10) + file(<=1)
-  },
-});
-
-// ---------- Routes ----------
+/* ---------- ROUTES (ห้ามใส่วงเล็บเรียก ctrl.fn()) ---------- */
+// Create post
 router.post(
   '/',
   upload.fields([
-    { name: 'images', maxCount: 10 }, // รูปหลายรูป
-    { name: 'file',   maxCount: 1  }, // ไฟล์แนบ
+    { name: 'images', maxCount: 10 },
+    { name: 'file',   maxCount: 1  },
   ]),
-  post.createPost
+  ctrl.createPost
 );
 
-router.get('/feed', post.getFeed);
-router.get('/by-subject', post.getPostsBySubject);
+// Feed
+router.get('/feed', ctrl.getFeed);
 
-// Like / Count / Comment
-router.post('/posts/:id/like',      post.toggleLike);
-router.get ('/posts/:id/counts',    post.getPostCounts);
-router.get ('/posts/:id/comments',  post.getComments);
-router.post('/posts/:id/comments',  post.addComment);
+router.get('/purchased', ctrl.getPurchasedFeed);
 
-// Save
-router.post('/posts/:id/save',        post.toggleSave);
-router.get ('/posts/:id/save/status', post.getSavedStatus);
-router.get ('/saved',                 post.getSavedPosts);
-//Profile 
-router.get('/user/:id', post.getPostsByUser);
+// By subject
+router.get('/by-subject', ctrl.getPostsBySubject);
+
+// Like / Unlike
+router.post('/posts/:id/like', ctrl.toggleLike);
+
+// Comments
+router.get('/posts/:id/comments', ctrl.getComments);
+router.post('/posts/:id/comments', ctrl.addComment);
+
+// Counts
+router.get('/posts/:id/counts', ctrl.getPostCounts);
+
+// Save / Unsave + status
+router.post('/posts/:id/save', ctrl.toggleSave);
+router.get('/posts/:id/save/status', ctrl.getSavedStatus);
+
+// Saved list
+router.get('/saved', ctrl.getSavedPosts);
+
+router.get('/archived', ctrl.getArchivedPosts);
+
+// Posts by user
+router.get('/user/:id', ctrl.getPostsByUser);
+
+// Detail
+router.get('/:id', ctrl.getPostDetail);
+
+// Archive / Unarchive / Hard delete
+router.post('/:id/archive', ctrl.archivePost);
+router.post('/:id/unarchive', ctrl.unarchivePost);
+router.delete('/:id', ctrl.hardDeletePost);
+
+router.get('/:id/file/download', ctrl.downloadFileProtected);      // NEW
+router.get('/:id/images', ctrl.getImagesRespectAccess);   
 
 
-//delete post
-// ✅ เส้นทางเก็บโพสต์
-router.post('/:id/archive', post.archivePost);        // /api/posts/:id/archive
-router.post('/:id/unarchive', post.unarchivePost);    // /api/posts/:id/unarchive
-router.get('/archived', post.getArchivedPosts);       // /api/posts/archived
-router.delete('/:id', post.hardDeletePost);      
 module.exports = router;
