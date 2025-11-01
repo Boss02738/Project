@@ -114,10 +114,9 @@ router.post("/admin/purchases/:id/approve", requireAdmin, async (req, res) => {
       [o.seller_id, o.amount_satang, coins, rate, o.id]
     );
 
-    await client.query(
-      `UPDATE purchases SET status='approved' WHERE id=$1`,
-      [o.id]
-    );
+    await client.query(`UPDATE purchases SET status='paid' WHERE id=$1`, [
+      o.id,
+    ]);
 
     await client.query("COMMIT");
     res.redirect("/admin/purchases?status=pending");
@@ -163,10 +162,10 @@ router.get("/admin/payouts", requireAdmin, async (req, res) => {
   );
 
   // enrich สำหรับแสดงผล
-  const rows = q.rows.map(r => ({
+  const rows = q.rows.map((r) => ({
     ...r,
     gross_baht: Number(r.amount_satang || 0) / 100,
-    net_baht:   Number(r.amount_satang || 0) / 100, // ถ้าไม่มีค่าธรรมเนียม เพิ่ม logic หักได้ที่นี่
+    net_baht: Number(r.amount_satang || 0) / 100,
     bank_qr_file: r.bank_qr_file || null,
   }));
 
@@ -199,7 +198,6 @@ router.post("/admin/payouts/:id/mark-paid", requireAdmin, async (req, res) => {
        VALUES ($1, 'debit_payout', $2, $3, 'payout paid', now())`,
       [w.user_id, Number(w.amount_satang) * -1, Number(w.coins) * -1]
     );
-    // หมายเหตุ: ไม่ยัด related_payout_id เพราะคอลัมน์เป็น uuid แต่ withdrawals.id เป็น bigint
 
     await client.query(
       `UPDATE withdrawals
@@ -218,5 +216,100 @@ router.post("/admin/payouts/:id/mark-paid", requireAdmin, async (req, res) => {
     client.release();
   }
 });
+
+/* ============ REPORTS ============ */
+/* ============ REPORTS (users.id_user) ============ */
+router.get("/admin/reports", requireAdmin, async (req, res) => {
+  const status = String(req.query.status || "pending").toLowerCase();
+
+  try {
+    await pool.query(`SELECT 1 FROM post_reports LIMIT 1`);
+
+    const { rows } = await pool.query(
+      `
+      SELECT
+        r.id,
+        r.post_id,
+        r.reporter_id,
+        r.reason,
+        r.details,
+        r.status,
+        r.created_at,
+        p.text      AS post_text,       -- ถ้าโพสต์ใช้ชื่อคอลัมน์อื่นให้แก้ตรงนี้
+        p.is_banned AS post_is_banned,
+        COALESCE(u.username, u.email, u.phone::text) AS reporter_name
+      FROM post_reports r
+      JOIN posts  p ON p.id = r.post_id
+      LEFT JOIN users u ON u.id_user = r.reporter_id
+      WHERE r.status = $1
+      ORDER BY r.created_at ASC
+      `,
+      [status]
+    );
+    
+    return res.render("reports", { items: rows, status });
+  } catch (e) {
+    console.error("[/admin/reports] error:", e?.message || e);
+    return res.status(500).send(e?.message || "internal_error");
+  }
+});
+
+// อนุมัติรายงาน -> ตั้งสถานะ approved และแบนโพสต์
+router.post('/admin/reports/:id/approve', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    const cur = await client.query(
+      `SELECT id, post_id, status FROM post_reports WHERE id=$1 FOR UPDATE`,
+      [id]
+    );
+    if (cur.rowCount === 0) throw new Error('report_not_found');
+    const r = cur.rows[0];
+    if (r.status !== 'pending') throw new Error('invalid_status');
+
+    await client.query(
+      `UPDATE post_reports
+         SET status='approved', reviewed_at=NOW()
+       WHERE id=$1`,
+      [id]
+    );
+    await client.query(
+      `UPDATE posts SET is_banned=TRUE WHERE id=$1`,
+      [r.post_id]
+    );
+
+    await client.query('COMMIT');
+    res.redirect('/admin/reports?status=pending');
+  } catch (e) {
+    await client.query('ROLLBACK');
+    console.error('approve report error:', e);
+    res.status(500).send(String(e));
+  } finally {
+    client.release();
+  }
+});
+
+// ปฏิเสธรายงาน -> ตั้งสถานะ rejected
+router.post('/admin/reports/:id/reject', requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  try {
+    const q = await pool.query(
+      `UPDATE post_reports
+         SET status='rejected', reviewed_at=NOW()
+       WHERE id=$1 AND status='pending'`,
+      [id]
+    );
+    if (q.rowCount === 0) return res.status(400).send('invalid_status_or_not_found');
+    res.redirect('/admin/reports?status=pending');
+  } catch (e) {
+    console.error('reject report error:', e);
+    res.status(500).send(String(e));
+  }
+});
+
+
+
 
 module.exports = router;
