@@ -26,6 +26,8 @@ class ApiService {
   static String get _auth => '$host/api/auth';
   static String get _posts => '$host/api/posts';
   static String get _search => '$host/api/search';
+  // NEW: Friends base
+  static String get _friends => '$host/api/friends';
 
   // ============== Generic HTTP helpers ==============
   static Map<String, dynamic> _decode(String body) {
@@ -494,9 +496,9 @@ class ApiService {
   }
 
   Future<List<String>> fetchPostImages(int postId, int viewerUserId) async {
-  final list = await _getJson('$host/api/posts/$postId/images?user_id=$viewerUserId');
-  return (list as List).cast<String>();
-}
+    final list = await _getJson('$host/api/posts/$postId/images?user_id=$viewerUserId');
+    return (list as List).cast<String>();
+  }
 
   // ============== Purchases ==============
   static Future<Map<String, dynamic>> startPurchase({
@@ -620,6 +622,91 @@ class ApiService {
   Future<bool> deletePost(int id) async {
     final r = await http.delete(Uri.parse('$_posts/$id')).timeout(_reqTimeout);
     return r.statusCode == 200;
+  }
+
+  // ============== Friends ==============
+
+  /// สถานะความสัมพันธ์ระหว่าง user กับอีกคน
+  /// return: 'none' | 'pending_in' | 'pending_out' | 'friends'
+  static Future<String> getFriendStatus({
+    required int userId,
+    required int otherUserId,
+  }) async {
+    final res = await getJson('/api/friends/status?user_id=$userId&other_id=$otherUserId');
+    return (res['status'] as String?) ?? 'none';
+  }
+
+  /// ส่งคำขอเป็นเพื่อน (ฉัน -> เขา)
+  static Future<void> sendFriendRequest({
+    required int fromUserId,
+    required int toUserId,
+  }) async {
+    await postJson('/api/friends/request', {
+      'from_user_id': fromUserId,
+      'to_user_id': toUserId,
+    });
+  }
+
+  /// ตอบคำขอ (ฝั่งผู้รับกด): action = 'accept' | 'reject'
+  static Future<void> respondFriendRequest({
+    required int userId,
+    required int otherUserId,
+    required String action, // 'accept' | 'reject'
+  }) async {
+    await postJson('/api/friends/respond', {
+      'user_id': userId,
+      'other_user_id': otherUserId,
+      'action': action,
+    });
+  }
+
+  /// ยกเลิกคำขอ (ฝั่งผู้ส่ง)
+  static Future<void> cancelFriendRequest({
+    required int userId,
+    required int otherUserId,
+  }) async {
+    await postJson('/api/friends/cancel', {
+      'user_id': userId,
+      'other_user_id': otherUserId,
+    });
+  }
+
+  /// เลิกเป็นเพื่อน (สถานะต้องเป็น accepted)
+  static Future<void> unfriend({
+    required int userId,
+    required int otherUserId,
+  }) async {
+    final uri = Uri.parse('$_friends/unfriend/$otherUserId')
+        .replace(queryParameters: {'user_id': '$userId'});
+    final r = await http.delete(uri).timeout(_reqTimeout);
+    _ensureOk(r);
+  }
+
+  /// รายชื่อเพื่อนของฉัน (status = accepted)
+  static Future<List<Map<String, dynamic>>> listFriends(int userId) async {
+    final res = await getJson('/api/friends/list?user_id=$userId');
+    final list = (res['friends'] as List? ?? const []);
+    return list
+        .map<Map<String, dynamic>>((e) => (e as Map).cast<String, dynamic>())
+        .toList();
+  }
+
+  /// คิวคำขอที่ “ฉันต้องตอบ” (incoming)
+  static Future<List<Map<String, dynamic>>> listIncomingRequests(int userId) async {
+    final res = await getJson('/api/friends/requests/incoming?user_id=$userId');
+    final list = (res['incoming'] as List? ?? const []);
+    return list
+        .map<Map<String, dynamic>>((e) => (e as Map).cast<String, dynamic>())
+        .toList();
+  }
+
+  /// คิวคำขอที่ “ฉันเป็นคนส่ง” (outgoing)
+  static Future<List<Map<String, dynamic>>> listOutgoingRequests(int userId) async {
+    final res = await getJson('/api/friends/requests/outgoing?user_id=$userId');
+    final list = (res['outgoing'] as List? ?? const []);
+    return list
+        .map<Map<String, dynamic>>((e) => (e as Map).cast<String, dynamic>())
+        .toList();
   }
 
   // ============== Wallet/Coins ==============

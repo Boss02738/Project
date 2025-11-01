@@ -29,6 +29,7 @@ const walletRouter = require("./routes/wallet");
 const withdrawalsRouter = require("./routes/withdrawals");
 const purchasesRouter = require("./routes/purchases");
 const reportRoutes = require("./routes/reportRoutes");
+const friendRoutes = require("./routes/friendRoutes");
 
 /* ================= APP/HTTP/IO ================= */
 const app = express();
@@ -84,6 +85,7 @@ app.use("/api", userRoutes);
 app.use(withdrawalsRouter);
 app.use(walletRouter);
 app.use(purchasesRouter);
+app.use("/api/friends", friendRoutes);
 
 // [FIX] mount admin router ครั้งเดียว โดยไม่ใส่ prefix ซ้ำ (เพราะไฟล์ routes/admin.js เริ่มด้วย /admin อยู่แล้ว)
 app.use(adminRoutes);

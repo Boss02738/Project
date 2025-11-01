@@ -4,6 +4,7 @@ import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/widgets/post_card.dart';
 import 'package:my_note_app/screens/settings_screen.dart';
 import 'package:my_note_app/screens/edit_profile_screen.dart';
+import 'package:my_note_app/widgets/friend_action_button.dart'; // <-- เพิ่ม
 
 class ProfileScreen extends StatefulWidget {
   /// โปรไฟล์ที่ต้องการเปิดดู; ถ้าไม่ส่งมา จะเปิดโปรไฟล์ตนเอง
@@ -41,9 +42,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       setState(() {
         _loading = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('กรุณาเข้าสู่ระบบ')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('กรุณาเข้าสู่ระบบ')));
       return;
     }
 
@@ -62,30 +62,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Map<String, dynamic>? p;
     List<dynamic> posts = [];
 
-    // 1) โหลดโปรไฟล์ (ต้องพยายามให้สำเร็จก่อน)
+    // 1) โหลดโปรไฟล์
     try {
       p = await ApiService.getUserProfile(_profileUserId!);
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('โหลดโปรไฟล์ไม่สำเร็จ: $e')));
-      return; // ไม่มีโปรไฟล์ แสดงผลต่อไม่ได้
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('โหลดโปรไฟล์ไม่สำเร็จ: $e')));
+      return;
     }
 
-    // 2) โหลดโพสต์ (ถ้าพัง ให้ผ่านไปก่อน)
+    // 2) โหลดโพสต์ (พังได้ ไม่บล็อคหน้า)
     try {
       posts = await ApiService.getPostsByUser(
         profileUserId: _profileUserId!,
         viewerId: _viewerId ?? 0,
       );
-    } catch (e) {
-      // แจ้งเตือนแบบเบา ๆ แล้วไปต่อ
+    } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('โหลดโพสต์ไม่สำเร็จ')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('โหลดโพสต์ไม่สำเร็จ')));
       }
     }
 
@@ -101,20 +98,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final avatar = (_profile?['avatar_url'] as String?) ?? '';
-    final bio = (_profile?['bio'] as String?) ?? '';
-    final username = (_profile?['username'] as String?) ?? '';
-
-    // ใช้ count จาก backend ถ้ามี ไม่งั้น fallback เป็นที่โหลดมา
-    final postCount = (_profile?['post_count'] as int?) ?? _posts.length;
-    final friendCount = (_profile?['friends_count'] as int?) ?? 0;
-
     return Scaffold(
       appBar: AppBar(
         title: Text(_isMe ? 'Profile' : (_profile?['username'] ?? 'Profile')),
         automaticallyImplyLeading: true,
         actions: [
-          if (_isMe) // แสดงเฉพาะของตัวเอง
+          if (_isMe)
             IconButton(
               icon: const Icon(Icons.settings),
               onPressed: () {
@@ -157,17 +146,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     // นับโพสต์จากที่โหลดมา (หรือให้ backend ส่ง count มาก็ได้)
     final postCount = _posts.length;
-    // เพื่อน (ยังไม่ทำระบบ friend จริง ๆ ใส่ 0 ไว้ก่อนหรือรับจาก backend)
-    final friendCount = _profile?['friend_count'] as int? ?? 0;
+    // ใช้ friends_count ถ้ามี (รองรับ friend_count เดิมเป็น fallback)
+    final friendCount =
+        (_profile?['friends_count'] as int?) ?? (_profile?['friend_count'] as int?) ?? 0;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // username มุมซ้ายบน
+          // ชื่อ
           Text(
-            username,
+            username.isNotEmpty ? username : 'user#${_profileUserId ?? ''}',
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
@@ -180,7 +170,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 backgroundImage: avatar.isNotEmpty
                     ? NetworkImage('${ApiService.host}$avatar')
                     : const AssetImage('assets/default_avatar.png')
-                          as ImageProvider,
+                        as ImageProvider,
               ),
               const SizedBox(width: 24),
               _Counter(label: 'post', value: postCount),
@@ -197,48 +187,55 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           const SizedBox(height: 12),
 
-          // button
+          // ===== ปุ่มด้านล่างรูปโปรไฟล์ =====
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () async {
-                if (_isMe) {
-                  final changed = await Navigator.push<bool>(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => EditProfileScreen(
-                        userId: _profileUserId!,
-                        initialUsername:
-                            (_profile?['username'] as String?) ?? '',
-                        initialBio: (_profile?['bio'] as String?) ?? '',
-                        initialAvatar:
-                            (_profile?['avatar_url'] as String?) ?? '',
+            child: _isMe
+                ? ElevatedButton(
+                    onPressed: () async {
+                      final changed = await Navigator.push<bool>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => EditProfileScreen(
+                            userId: _profileUserId!,
+                            initialUsername:
+                                (_profile?['username'] as String?) ?? '',
+                            initialBio: (_profile?['bio'] as String?) ?? '',
+                            initialAvatar:
+                                (_profile?['avatar_url'] as String?) ?? '',
+                          ),
+                        ),
+                      );
+                      if (changed == true) _refresh();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
                       ),
+                      backgroundColor: Colors.blueGrey.shade700,
+                      foregroundColor: Colors.white,
                     ),
-                  );
-                  // ถ้ากลับมาพร้อม changed == true ให้รีเฟรชหน้าโปรไฟล์
-                  if (changed == true) {
-                    _refresh();
-                  }
-                } else {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('ส่งคำขอเป็นเพื่อนแล้ว')),
-                  );
-                }
-              },
-
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                backgroundColor: _isMe
-                    ? Colors.blueGrey.shade700
-                    : Colors.black,
-                foregroundColor: Colors.white,
-              ),
-              child: Text(_isMe ? 'Edit Profile' : 'Add friend'),
-            ),
+                    child: const Text('Edit Profile'),
+                  )
+                : (_viewerId == null
+                    ? ElevatedButton(
+                        onPressed: null,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          backgroundColor: Colors.grey,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('กรุณาเข้าสู่ระบบเพื่อเพิ่มเพื่อน'),
+                      )
+                    : // === ใช้ FriendActionButton ที่เชื่อม API แล้ว ===
+                    FriendActionButton(
+                        meId: _viewerId!,
+                        otherId: _profileUserId!,
+                      )),
           ),
 
           const SizedBox(height: 12),
