@@ -30,6 +30,8 @@ async function getCoinRate(client) {
  * POST /api/withdrawals
  * form-data: user_id, coins, qr (file)
  * สร้างคำขอถอนสถานะ pending + หักเหรียญทันที
+ *  - amount_satang และ coins ใน wallet_transactions เก็บเป็น "ค่าบวกเสมอ"
+ *    แล้วใช้ type = 'debit_withdrawal' บอกทิศทางการเงิน
  * ==============================================================*/
 router.post('/api/withdrawals', upload.single('qr'), async (req, res) => {
   const userId = Number(req.body?.user_id || 0);
@@ -56,11 +58,11 @@ router.post('/api/withdrawals', upload.single('qr'), async (req, res) => {
       throw new Error('insufficient_coins');
     }
 
-    const rate          = await getCoinRate(client);
-    const amountSatang  = coins * rate;
-    const rel           = '/' + path.relative(process.cwd(), req.file.path).replace(/\\/g, '/');
+    const rate         = await getCoinRate(client);
+    const amountSatang = coins * rate; // เก็บเป็นค่าบวกเสมอ
+    const rel          = '/' + path.relative(process.cwd(), req.file.path).replace(/\\/g, '/');
 
-    // หักเหรียญทันที
+    // หักเหรียญทันที (อัปเดต wallet)
     await client.query(
       `UPDATE user_wallets
          SET coins = coins - $2, updated_at = now()
@@ -68,11 +70,11 @@ router.post('/api/withdrawals', upload.single('qr'), async (req, res) => {
       [userId, coins]
     );
 
-    // บันทึกธุรกรรม (ลบ)
+    // บันทึกธุรกรรม (ค่าบวกเสมอ + ระบุทิศทางด้วย type)
     await client.query(
       `INSERT INTO wallet_transactions
         (user_id, type, amount_satang, coins, rate_satang_per_coin, note, created_at)
-       VALUES ($1, 'debit_withdrawal', $2 * -1, $3 * -1, $4, 'withdraw request', now())`,
+       VALUES ($1, 'debit_withdrawal', $2, $3, $4, 'withdraw request', now())`,
       [userId, amountSatang, coins, rate]
     );
 
@@ -218,6 +220,7 @@ router.post('/api/admin/withdrawals/:id/reject', async (req, res) => {
       [w.user_id, w.coins]
     );
 
+    // บันทึกธุรกรรม refund (amount_satang/coins เป็นค่าบวกเสมอ)
     await client.query(
       `INSERT INTO wallet_transactions
         (user_id, type, amount_satang, coins, rate_satang_per_coin, note, created_at)

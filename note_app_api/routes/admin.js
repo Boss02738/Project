@@ -181,6 +181,7 @@ router.post("/admin/payouts/:id/mark-paid", requireAdmin, async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    // ดึงคำขอถอนมาล็อคแถว
     const cur = await client.query(
       `SELECT id, user_id, coins, amount_satang, status
        FROM withdrawals
@@ -191,14 +192,18 @@ router.post("/admin/payouts/:id/mark-paid", requireAdmin, async (req, res) => {
     const w = cur.rows[0];
     if (w.status !== "pending") throw new Error("invalid_status");
 
-    // บันทึกธุรกรรมจ่ายออก (amount/coins เป็นค่าลบ)
+    // ✅ ไม่หักเหรียญซ้ำ: หักไปแล้วตอนสร้างคำขอถอน
+    // ถ้าต้องการบันทึกธุรกรรม "ยืนยันการจ่าย" เพื่อ audit:
+    // - เก็บ amount_satang เป็น "บวก"
+    // - coins แนะนำให้เป็น NULL (หรือ 0 ถ้า schema ไม่อนุญาต NULL)
     await client.query(
       `INSERT INTO wallet_transactions
         (user_id, type, amount_satang, coins, note, created_at)
-       VALUES ($1, 'debit_payout', $2, $3, 'payout paid', now())`,
-      [w.user_id, Number(w.amount_satang) * -1, Number(w.coins) * -1]
+       VALUES ($1, 'payout_paid', $2, NULL, 'payout paid', now())`,
+      [Number(w.user_id), Number(w.amount_satang)]
     );
 
+    // อัปเดตสถานะเป็น paid
     await client.query(
       `UPDATE withdrawals
          SET status='paid', paid_at=now(), admin_id=$2
