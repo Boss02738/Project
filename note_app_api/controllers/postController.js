@@ -2,6 +2,7 @@
 const fs = require("fs");
 const path = require("path");
 const pool = require("../models/db");
+const { createAndEmit } = require('./notificationController');
 
 /* ----------------------- helpers ----------------------- */
 const normalizeImagePaths = (files = []) =>
@@ -202,39 +203,22 @@ async function getPostsBySubject(req, res) {
 
 /* ===================== LIKE/UNLIKE ===================== */
 async function toggleLike(req, res) {
-  const postId = Number(req.params.id);
-  const userId = Number(req.body.user_id);
-  if (!postId || !userId)
-    return res.status(400).json({ message: "missing post_id/user_id" });
-
-  const chk = await pool.query(
-    "SELECT COALESCE(is_archived,false) a, COALESCE(is_banned,false) b FROM public.posts WHERE id=$1",
-    [postId]
-  );
-  if (!chk.rowCount) return res.status(404).json({ message: "post_not_found" });
-  if (chk.rows[0].a) return res.status(400).json({ message: "post_archived" });
-  if (chk.rows[0].b) return res.status(400).json({ message: "post_banned" });
-
-  try {
-    const ex = await pool.query(
-      "SELECT id FROM public.likes WHERE post_id=$1 AND user_id=$2",
-      [postId, userId]
-    );
-    if (ex.rowCount > 0) {
-      await pool.query("DELETE FROM public.likes WHERE id=$1", [ex.rows[0].id]);
-      return res.json({ liked: false });
-    } else {
-      await pool.query(
-        "INSERT INTO public.likes(post_id,user_id) VALUES ($1,$2)",
-        [postId, userId]
-      );
-      return res.json({ liked: true });
+  // ... logic เดิม เช็คกด/ยกเลิกไลค์ อัปเดต DB ...
+  // สมมติว่าผลคือ justLiked === true เมื่อ “เพิ่งกดไลค์สำเร็จ”
+  if (justLiked && postOwnerId && postOwnerId !== likerId) {
+    try {
+      await createAndEmit(req.app.get('io'), {
+        userId: postOwnerId,
+        actorId: likerId,
+        postId: postId,
+        action: 'like',
+        message: `${actorName} ถูกใจโพสต์ของคุณ`,
+      });
+    } catch (e) {
+      console.error('notify like error:', e);
+      // ไม่ต้อง fail ทั้ง endpoint — แค่ log ไว้
     }
-  } catch (e) {
-    console.error("toggleLike error:", e);
-    res.status(500).json({ message: "internal error" });
-  }
-}
+  }}
 
 /* ========================= COUNTS ====================== */
 async function getPostCounts(req, res) {

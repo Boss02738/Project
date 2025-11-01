@@ -29,7 +29,7 @@ const walletRouter = require("./routes/wallet");
 const withdrawalsRouter = require("./routes/withdrawals");
 const purchasesRouter = require("./routes/purchases");
 const reportRoutes = require("./routes/reportRoutes");
-
+const notificationRoutes = require("./routes/notificationRoutes");
 /* ================= APP/HTTP/IO ================= */
 const app = express();
 const server = http.createServer(app);
@@ -44,6 +44,7 @@ app.use((req, _res, next) => {
   console.log(req.method, req.originalUrl);
   next();
 });
+app.set('io', io);
 app.set("view engine", "ejs");
 app.set("views", path.join(process.cwd(), "views"));
 app.use(express.json({ limit: "50mb" }));
@@ -84,6 +85,7 @@ app.use("/api", userRoutes);
 app.use(withdrawalsRouter);
 app.use(walletRouter);
 app.use(purchasesRouter);
+app.use('/api/notifications', notificationRoutes);
 
 // [FIX] mount admin router ครั้งเดียว โดยไม่ใส่ prefix ซ้ำ (เพราะไฟล์ routes/admin.js เริ่มด้วย /admin อยู่แล้ว)
 app.use(adminRoutes);
@@ -823,6 +825,12 @@ io.on("connection", (socket) => {
       console.error("clear_board error", e);
     }
   });
+  io.on('connection', (socket) => {
+  socket.on('register', (userId) => {
+    const id = Number(userId);
+    if (id > 0) socket.join(`user:${id}`);
+  });
+});
 });
 
 /* ===================================================================

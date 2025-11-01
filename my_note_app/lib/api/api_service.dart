@@ -19,7 +19,7 @@ class ApiService {
       return 'http://localhost:3000';
     }
     if (Platform.isAndroid) return 'http://10.0.2.2:3000'; // Android emulator
-    return 'http://10.34.104.53:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
+    return 'http://192.168.1.36:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
   }
 
   // -------- Base paths --------
@@ -616,7 +616,55 @@ class ApiService {
     if (r.statusCode == 200) return jsonDecode(r.body) as List;
     throw Exception('load archived failed');
   }
+  // ============== Notifications ==============
+static Future<int> getUnreadCount(int userId) async {
+    final uri = Uri.parse('$host/api/notifications/unread-count')
+        .replace(queryParameters: {'user_id': '$userId'});
+    final res = await http.get(uri).timeout(_reqTimeout);
 
+    if (res.statusCode == 200) {
+      try {
+        final data = jsonDecode(res.body);
+        if (data is Map && data.containsKey('unread')) {
+          return (data['unread'] as num).toInt();
+        } else if (data is int) {
+          return data;
+        }
+      } catch (_) {}
+      return 0;
+    } else {
+      throw HttpException(
+        'โหลดจำนวนแจ้งเตือนล้มเหลว (${res.statusCode}): ${res.body}',
+      );
+    }
+  }
+
+  static Future<List<dynamic>> getNotifications(int userId) async {
+    final uri = Uri.parse('$host/api/notifications')
+        .replace(queryParameters: {'user_id': '$userId'});
+    final res = await http.get(uri).timeout(_reqTimeout);
+    if (res.statusCode == 200) {
+      return jsonDecode(res.body) as List<dynamic>;
+    } else {
+      throw HttpException(
+        'โหลดรายการแจ้งเตือนล้มเหลว (${res.statusCode}): ${res.body}',
+      );
+    }
+  }
+
+  static Future<void> markAllAsRead(int userId) async {
+    final uri = Uri.parse('$host/api/notifications/mark-read');
+    final res = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'user_id': userId}),
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw HttpException(
+        'อัปเดตแจ้งเตือนเป็นอ่านแล้วล้มเหลว (${res.statusCode}): ${res.body}',
+      );
+    }
+  }
   Future<bool> deletePost(int id) async {
     final r = await http.delete(Uri.parse('$_posts/$id')).timeout(_reqTimeout);
     return r.statusCode == 200;
@@ -750,6 +798,7 @@ Future<void> reportPost({
   if (r.statusCode < 200 || r.statusCode >= 300) {
     throw Exception('HTTP ${r.statusCode}: ${r.body}');
   }
+  
 }
 
 // Error อ่านง่ายขึ้นเวลามี status >= 400
