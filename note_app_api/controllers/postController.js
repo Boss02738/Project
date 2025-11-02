@@ -267,7 +267,7 @@ await createAndEmit({
   receiverId: post.owner_id,
   actorId,
   postId,
-  verb: 'like',
+  action: 'like',             // หรือจะส่ง verb ก็ได้ ฟังก์ชันรองรับ
   message: `${actorName} ถูกใจโพสต์ของคุณ`,
 });
     }
