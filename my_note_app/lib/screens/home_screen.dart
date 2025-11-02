@@ -1,30 +1,29 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/NewPost.dart';
 import 'package:my_note_app/screens/login_screen.dart';
 import 'package:my_note_app/screens/search_screen.dart';
 import 'package:my_note_app/screens/profile_screen.dart';
 import 'package:my_note_app/screens/purchase_screen.dart';
-
+import 'package:my_note_app/screens/Notificationscreen.dart';
 import 'package:my_note_app/widgets/post_card.dart';
-import 'package:my_note_app/widgets/purchased_overlay.dart';
 
 class homescreen extends StatefulWidget {
   const homescreen({super.key});
+
   @override
   State<homescreen> createState() => _HomeState();
 }
 
 class _HomeState extends State<homescreen> {
   int _currentIndex = 0;
-  late Future<List<dynamic>> _futureFeed;
-
+  Future<List<dynamic>>? _futureFeed;
   int? _userId;
   String? _username;
   bool _loadingUser = true;
+  int _unreadCount = 0; // 🔔 ตัวนับแจ้งเตือนที่ยังไม่อ่าน
 
   @override
   void initState() {
@@ -52,14 +51,26 @@ class _HomeState extends State<homescreen> {
       _loadingUser = false;
       _futureFeed = ApiService.getFeed(_userId!);
     });
+
+    await _loadUnreadCount();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    if (_userId == null) return;
+    try {
+      final res = await ApiService.getUnreadCount(_userId!);
+      if (!mounted) return;
+      setState(() => _unreadCount = res);
+    } catch (_) {}
   }
 
   Future<void> _reload() async {
     if (_userId == null) return;
     setState(() => _futureFeed = ApiService.getFeed(_userId!));
+    await _loadUnreadCount();
   }
 
-  // ---------- helpers แปลงชนิด ----------
+  // ---------- helpers ----------
   int _asInt(dynamic v, {int fallback = 0}) {
     if (v is int) return v;
     if (v is String) return int.tryParse(v) ?? fallback;
@@ -79,7 +90,7 @@ class _HomeState extends State<homescreen> {
     }
   }
 
-  // ===== กด “ซื้อ” ที่แถวราคา =====
+  // ===== ซื้อโพสต์ =====
   Future<void> _handleBuy({
     required int postId,
     required int amountSatang,
@@ -92,9 +103,10 @@ class _HomeState extends State<homescreen> {
       return;
     }
 
-    Map<String, dynamic>? created;
+    // ✅ ใช้ Map ที่ไม่ nullable เพราะ startPurchase คืนค่าปกติ
+    late final Map<String, dynamic> created;
+
     try {
-      // ใช้เมธอดที่ประกาศใน ApiService (คืน {id, amount_satang, qr_payload, expires_at})
       created = await ApiService.startPurchase(
         postId: postId,
         buyerId: _userId!,
@@ -106,13 +118,13 @@ class _HomeState extends State<homescreen> {
       return;
     }
 
-    if (created == null ||
-        created['id'] == null ||
+    // ✅ ตรวจค่าหลักครบ
+    if (created['id'] == null ||
         created['qr_payload'] == null ||
         created['expires_at'] == null) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('สร้างคำสั่งซื้อไม่สำเร็จ')),
+        const SnackBar(content: Text('ข้อมูลคำสั่งซื้อไม่ถูกต้อง')),
       );
       return;
     }
@@ -122,11 +134,10 @@ class _HomeState extends State<homescreen> {
       context,
       MaterialPageRoute(
         builder: (_) => PurchaseScreen(
-          purchaseId: _asInt(created!['id']),
-          amountSatang:
-              _asInt(created!['amount_satang'], fallback: amountSatang),
-          qrPayload: _asStr(created!['qr_payload']),
-          expiresAt: _asDate(created!['expires_at']),
+          purchaseId: _asInt(created['id']),
+          amountSatang: _asInt(created['amount_satang'], fallback: amountSatang),
+          qrPayload: _asStr(created['qr_payload']),
+          expiresAt: _asDate(created['expires_at']),
         ),
       ),
     );
@@ -134,7 +145,7 @@ class _HomeState extends State<homescreen> {
     await _reload();
   }
 
-  // แถบ “ราคา + ปุ่มซื้อ”
+  // ===== แถบราคา =====
   Widget _paidBar({required int postId, required int amountSatang}) {
     final priceBaht = amountSatang / 100.0;
     return Padding(
@@ -147,8 +158,7 @@ class _HomeState extends State<homescreen> {
           ),
           const Spacer(),
           OutlinedButton(
-            onPressed: () =>
-                _handleBuy(postId: postId, amountSatang: amountSatang),
+            onPressed: () => _handleBuy(postId: postId, amountSatang: amountSatang),
             child: const Text('ซื้อ'),
           ),
         ],
@@ -163,7 +173,7 @@ class _HomeState extends State<homescreen> {
     }
 
     final screens = [
-      // ===================== HOME (ฟีด) =====================
+      // ===================== HOME FEED =====================
       FutureBuilder<List<dynamic>>(
         future: _futureFeed,
         builder: (context, snap) {
@@ -202,58 +212,39 @@ class _HomeState extends State<homescreen> {
               itemCount: feed.length,
               itemBuilder: (_, i) {
                 final p = feed[i] as Map<String, dynamic>;
-
                 final String priceType = (p['price_type'] ?? 'free').toString();
                 final bool isPaid = priceType == 'paid';
                 final int amountSatang = (p['price_amount_satang'] ?? 0) is int
                     ? p['price_amount_satang'] as int
                     : int.tryParse('${p['price_amount_satang']}') ?? 0;
+                final int postId =
+                    p['id'] is int ? p['id'] as int : int.parse('${p['id']}');
 
-                final int postId = p['id'] is int
-                    ? p['id'] as int
-                    : int.parse('${p['id']}');
+                final postCard = PostCard(post: p, onDeleted: _reload);
 
-                final postCard = PostCard(post: p,onDeleted: _reload);
-
-                // โพสต์ฟรี → แสดงการ์ดปกติ
                 if (!isPaid) return postCard;
 
-                // โพสต์เสียเงิน → ตรวจ hasAccess ภายใน FutureBuilder
                 return FutureBuilder<Map<String, dynamic>>(
                   future: ApiService.getPostDetail(
                     postId: postId,
                     viewerUserId: _userId!,
                   ),
                   builder: (context, detailSnap) {
-                    final bool hasAccess =
-                        (detailSnap.data?['hasAccess'] == true);
-
-                    // ระหว่างโหลดสิทธิ์ แสดงการ์ดปกติ
-                    if (detailSnap.connectionState ==
-                        ConnectionState.waiting) {
+                    final bool hasAccess = (detailSnap.data?['hasAccess'] == true);
+                    if (detailSnap.connectionState == ConnectionState.waiting) {
                       return postCard;
                     }
-
                     if (hasAccess) {
-                      // มีสิทธิ์แล้ว → ครอบป้าย "ซื้อแล้ว"
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          postCard,
-                          const SizedBox(height: 8),
-                        ],
+                        children: [postCard, const SizedBox(height: 8)],
                       );
                     }
-
-                    // ยังไม่มีสิทธิ์ → แสดงราคา + ปุ่มซื้อ
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         postCard,
-                        _paidBar(
-                          postId: postId,
-                          amountSatang: amountSatang,
-                        ),
+                        _paidBar(postId: postId, amountSatang: amountSatang),
                       ],
                     );
                   },
@@ -263,15 +254,9 @@ class _HomeState extends State<homescreen> {
           );
         },
       ),
-
-      // ===================== SEARCH =====================
       const SearchScreen(),
-
-      // ===================== ADD =====================
       const Center(child: Text('Add Screen')),
-
-      // ===================== PROFILE =====================
-      ProfileScreen(userId: _userId),
+      ProfileScreen(userId: _userId ?? 0),
     ];
 
     return Scaffold(
@@ -286,6 +271,48 @@ class _HomeState extends State<homescreen> {
                         : 'Note app',
               ),
               automaticallyImplyLeading: false,
+              actions: [
+                Stack(
+                  alignment: Alignment.topRight,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.notifications_none),
+                      tooltip: 'แจ้งเตือน',
+                      onPressed: () async {
+                        if (_userId == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('กรุณาเข้าสู่ระบบก่อนดูแจ้งเตือน')),
+                          );
+                          return;
+                        }
+
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => NotificationScreen(userId: _userId!),
+                          ),
+                        );
+
+                        await _reload(); // รีโหลด feed + noti
+                      },
+                    ),
+                    if (_unreadCount > 0)
+                      Positioned(
+                        right: 10,
+                        top: 10,
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: const BoxDecoration(
+                            color: Colors.red,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
             ),
       body: Column(children: [Expanded(child: screens[_currentIndex])]),
       bottomNavigationBar: BottomNavigationBar(

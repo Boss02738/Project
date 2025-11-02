@@ -203,23 +203,84 @@ async function getPostsBySubject(req, res) {
 
 /* ===================== LIKE/UNLIKE ===================== */
 async function toggleLike(req, res) {
-  // ... logic เดิม เช็คกด/ยกเลิกไลค์ อัปเดต DB ...
-  // สมมติว่าผลคือ justLiked === true เมื่อ “เพิ่งกดไลค์สำเร็จ”
-  if (justLiked && postOwnerId && postOwnerId !== likerId) {
-    try {
-      await createAndEmit(req.app.get('io'), {
-        userId: postOwnerId,
-        actorId: likerId,
-        postId: postId,
-        action: 'like',
-        message: `${actorName} ถูกใจโพสต์ของคุณ`,
-      });
-    } catch (e) {
-      console.error('notify like error:', e);
-      // ไม่ต้อง fail ทั้ง endpoint — แค่ log ไว้
-    }
-  }}
+  try {
+    const postId = Number(req.params.id);
+    const actorId =
+      req.user?.id_user ||
+      Number(req.body.user_id) ||
+      Number(req.query.user_id);
 
+    if (!postId || !actorId) {
+      return res.status(400).json({ error: 'missing_post_or_user' });
+    }
+
+    // 1) หาโพสต์+เจ้าของก่อน
+    const { rows: pRows } = await pool.query(
+      `SELECT id, user_id AS owner_id FROM public.posts WHERE id = $1`,
+      [postId]
+    );
+    if (pRows.length === 0) {
+      return res.status(404).json({ error: 'post_not_found' });
+    }
+    const post = pRows[0];
+
+    // 2) เช็คว่าผู้ใช้กดไลก์อยู่แล้วหรือยัง
+    const { rows: likeRows } = await pool.query(
+      `SELECT 1 FROM public.likes WHERE post_id = $1 AND user_id = $2`,
+      [postId, actorId]
+    );
+
+    let justLiked = false;
+
+    if (likeRows.length) {
+      // เคยไลก์อยู่ -> ทำการ unlike
+      await pool.query(
+        `DELETE FROM public.likes WHERE post_id = $1 AND user_id = $2`,
+        [postId, actorId]
+      );
+      justLiked = false;
+    } else {
+      // ยังไม่ไลก์ -> insert ไลก์ใหม่
+      await pool.query(
+        `INSERT INTO public.likes (post_id, user_id) VALUES ($1, $2)`,
+        [postId, actorId]
+      );
+      justLiked = true;
+    }
+
+    // 3) นับจำนวนไลก์ล่าสุดไว้ตอบกลับ
+    const { rows: cntRows } = await pool.query(
+      `SELECT COUNT(*)::int AS like_count FROM public.likes WHERE post_id = $1`,
+      [postId]
+    );
+    const likeCount = cntRows[0]?.like_count ?? 0;
+
+    // 4) แจ้งเตือนเฉพาะตอนเพิ่ง "ไลก์" และไม่แจ้งเตือนเจ้าของคนเดียวกัน
+    if (justLiked && post.owner_id !== actorId) {
+      const { rows: uRows } = await pool.query(
+        `SELECT username FROM public.users WHERE id_user = $1`,
+        [actorId]
+      );
+      const actorName = uRows[0]?.username || 'ใครสักคน';
+
+await createAndEmit({
+  receiverId: post.owner_id,
+  actorId,
+  postId,
+  verb: 'like',
+  message: `${actorName} ถูกใจโพสต์ของคุณ`,
+});
+    }
+
+    return res.json({
+      liked: justLiked,
+      like_count: likeCount,
+    });
+  } catch (err) {
+    console.error('toggleLike error:', err);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+}
 /* ========================= COUNTS ====================== */
 async function getPostCounts(req, res) {
   const postId = Number(req.params.id);
