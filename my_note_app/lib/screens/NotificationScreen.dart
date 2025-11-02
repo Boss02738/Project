@@ -347,44 +347,43 @@ class _NotificationScreenState extends State<NotificationScreen> {
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (_, i) {
-                final n = (items[i] as Map).cast<String, dynamic>();
-                final isRead = (n['is_read'] ?? false) as bool;
-                final msg = (n['message'] ?? '').toString();
-                final action = (n['action'] ?? '').toString();
-                final ts = (n['created_at'] ?? '').toString();
-                final actor = (n['actor_name'] ?? '').toString();
-                final postText = (n['post_text'] ?? '').toString();
-                final avatar = (n['actor_avatar_url'] ?? '').toString();
+final n        = (items[i] as Map).cast<String, dynamic>();
+final isRead   = (n['is_read'] ?? false) as bool;
+final msg      = (n['message'] ?? '').toString();
+final action   = (n['action'] ?? '').toString();
+final ts       = (n['created_at'] ?? '').toString();
+final actor    = (n['actor_name'] ?? '').toString();
 
-                return Material(
-                  color: isRead
-                      ? Theme.of(context).colorScheme.surface
-                      : Theme.of(context).colorScheme.surfaceTint.withOpacity(.10),
-                  borderRadius: BorderRadius.circular(14),
-                  child: ListTile(
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    leading: _Avatar(url: avatar, name: actor),
-                    title: Text(
-                      msg.isNotEmpty ? msg : action,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      [
-                        if (actor.isNotEmpty) 'โดย: $actor',
-                        if (postText.isNotEmpty)
-                          'โพสต์: ${postText.length > 30 ? postText.substring(0, 30) + "..." : postText}',
-                        _timeText(ts),
-                      ].join(' • '),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => _openItem(n),
-                  ),
-                );
+// ✅ ใช้คีย์ให้ตรงกับ API
+final avatar   = (n['actor_avatar'] ?? '').toString();
+final thumb    = (n['post_image'] ?? '').toString();
+
+return Material(
+  color: isRead
+      ? Theme.of(context).colorScheme.surface
+      : Theme.of(context).colorScheme.surfaceTint.withOpacity(.10),
+  borderRadius: BorderRadius.circular(14),
+  child: ListTile(
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    leading: _Avatar(url: avatar, name: actor),
+    title: Text(msg.isNotEmpty ? msg : action, maxLines: 2, overflow: TextOverflow.ellipsis),
+    subtitle: Text(_timeText(ts), maxLines: 1, overflow: TextOverflow.ellipsis),
+
+    // ✅ แสดงรูปแรกของโพสต์ทางขวา
+    trailing: (thumb.isNotEmpty)
+        ? ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.network(
+              absUrl(thumb),
+              width: 56, height: 56, fit: BoxFit.cover,
+              errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported),
+            ),
+          )
+        : const Icon(Icons.chevron_right),
+
+    onTap: () => _openItem(n),
+  ),
+);
               },
             ),
           );

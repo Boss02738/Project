@@ -511,38 +511,86 @@ async function getPostsByUser(req, res) {
 /* ===================== DETAIL + ACCESS ================== */
 async function getPostDetail(req, res) {
   try {
-    const postId = Number(req.params.id);
-    const viewerId = Number(req.query.userId || req.query.viewer_id) || 0;
+    const postId  = Number(req.params.id);
+    const viewerId =
+      Number(req.query.user_id) ||
+      Number(req.query.viewer_id) ||
+      Number(req.query.userId) || 0;
 
-    const { rows } = await pool.query(
-      `SELECT id, user_id, text, year_label, subject,
-              image_url, file_url,
-              LOWER(TRIM(price_type)) AS price_type,
-              price_amount_satang, created_at,
-              COALESCE(is_archived,false) AS is_archived,
-              COALESCE(is_banned,false)   AS is_banned
-         FROM public.posts
-        WHERE id=$1`,
-      [postId]
-    );
-    const post = rows[0];
-    if (!post || post.is_archived || post.is_banned)
+    if (!postId) return res.status(400).json({ error: "missing_post_id" });
+
+    const q = `
+      SELECT
+        p.id,
+        p.user_id,
+        u.username,
+        COALESCE(u.avatar_url,'') AS avatar_url,
+        p.text, p.subject, p.year_label,
+        LOWER(TRIM(p.price_type)) AS price_type,
+        p.price_amount_satang,
+        p.file_url,
+        p.created_at,
+        COALESCE(p.is_archived,false) AS is_archived,
+        COALESCE(p.is_banned,false)   AS is_banned,
+
+        /* รูปเหมือนหน้า Home */
+        COALESCE(
+          json_agg(pi.image_url ORDER BY pi.id)
+            FILTER (WHERE pi.id IS NOT NULL),
+          '[]'
+        ) AS images,
+
+        /* นับยอด */
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
+
+        /* คนดูคนนี้กดไลก์มั้ย */
+        CASE
+          WHEN $2 = 0 THEN false
+          WHEN EXISTS (SELECT 1 FROM public.likes l WHERE l.post_id = p.id AND l.user_id = $2) THEN true
+          ELSE false
+        END AS liked_by_me,
+
+        /* ซื้อแล้วหรือยัง (เอาไว้โชว์ badge) */
+        CASE
+          WHEN $2 = 0 THEN false
+          WHEN EXISTS (SELECT 1 FROM public.purchased_posts pp WHERE pp.post_id = p.id AND pp.user_id = $2) THEN true
+          ELSE false
+        END AS is_purchased,
+
+        /* สิทธิ์เข้าถึงไฟล์/รูปทั้งหมด */
+        CASE
+          WHEN LOWER(TRIM(p.price_type)) <> 'paid' THEN true
+          WHEN $2 <> 0 AND ($2 = p.user_id
+                OR EXISTS (SELECT 1 FROM public.purchased_posts pp WHERE pp.post_id = p.id AND pp.user_id = $2))
+            THEN true
+          ELSE false
+        END AS has_access
+
+      FROM public.posts p
+      JOIN public.users u       ON u.id_user = p.user_id
+      LEFT JOIN public.post_images pi ON pi.post_id = p.id
+      WHERE p.id = $1
+        AND COALESCE(p.is_banned,false) = false
+      GROUP BY p.id, u.id_user, u.username, u.avatar_url
+      LIMIT 1
+    `;
+
+    const { rows } = await pool.query(q, [postId, viewerId]);
+    const row = rows[0];
+    if (!row) return res.status(404).json({ error: "not_found" });
+
+    // ถ้าโพสต์ถูก archive และคนดูไม่ใช่เจ้าของ → ซ่อน
+    if (row.is_archived && Number(row.user_id) !== viewerId) {
       return res.status(404).json({ error: "not_found" });
-
-    let hasAccess = false;
-    if (post.price_type !== "paid") {
-      hasAccess = true;
-    } else if (viewerId && viewerId === post.user_id) {
-      hasAccess = true;
-    } else if (viewerId) {
-      const acc = await pool.query(
-        `SELECT 1 FROM public.purchased_posts WHERE post_id=$1 AND user_id=$2 LIMIT 1`,
-        [postId, viewerId]
-      );
-      hasAccess = acc.rowCount > 0;
     }
 
-    res.json({ post, hasAccess });
+    // ส่งกลับ “โครงสร้างเดียวกับ feed” + access flags
+    return res.json({
+      ...row,
+      // เผื่อ client เดิมคาดหวังชื่อ field นี้
+      hasAccess: row.has_access,
+    });
   } catch (e) {
     console.error("getPostDetail error:", e);
     res.status(500).json({ error: "internal_error" });

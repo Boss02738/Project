@@ -96,25 +96,36 @@ async function listNotifications(req, res) {
     if (!userId) return res.status(400).json({ message: 'user_id required' });
 
     const unreadOnly = String(req.query.unread_only || 'false').toLowerCase() === 'true';
-    const limit = Math.min(Number(req.query.limit) || 30, 100);
+    const limit  = Math.min(Number(req.query.limit) || 30, 100);
     const offset = Number(req.query.offset) || 0;
 
-    const r = await pool.query(
-      `
-      SELECT n.id, n.user_id, n.actor_id, n.post_id, n.action, n.verb, n.message,
-             n.is_read, n.created_at,
-             COALESCE(a.username,'') AS actor_name,
-             COALESCE(p.text,'')      AS post_text
-      FROM public.notifications n
-      LEFT JOIN public.users a ON a.id_user = n.actor_id
-      LEFT JOIN public.posts p ON p.id      = n.post_id
+    const r = await pool.query(`
+      SELECT
+        n.id, n.user_id, n.actor_id, n.post_id, n.action, n.verb, n.message,
+        n.is_read, n.created_at,
+
+        /* ผู้กระทำ (ไว้แสดงรูปวงกลมซ้าย) */
+        COALESCE(a.username,'') AS actor_name,
+        COALESCE(a.avatar_url, '/uploads/avatars/default.png') AS actor_avatar,
+
+        /* ข้อความโพสต์ + รูปแรกของโพสต์ (ไว้แสดงทางขวา) */
+        COALESCE(p.text,'') AS post_text,
+        (
+          SELECT pi.image_url
+          FROM post_images pi
+          WHERE pi.post_id = n.post_id
+          ORDER BY pi.id ASC
+          LIMIT 1
+        ) AS post_image
+
+      FROM notifications n
+      LEFT JOIN users a ON a.id_user = n.actor_id
+      LEFT JOIN posts p ON p.id      = n.post_id
       WHERE n.user_id = $1
         ${unreadOnly ? 'AND n.is_read = false' : ''}
       ORDER BY n.created_at DESC
       LIMIT $2 OFFSET $3
-      `,
-      [userId, limit, offset]
-    );
+    `, [userId, limit, offset]);
 
     res.json({ items: r.rows, limit, offset });
   } catch (e) {
