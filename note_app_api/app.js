@@ -826,12 +826,10 @@ io.on("connection", (socket) => {
       console.error("clear_board error", e);
     }
   });
-  io.on('connection', (socket) => {
-  socket.on('register', (userId) => {
+  socket.on("register", (userId) => {
     const id = Number(userId);
     if (id > 0) socket.join(`user:${id}`);
   });
-});
 });
 
 /* ===================================================================

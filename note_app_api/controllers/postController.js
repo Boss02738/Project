@@ -256,21 +256,22 @@ async function toggleLike(req, res) {
     const likeCount = cntRows[0]?.like_count ?? 0;
 
     // 4) แจ้งเตือนเฉพาะตอนเพิ่ง "ไลก์" และไม่แจ้งเตือนเจ้าของคนเดียวกัน
-    if (justLiked && post.owner_id !== actorId) {
-      const { rows: uRows } = await pool.query(
-        `SELECT username FROM public.users WHERE id_user = $1`,
-        [actorId]
-      );
-      const actorName = uRows[0]?.username || 'ใครสักคน';
+if (justLiked && post.owner_id !== actorId) {
+  const { rows: uRows } = await pool.query(
+    `SELECT username FROM public.users WHERE id_user = $1`,
+    [actorId]
+  );
+  const actorName = uRows[0]?.username || 'ใครสักคน';
 
-await createAndEmit({
-  receiverId: post.owner_id,
-  actorId,
-  postId,
-  action: 'like',             // หรือจะส่ง verb ก็ได้ ฟังก์ชันรองรับ
-  message: `${actorName} ถูกใจโพสต์ของคุณ`,
-});
-    }
+  // ✅ ส่ง io เป็นอาร์กิวเมนต์ตัวแรก + ใช้ key = userId
+  await createAndEmit(req.app.get('io'), {
+    userId: post.owner_id,
+    actorId,
+    postId,
+    action: 'like',
+    message: `${actorName} ถูกใจโพสต์ของคุณ`,
+  });
+}
 
     return res.json({
       liked: justLiked,
@@ -322,24 +323,62 @@ async function getComments(req, res) {
   }
 }
 
+// async function addComment(req, res) {
+//   const postId = Number(req.params.id);
+//   const { user_id, text } = req.body || {};
+//   const userId = Number(user_id);
+//   if (!postId || !userId || !text || !text.trim())
+//     return res.status(400).json({ message: "missing fields" });
+//   try {
+//     await pool.query(
+//       "INSERT INTO public.comments(post_id,user_id,text) VALUES ($1,$2,$3)",
+//       [postId, userId, text.trim()]
+//     );
+//     res.json({ message: "ok" });
+//   } catch (e) {
+//     console.error("addComment error:", e);
+//     res.status(500).json({ message: "internal error" });
+//   }
+// }
 async function addComment(req, res) {
   const postId = Number(req.params.id);
   const { user_id, text } = req.body || {};
   const userId = Number(user_id);
   if (!postId || !userId || !text || !text.trim())
     return res.status(400).json({ message: "missing fields" });
+
   try {
     await pool.query(
       "INSERT INTO public.comments(post_id,user_id,text) VALUES ($1,$2,$3)",
       [postId, userId, text.trim()]
     );
+
+    // ✅ ยิง noti ให้เจ้าของโพสต์ (ยกเว้นคอมเมนต์ตัวเอง)
+    const [{ rows: pRows }, { rows: uRows }] = await Promise.all([
+      pool.query(`SELECT user_id AS owner_id FROM public.posts WHERE id=$1`, [postId]),
+      pool.query(`SELECT username FROM public.users WHERE id_user=$1`, [userId]),
+    ]);
+
+    if (pRows.length) {
+      const ownerId = Number(pRows[0].owner_id);
+      if (ownerId && ownerId !== userId) {
+        const actorName = uRows[0]?.username || 'ใครสักคน';
+        await createAndEmit(req.app.get('io'), {
+          userId: ownerId,
+          actorId: userId,
+          postId,
+          action: 'comment',
+          message: `${actorName} แสดงความคิดเห็นในโพสต์ของคุณ`,
+        });
+      }
+    }
+
     res.json({ message: "ok" });
   } catch (e) {
     console.error("addComment error:", e);
     res.status(500).json({ message: "internal error" });
   }
 }
-
 /* ======================== SAVE ========================= */
 async function toggleSave(req, res) {
   const postId = Number(req.params.id);
