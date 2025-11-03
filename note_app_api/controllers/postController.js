@@ -203,83 +203,71 @@ async function getPostsBySubject(req, res) {
 
 /* ===================== LIKE/UNLIKE ===================== */
 async function toggleLike(req, res) {
+  const userId = Number(req.body.user_id);
+  const postId = Number(req.params.id || req.body.post_id);
+  if (!userId || !postId) return res.status(400).json({ message: "bad_request" });
+
+  const client = await pool.connect();
   try {
-    const postId = Number(req.params.id);
-    const actorId =
-      req.user?.id_user ||
-      Number(req.body.user_id) ||
-      Number(req.query.user_id);
+    await client.query("BEGIN");
 
-    if (!postId || !actorId) {
-      return res.status(400).json({ error: 'missing_post_or_user' });
-    }
-
-    // 1) หาโพสต์+เจ้าของก่อน
-    const { rows: pRows } = await pool.query(
-      `SELECT id, user_id AS owner_id FROM public.posts WHERE id = $1`,
+    // หาเจ้าของโพสต์ไว้ส่ง noti
+    const { rows: postRows } = await client.query(
+      `SELECT id, user_id FROM public.posts WHERE id=$1`,
       [postId]
     );
-    if (pRows.length === 0) {
-      return res.status(404).json({ error: 'post_not_found' });
+    if (!postRows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "post_not_found" });
     }
-    const post = pRows[0];
+    const ownerId = Number(postRows[0].user_id);
 
-    // 2) เช็คว่าผู้ใช้กดไลก์อยู่แล้วหรือยัง
-    const { rows: likeRows } = await pool.query(
-      `SELECT 1 FROM public.likes WHERE post_id = $1 AND user_id = $2`,
-      [postId, actorId]
+    // เช็คว่าไลค์อยู่แล้วไหม
+    const { rows: likeRows } = await client.query(
+      `SELECT id FROM public.likes WHERE user_id=$1 AND post_id=$2`,
+      [userId, postId]
     );
 
-    let justLiked = false;
-
+    let likedNow;
     if (likeRows.length) {
-      // เคยไลก์อยู่ -> ทำการ unlike
-      await pool.query(
-        `DELETE FROM public.likes WHERE post_id = $1 AND user_id = $2`,
-        [postId, actorId]
-      );
-      justLiked = false;
+      // ถ้ามีอยู่แล้ว → unlike
+      await client.query(`DELETE FROM public.likes WHERE id=$1`, [likeRows[0].id]);
+      likedNow = false;
     } else {
-      // ยังไม่ไลก์ -> insert ไลก์ใหม่
-      await pool.query(
-        `INSERT INTO public.likes (post_id, user_id) VALUES ($1, $2)`,
-        [postId, actorId]
+      // ถ้ายัง → like
+      await client.query(
+        `INSERT INTO public.likes (user_id, post_id, created_at) VALUES ($1,$2,now())`,
+        [userId, postId]
       );
-      justLiked = true;
+      likedNow = true;
+
+      // ส่งแจ้งเตือนให้เจ้าของโพสต์ (ห้ามส่งถ้าเจ้าของกดไลค์โพสต์ตัวเอง)
+      if (ownerId && ownerId !== userId) {
+        await createAndEmit(req.app, {
+          targetUserId: ownerId,     // ผู้รับ
+          actorId: userId,           // คนกดไลค์
+          action: "like",            // คีย์ที่ NotificationScreen ใช้ได้
+          message: "ถูกใจโพสต์ของคุณ",
+          postId: postId,
+        });
+      }
     }
 
-    // 3) นับจำนวนไลก์ล่าสุดไว้ตอบกลับ
-    const { rows: cntRows } = await pool.query(
-      `SELECT COUNT(*)::int AS like_count FROM public.likes WHERE post_id = $1`,
+    await client.query("COMMIT");
+
+    // นับ like ใหม่
+    const { rows: cnt } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM public.likes WHERE post_id=$1`,
       [postId]
     );
-    const likeCount = cntRows[0]?.like_count ?? 0;
 
-    // 4) แจ้งเตือนเฉพาะตอนเพิ่ง "ไลก์" และไม่แจ้งเตือนเจ้าของคนเดียวกัน
-if (justLiked && post.owner_id !== actorId) {
-  const { rows: uRows } = await pool.query(
-    `SELECT username FROM public.users WHERE id_user = $1`,
-    [actorId]
-  );
-  const actorName = uRows[0]?.username || 'ใครสักคน';
-
-  // ✅ ส่ง io เป็นอาร์กิวเมนต์ตัวแรก + ใช้ key = userId
-  await createAndEmit(req.app.get('io'), {
-    userId: post.owner_id,
-    actorId,
-    postId,
-    action: 'like',
-    message: `${actorName} ถูกใจโพสต์ของคุณ`,
-  });
-}
-
-    return res.json({
-      liked: justLiked,
-      like_count: likeCount,
-    });
-  } catch (err) {
-    console.error('toggleLike error:', err);
-    return res.status(500).json({ error: 'internal_error' });
+    return res.json({ ok: true, liked: likedNow, like_count: cnt[0].n });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    console.error("toggleLike error:", e);
+    return res.status(500).json({ message: "internal_error" });
+  } finally {
+    client.release();
   }
 }
 /* ========================= COUNTS ====================== */
@@ -341,42 +329,62 @@ async function getComments(req, res) {
 //   }
 // }
 async function addComment(req, res) {
-  const postId = Number(req.params.id);
-  const { user_id, text } = req.body || {};
-  const userId = Number(user_id);
-  if (!postId || !userId || !text || !text.trim())
-    return res.status(400).json({ message: "missing fields" });
+  const userId = Number(req.body.user_id);
+  const postId = Number(req.params.id || req.body.post_id);
+  const text = (req.body.text || "").toString().trim();
+  if (!userId || !postId || !text) {
+    return res.status(400).json({ message: "bad_request" });
+  }
 
+  const client = await pool.connect();
   try {
-    await pool.query(
-      "INSERT INTO public.comments(post_id,user_id,text) VALUES ($1,$2,$3)",
-      [postId, userId, text.trim()]
+    await client.query("BEGIN");
+
+    // หาเจ้าของโพสต์ไว้ส่ง noti
+    const { rows: postRows } = await client.query(
+      `SELECT id, user_id FROM public.posts WHERE id=$1`,
+      [postId]
+    );
+    if (!postRows.length) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "post_not_found" });
+    }
+    const ownerId = Number(postRows[0].user_id);
+
+    // เพิ่มคอมเมนต์
+    const { rows: ins } = await client.query(
+      `INSERT INTO public.comments (user_id, post_id, text, created_at)
+       VALUES ($1,$2,$3,now())
+       RETURNING id, user_id, post_id, text, created_at`,
+      [userId, postId, text]
     );
 
-    // ✅ ยิง noti ให้เจ้าของโพสต์ (ยกเว้นคอมเมนต์ตัวเอง)
-    const [{ rows: pRows }, { rows: uRows }] = await Promise.all([
-      pool.query(`SELECT user_id AS owner_id FROM public.posts WHERE id=$1`, [postId]),
-      pool.query(`SELECT username FROM public.users WHERE id_user=$1`, [userId]),
-    ]);
-
-    if (pRows.length) {
-      const ownerId = Number(pRows[0].owner_id);
-      if (ownerId && ownerId !== userId) {
-        const actorName = uRows[0]?.username || 'ใครสักคน';
-        await createAndEmit(req.app.get('io'), {
-          userId: ownerId,
-          actorId: userId,
-          postId,
-          action: 'comment',
-          message: `${actorName} แสดงความคิดเห็นในโพสต์ของคุณ`,
-        });
-      }
+    // ส่ง noti ให้เจ้าของโพสต์ (ถ้าไม่ใช่คอมเมนต์ตัวเอง)
+    if (ownerId && ownerId !== userId) {
+      await createAndEmit(req.app, {
+        targetUserId: ownerId,       // ผู้รับ
+        actorId: userId,             // คนคอมเมนต์
+        action: "comment",           // ให้ตรงกับฝั่งแอป
+        message: "แสดงความคิดเห็นในโพสต์ของคุณ",
+        postId: postId,
+      });
     }
 
-    res.json({ message: "ok" });
+    await client.query("COMMIT");
+
+    // นับคอมเมนต์ใหม่
+    const { rows: cnt } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM public.comments WHERE post_id=$1`,
+      [postId]
+    );
+
+    return res.json({ ok: true, comment: ins[0], comment_count: cnt[0].n });
   } catch (e) {
+    await client.query("ROLLBACK");
     console.error("addComment error:", e);
-    res.status(500).json({ message: "internal error" });
+    return res.status(500).json({ message: "internal_error" });
+  } finally {
+    client.release();
   }
 }
 /* ======================== SAVE ========================= */
