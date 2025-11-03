@@ -421,46 +421,43 @@ class _PostCardState extends State<PostCard> {
   }
 
   /// ====== Action Sheet (เมนู) ======
-  Future<void> _openActionsSheet(bool canDelete) async {
-    // ปิดคีย์บอร์ดกัน layout กระตุก
-    FocusScope.of(context).unfocus();
+Future<void> _openActionsSheet(bool canDelete) async {
+  FocusScope.of(context).unfocus();
 
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: false,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // drag handle
-                Container(
-                  width: 44,
-                  height: 5,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.black12,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                ),
-                Row(
-                  children: const [
-                    Icon(Icons.tune, size: 18, color: Colors.black54),
-                    SizedBox(width: 8),
-                    Text('การทำรายการกับโพสต์',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                  ],
-                ),
-                const SizedBox(height: 8),
+  await showModalBottomSheet<void>(
+    context: context,
+    useRootNavigator: true,
+    isScrollControlled: false,
+    backgroundColor: Colors.white,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (ctx) {
+      // คำนวณ isOwner จาก build() แล้วส่งมาเป็น canDelete อยู่แล้ว
+      final isOwner = canDelete;
 
+      return SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44, height: 5, margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(color: Colors.black12, borderRadius: BorderRadius.circular(999)),
+              ),
+              Row(
+                children: const [
+                  Icon(Icons.tune, size: 18, color: Colors.black54),
+                  SizedBox(width: 8),
+                  Text('การทำรายการกับโพสต์', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                ],
+              ),
+              const SizedBox(height: 8),
+
+              // แสดงปุ่มรายงานเฉพาะเมื่อ "ไม่ใช่" เจ้าของโพสต์
+              if (!isOwner)
                 _ActionItem(
                   icon: Icons.flag_outlined,
                   label: 'รายงานโพสต์',
@@ -471,29 +468,29 @@ class _PostCardState extends State<PostCard> {
                   },
                 ),
 
-                if (canDelete) ...[
-                  const SizedBox(height: 4),
-                  const Divider(height: 1),
-                  const SizedBox(height: 4),
-                  _ActionItem(
-                    icon: Icons.delete_outline,
-                    label: 'Delete post',
-                    subtitle: 'ย้ายไปยังรายการลบ (กู้คืนได้ใน Settings)',
-                    danger: true,
-                    onTap: () async {
-                      Navigator.pop(ctx);
-                      await _confirmAndArchive();
-                    },
-                  ),
-                ],
+              if (canDelete) ...[
                 const SizedBox(height: 4),
+                const Divider(height: 1),
+                const SizedBox(height: 4),
+                _ActionItem(
+                  icon: Icons.delete_outline,
+                  label: 'Delete post',
+                  subtitle: 'ย้ายไปยังรายการลบ (กู้คืนได้ใน Settings)',
+                  danger: true,
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    await _confirmAndArchive();
+                  },
+                ),
               ],
-            ),
+              const SizedBox(height: 4),
+            ],
           ),
-        );
-      },
-    );
-  }
+        ),
+      );
+    },
+  );
+}
 
   @override
   Widget build(BuildContext context) {
