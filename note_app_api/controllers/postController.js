@@ -203,23 +203,85 @@ async function getPostsBySubject(req, res) {
 
 /* ===================== LIKE/UNLIKE ===================== */
 async function toggleLike(req, res) {
-  // ... logic เดิม เช็คกด/ยกเลิกไลค์ อัปเดต DB ...
-  // สมมติว่าผลคือ justLiked === true เมื่อ “เพิ่งกดไลค์สำเร็จ”
-  if (justLiked && postOwnerId && postOwnerId !== likerId) {
-    try {
-      await createAndEmit(req.app.get('io'), {
-        userId: postOwnerId,
-        actorId: likerId,
-        postId: postId,
-        action: 'like',
-        message: `${actorName} ถูกใจโพสต์ของคุณ`,
-      });
-    } catch (e) {
-      console.error('notify like error:', e);
-      // ไม่ต้อง fail ทั้ง endpoint — แค่ log ไว้
-    }
-  }}
+  try {
+    const postId = Number(req.params.id);
+    const actorId =
+      req.user?.id_user ||
+      Number(req.body.user_id) ||
+      Number(req.query.user_id);
 
+    if (!postId || !actorId) {
+      return res.status(400).json({ error: 'missing_post_or_user' });
+    }
+
+    // 1) หาโพสต์+เจ้าของก่อน
+    const { rows: pRows } = await pool.query(
+      `SELECT id, user_id AS owner_id FROM public.posts WHERE id = $1`,
+      [postId]
+    );
+    if (pRows.length === 0) {
+      return res.status(404).json({ error: 'post_not_found' });
+    }
+    const post = pRows[0];
+
+    // 2) เช็คว่าผู้ใช้กดไลก์อยู่แล้วหรือยัง
+    const { rows: likeRows } = await pool.query(
+      `SELECT 1 FROM public.likes WHERE post_id = $1 AND user_id = $2`,
+      [postId, actorId]
+    );
+
+    let justLiked = false;
+
+    if (likeRows.length) {
+      // เคยไลก์อยู่ -> ทำการ unlike
+      await pool.query(
+        `DELETE FROM public.likes WHERE post_id = $1 AND user_id = $2`,
+        [postId, actorId]
+      );
+      justLiked = false;
+    } else {
+      // ยังไม่ไลก์ -> insert ไลก์ใหม่
+      await pool.query(
+        `INSERT INTO public.likes (post_id, user_id) VALUES ($1, $2)`,
+        [postId, actorId]
+      );
+      justLiked = true;
+    }
+
+    // 3) นับจำนวนไลก์ล่าสุดไว้ตอบกลับ
+    const { rows: cntRows } = await pool.query(
+      `SELECT COUNT(*)::int AS like_count FROM public.likes WHERE post_id = $1`,
+      [postId]
+    );
+    const likeCount = cntRows[0]?.like_count ?? 0;
+
+    // 4) แจ้งเตือนเฉพาะตอนเพิ่ง "ไลก์" และไม่แจ้งเตือนเจ้าของคนเดียวกัน
+if (justLiked && post.owner_id !== actorId) {
+  const { rows: uRows } = await pool.query(
+    `SELECT username FROM public.users WHERE id_user = $1`,
+    [actorId]
+  );
+  const actorName = uRows[0]?.username || 'ใครสักคน';
+
+  // ✅ ส่ง io เป็นอาร์กิวเมนต์ตัวแรก + ใช้ key = userId
+  await createAndEmit(req.app.get('io'), {
+    userId: post.owner_id,
+    actorId,
+    postId,
+    action: 'like',
+    message: `${actorName} ถูกใจโพสต์ของคุณ`,
+  });
+}
+
+    return res.json({
+      liked: justLiked,
+      like_count: likeCount,
+    });
+  } catch (err) {
+    console.error('toggleLike error:', err);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+}
 /* ========================= COUNTS ====================== */
 async function getPostCounts(req, res) {
   const postId = Number(req.params.id);
@@ -261,24 +323,62 @@ async function getComments(req, res) {
   }
 }
 
+// async function addComment(req, res) {
+//   const postId = Number(req.params.id);
+//   const { user_id, text } = req.body || {};
+//   const userId = Number(user_id);
+//   if (!postId || !userId || !text || !text.trim())
+//     return res.status(400).json({ message: "missing fields" });
+//   try {
+//     await pool.query(
+//       "INSERT INTO public.comments(post_id,user_id,text) VALUES ($1,$2,$3)",
+//       [postId, userId, text.trim()]
+//     );
+//     res.json({ message: "ok" });
+//   } catch (e) {
+//     console.error("addComment error:", e);
+//     res.status(500).json({ message: "internal error" });
+//   }
+// }
 async function addComment(req, res) {
   const postId = Number(req.params.id);
   const { user_id, text } = req.body || {};
   const userId = Number(user_id);
   if (!postId || !userId || !text || !text.trim())
     return res.status(400).json({ message: "missing fields" });
+
   try {
     await pool.query(
       "INSERT INTO public.comments(post_id,user_id,text) VALUES ($1,$2,$3)",
       [postId, userId, text.trim()]
     );
+
+    // ✅ ยิง noti ให้เจ้าของโพสต์ (ยกเว้นคอมเมนต์ตัวเอง)
+    const [{ rows: pRows }, { rows: uRows }] = await Promise.all([
+      pool.query(`SELECT user_id AS owner_id FROM public.posts WHERE id=$1`, [postId]),
+      pool.query(`SELECT username FROM public.users WHERE id_user=$1`, [userId]),
+    ]);
+
+    if (pRows.length) {
+      const ownerId = Number(pRows[0].owner_id);
+      if (ownerId && ownerId !== userId) {
+        const actorName = uRows[0]?.username || 'ใครสักคน';
+        await createAndEmit(req.app.get('io'), {
+          userId: ownerId,
+          actorId: userId,
+          postId,
+          action: 'comment',
+          message: `${actorName} แสดงความคิดเห็นในโพสต์ของคุณ`,
+        });
+      }
+    }
+
     res.json({ message: "ok" });
   } catch (e) {
     console.error("addComment error:", e);
     res.status(500).json({ message: "internal error" });
   }
 }
-
 /* ======================== SAVE ========================= */
 async function toggleSave(req, res) {
   const postId = Number(req.params.id);
@@ -411,38 +511,86 @@ async function getPostsByUser(req, res) {
 /* ===================== DETAIL + ACCESS ================== */
 async function getPostDetail(req, res) {
   try {
-    const postId = Number(req.params.id);
-    const viewerId = Number(req.query.userId || req.query.viewer_id) || 0;
+    const postId  = Number(req.params.id);
+    const viewerId =
+      Number(req.query.user_id) ||
+      Number(req.query.viewer_id) ||
+      Number(req.query.userId) || 0;
 
-    const { rows } = await pool.query(
-      `SELECT id, user_id, text, year_label, subject,
-              image_url, file_url,
-              LOWER(TRIM(price_type)) AS price_type,
-              price_amount_satang, created_at,
-              COALESCE(is_archived,false) AS is_archived,
-              COALESCE(is_banned,false)   AS is_banned
-         FROM public.posts
-        WHERE id=$1`,
-      [postId]
-    );
-    const post = rows[0];
-    if (!post || post.is_archived || post.is_banned)
+    if (!postId) return res.status(400).json({ error: "missing_post_id" });
+
+    const q = `
+      SELECT
+        p.id,
+        p.user_id,
+        u.username,
+        COALESCE(u.avatar_url,'') AS avatar_url,
+        p.text, p.subject, p.year_label,
+        LOWER(TRIM(p.price_type)) AS price_type,
+        p.price_amount_satang,
+        p.file_url,
+        p.created_at,
+        COALESCE(p.is_archived,false) AS is_archived,
+        COALESCE(p.is_banned,false)   AS is_banned,
+
+        /* รูปเหมือนหน้า Home */
+        COALESCE(
+          json_agg(pi.image_url ORDER BY pi.id)
+            FILTER (WHERE pi.id IS NOT NULL),
+          '[]'
+        ) AS images,
+
+        /* นับยอด */
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
+
+        /* คนดูคนนี้กดไลก์มั้ย */
+        CASE
+          WHEN $2 = 0 THEN false
+          WHEN EXISTS (SELECT 1 FROM public.likes l WHERE l.post_id = p.id AND l.user_id = $2) THEN true
+          ELSE false
+        END AS liked_by_me,
+
+        /* ซื้อแล้วหรือยัง (เอาไว้โชว์ badge) */
+        CASE
+          WHEN $2 = 0 THEN false
+          WHEN EXISTS (SELECT 1 FROM public.purchased_posts pp WHERE pp.post_id = p.id AND pp.user_id = $2) THEN true
+          ELSE false
+        END AS is_purchased,
+
+        /* สิทธิ์เข้าถึงไฟล์/รูปทั้งหมด */
+        CASE
+          WHEN LOWER(TRIM(p.price_type)) <> 'paid' THEN true
+          WHEN $2 <> 0 AND ($2 = p.user_id
+                OR EXISTS (SELECT 1 FROM public.purchased_posts pp WHERE pp.post_id = p.id AND pp.user_id = $2))
+            THEN true
+          ELSE false
+        END AS has_access
+
+      FROM public.posts p
+      JOIN public.users u       ON u.id_user = p.user_id
+      LEFT JOIN public.post_images pi ON pi.post_id = p.id
+      WHERE p.id = $1
+        AND COALESCE(p.is_banned,false) = false
+      GROUP BY p.id, u.id_user, u.username, u.avatar_url
+      LIMIT 1
+    `;
+
+    const { rows } = await pool.query(q, [postId, viewerId]);
+    const row = rows[0];
+    if (!row) return res.status(404).json({ error: "not_found" });
+
+    // ถ้าโพสต์ถูก archive และคนดูไม่ใช่เจ้าของ → ซ่อน
+    if (row.is_archived && Number(row.user_id) !== viewerId) {
       return res.status(404).json({ error: "not_found" });
-
-    let hasAccess = false;
-    if (post.price_type !== "paid") {
-      hasAccess = true;
-    } else if (viewerId && viewerId === post.user_id) {
-      hasAccess = true;
-    } else if (viewerId) {
-      const acc = await pool.query(
-        `SELECT 1 FROM public.purchased_posts WHERE post_id=$1 AND user_id=$2 LIMIT 1`,
-        [postId, viewerId]
-      );
-      hasAccess = acc.rowCount > 0;
     }
 
-    res.json({ post, hasAccess });
+    // ส่งกลับ “โครงสร้างเดียวกับ feed” + access flags
+    return res.json({
+      ...row,
+      // เผื่อ client เดิมคาดหวังชื่อ field นี้
+      hasAccess: row.has_access,
+    });
   } catch (e) {
     console.error("getPostDetail error:", e);
     res.status(500).json({ error: "internal_error" });
