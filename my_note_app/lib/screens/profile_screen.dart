@@ -4,7 +4,14 @@ import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/widgets/post_card.dart';
 import 'package:my_note_app/screens/settings_screen.dart';
 import 'package:my_note_app/screens/edit_profile_screen.dart';
-import 'package:my_note_app/widgets/friend_action_button.dart'; // <-- เพิ่ม
+import 'package:my_note_app/widgets/friend_action_button.dart';
+
+// ⬇️ เพิ่ม import สำหรับ bottom nav และหน้าที่จะนำทางไป
+import 'package:my_note_app/widgets/app_bottom_nav_bar.dart';
+import 'package:my_note_app/screens/home_screen.dart';
+import 'package:my_note_app/screens/search_screen.dart';
+import 'package:my_note_app/screens/documents_screen.dart';
+import 'package:my_note_app/screens/NewPost.dart';
 
 class ProfileScreen extends StatefulWidget {
   /// โปรไฟล์ที่ต้องการเปิดดู; ถ้าไม่ส่งมา จะเปิดโปรไฟล์ตนเอง
@@ -73,7 +80,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    // 2) โหลดโพสต์ (พังได้ ไม่บล็อคหน้า)
+    // 2) โหลดโพสต์
     try {
       posts = await ApiService.getPostsByUser(
         profileUserId: _profileUserId!,
@@ -96,6 +103,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _refresh() async => _loadAll();
 
+  // ---------------- UI ----------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -136,6 +144,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
             ),
+
+      // ✅ ใช้ AppBottomNavBar (index 4 = Profile)
+      bottomNavigationBar: AppBottomNavBar(
+        currentIndex: 4,
+        onTapAsync: (index) async {
+          if (index == 0) {
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const homescreen()),
+            );
+          } else if (index == 1) {
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const SearchScreen()),
+            );
+          } else if (index == 2) {
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const DocumentsScreen()),
+            );
+          } else if (index == 3) {
+            // ไปหน้าเพิ่มโพสต์ ต้องมี userId และ username
+            final sp = await SharedPreferences.getInstance();
+            final uid = sp.getInt('user_id');
+            final uname = sp.getString('username') ?? '';
+            if (uid == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('กรุณาเข้าสู่ระบบก่อนโพสต์')),
+              );
+              return;
+            }
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => NewPostScreen(userId: uid, username: uname),
+              ),
+            );
+          } else if (index == 4) {
+            // อยู่หน้า Profile แล้ว — ไม่ต้องทำอะไร
+          }
+        },
+      ),
     );
   }
 
@@ -231,7 +285,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         child: const Text('กรุณาเข้าสู่ระบบเพื่อเพิ่มเพื่อน'),
                       )
-                    : // === ใช้ FriendActionButton ที่เชื่อม API แล้ว ===
+                    : // ใช้ FriendActionButton ที่เชื่อม API แล้ว
                     FriendActionButton(
                         meId: _viewerId!,
                         otherId: _profileUserId!,

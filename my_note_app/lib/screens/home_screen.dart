@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:my_note_app/screens/documents_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/NewPost.dart';
@@ -9,6 +10,7 @@ import 'package:my_note_app/screens/profile_screen.dart';
 import 'package:my_note_app/screens/purchase_screen.dart';
 import 'package:my_note_app/screens/Notificationscreen.dart';
 import 'package:my_note_app/widgets/post_card.dart';
+import 'package:my_note_app/widgets/app_bottom_nav_bar.dart';
 
 class homescreen extends StatefulWidget {
   const homescreen({super.key});
@@ -23,7 +25,7 @@ class _HomeState extends State<homescreen> {
   int? _userId;
   String? _username;
   bool _loadingUser = true;
-  int _unreadCount = 0; // 🔔 ตัวนับแจ้งเตือนที่ยังไม่อ่าน
+  int _unreadCount = 0; // 🔔 แจ้งเตือนที่ยังไม่อ่าน
 
   @override
   void initState() {
@@ -103,7 +105,6 @@ class _HomeState extends State<homescreen> {
       return;
     }
 
-    // ✅ ใช้ Map ที่ไม่ nullable เพราะ startPurchase คืนค่าปกติ
     late final Map<String, dynamic> created;
 
     try {
@@ -118,7 +119,6 @@ class _HomeState extends State<homescreen> {
       return;
     }
 
-    // ✅ ตรวจค่าหลักครบ
     if (created['id'] == null ||
         created['qr_payload'] == null ||
         created['expires_at'] == null) {
@@ -254,21 +254,24 @@ class _HomeState extends State<homescreen> {
           );
         },
       ),
-      const SearchScreen(),
-      const Center(child: Text('Add Screen')),
-      ProfileScreen(userId: _userId ?? 0),
+      const SearchScreen(),           // index 1
+      const DocumentsScreen(),        // index 2: Document
+      const Center(child: Text('Add Screen')), // index 3: placeholder
+      ProfileScreen(userId: _userId ?? 0),     // index 4: Profile
     ];
 
     return Scaffold(
-      appBar: (_currentIndex == 3)
+      appBar: (_currentIndex == 4)
           ? null
           : AppBar(
               title: Text(
                 _currentIndex == 1
                     ? 'Search'
-                    : _currentIndex == 0
-                        ? 'Home'
-                        : 'Note app',
+                    : _currentIndex == 2
+                        ? 'Document'
+                        : _currentIndex == 0
+                            ? 'Home'
+                            : 'Note app',
               ),
               automaticallyImplyLeading: false,
               actions: [
@@ -315,13 +318,13 @@ class _HomeState extends State<homescreen> {
               ],
             ),
       body: Column(children: [Expanded(child: screens[_currentIndex])]),
-      bottomNavigationBar: BottomNavigationBar(
+
+      // ⬇ ใช้ widget ที่รีใช้ซ้ำได้ ⬇
+      bottomNavigationBar: AppBottomNavBar(
         currentIndex: _currentIndex,
-        selectedItemColor: const Color.fromARGB(255, 31, 102, 160),
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        onTap: (index) async {
-          if (index == 2) {
+        onTapAsync: (index) async {
+          if (index == 3) {
+            // ปุ่ม Add
             if (_userId == null) return;
             final changed = await Navigator.push<bool>(
               context,
@@ -332,26 +335,16 @@ class _HomeState extends State<homescreen> {
             );
             if (changed == true) await _reload();
           } else if (index == 1) {
+            // Search แบบ push ออกไป
             await Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const SearchScreen()),
             );
           } else {
+            // Home (0), Document (2), Profile (4)
             setState(() => _currentIndex = index);
           }
         },
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.account_circle_outlined),
-            label: 'Profile',
-          ),
-        ],
       ),
     );
   }

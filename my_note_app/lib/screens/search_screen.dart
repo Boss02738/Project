@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:my_note_app/screens/documents_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/NewPost.dart';
 import 'package:my_note_app/screens/subject_feed_screen.dart';
 import 'package:my_note_app/screens/profile_screen.dart'; // ✅ เพิ่มตรงนี้
+import 'package:my_note_app/widgets/app_bottom_nav_bar.dart'; 
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -366,61 +368,66 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Column(children: [_buildSearchBar(), _buildResults()]),
-        ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 1,
-        selectedItemColor: const Color.fromARGB(255, 31, 102, 160),
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        onTap: (index) async {
-          if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const homescreen()),
-            );
-          } else if (index == 2) {
-            final prefs = await SharedPreferences.getInstance();
-            final userId = prefs.getInt('user_id');
-            final username = prefs.getString('username');
 
-            if (userId == null || username == null) {
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('กรุณาเข้าสู่ระบบใหม่')),
-              );
-              return;
-            }
+return Scaffold(
+  body: SafeArea(
+    bottom: false,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Column(children: [_buildSearchBar(), _buildResults()]),
+    ),
+  ),
 
-            await Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) =>
-                    NewPostScreen(userId: userId, username: username),
-              ),
-            );
-          }
-        },
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            label: 'Home',
+  // ⬇⬇⬇ แทนส่วนนี้แทนของเก่า ⬇⬇⬇
+  bottomNavigationBar: AppBottomNavBar(
+    currentIndex: 1, // เพราะหน้า Search คือ index 1
+    onTapAsync: (index) async {
+      if (index == 0) {
+        // ไปหน้า Home
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const homescreen()),
+        );
+      } else if (index == 2) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const DocumentsScreen()),
+        );
+      } else if (index == 3) {
+        // ปุ่ม Add
+        final prefs = await SharedPreferences.getInstance();
+        final userId = prefs.getInt('user_id');
+        final username = prefs.getString('username');
+
+        if (userId == null || username == null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('กรุณาเข้าสู่ระบบใหม่')),
+          );
+          return;
+        }
+
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => NewPostScreen(userId: userId, username: username),
           ),
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.account_circle_outlined),
-            label: 'Profile',
+        );
+      } else if (index == 4) {
+        // ไปหน้าโปรไฟล์
+        final prefs = await SharedPreferences.getInstance();
+        final userId = prefs.getInt('user_id');
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ProfileScreen(userId: userId ?? 0),
           ),
-        ],
-      ),
-    );
+        );
+      }
+    },
+  ),
+);
+
   }
 }
 

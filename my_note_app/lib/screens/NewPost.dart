@@ -7,9 +7,12 @@ import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/drawing_screen.dart' as rt;
 import 'package:my_note_app/screens/documents_screen.dart';
+import 'package:my_note_app/screens/profile_screen.dart';
 import 'package:my_note_app/screens/search_screen.dart';
 import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+// ✅ ใช้ navbar แบบรีใช้ซ้ำ
+import 'package:my_note_app/widgets/app_bottom_nav_bar.dart';
 
 class NewPostScreen extends StatefulWidget {
   final int userId; // id_user จริงจาก login
@@ -127,15 +130,11 @@ class _NewPostScreenState extends State<NewPostScreen> {
   }
 
   // --------- Utils ----------
-
-  /// แปลงสตริงราคา (บาท) → สตางค์ (int) อย่างปลอดภัย
-  /// รองรับ "29", "29.0", "29.00", "1,234.56"
   int _parseBahtToSatang(String input) {
     final normalized = input.trim().replaceAll(',', '');
     if (normalized.isEmpty) return 0;
     final d = double.tryParse(normalized);
     if (d == null) return 0;
-    // ปัดเป็นสตางค์ (เลี่ยงปัญหา floating)
     return (d * 100).round();
   }
 
@@ -144,7 +143,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
   }
 
   // --------- Pickers ----------
-
   Future<void> _pickImages() async {
     final files = await _picker.pickMultiImage(imageQuality: 85);
     if (files.isEmpty) return;
@@ -169,7 +167,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
   }
 
   // --------- Post handler ----------
-
   Future<void> _handlePost() async {
     if (_submitting) return;
 
@@ -178,7 +175,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
       return;
     }
 
-    // ตรวจราคาเมื่อเลือกแบบเสียเงิน
     int? priceSatang;
     if (_priceType == 'paid') {
       final input = _priceCtrl.text;
@@ -187,7 +183,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
         _toast('กรุณาใส่ราคามากกว่า 0 บาท');
         return;
       }
-      // บางระบบจะกำหนดขั้นต่ำ เช่น 1 บาท = 100 สตางค์
       priceSatang = satang;
     }
 
@@ -199,11 +194,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
     );
 
     try {
-      // หมายเหตุ:
-      // - ApiService.createPost ของคุณเดิมรับ priceType & priceBaht
-      //   ถ้ารองรับ price_amount_satang ด้วย ให้ส่งแบบนี้แทน (แต่อย่าเดา signature):
-      //   priceAmountSatang: priceSatang
-      //   ที่นี่ผมส่งให้ตามสัญญาเดิม + แนบ satang ไปด้วยใน extraFields (ถ้า service คุณรองรับ)
       final res = await ApiService.createPost(
         userId: widget.userId,
         text: _detailController.text.trim(),
@@ -211,11 +201,13 @@ class _NewPostScreenState extends State<NewPostScreen> {
         subject: selectedSubject,
         images: _images.map((x) => File(x.path)).toList(),
         file: _file,
-        priceType: _priceType,                // 'free' | 'paid'
+        priceType: _priceType,
         priceBaht: _priceType == 'paid'
-            ? (_priceCtrl.text.trim().isEmpty ? null : double.tryParse(_priceCtrl.text.replaceAll(',', '')))
+            ? (_priceCtrl.text.trim().isEmpty
+                ? null
+                : double.tryParse(_priceCtrl.text.replaceAll(',', '')))
             : null,
-        // หากใน ApiService.createPost มีช่องให้ส่ง "extraFields" สำหรับ multipart:
+        // ถ้าฝั่ง API รองรับเพิ่มฟิลด์ satang:
         // extraFields: priceSatang != null ? {'price_amount_satang': '$priceSatang'} : {},
       );
 
@@ -254,7 +246,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
   }
 
   // --------- เปิดหน้าเขียนโน้ต realtime ----------
-
   String _slugify(String s) {
     final t = s
         .toLowerCase()
@@ -279,16 +270,15 @@ class _NewPostScreenState extends State<NewPostScreen> {
         return;
       }
 
-      // parse response
       String createdRoomId = roomId;
       try {
-        final Map<String, dynamic> j = jsonDecode(r.body) as Map<String, dynamic>;
+        final Map<String, dynamic> j =
+            jsonDecode(r.body) as Map<String, dynamic>;
         if (j['roomId'] is String && (j['roomId'] as String).isNotEmpty) {
           createdRoomId = j['roomId'] as String;
         }
       } catch (_) {}
 
-      // connect socket
       final socket = IO.io(
         ApiService.host,
         IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
@@ -367,7 +357,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('NewPost'),
+        title: const Text('New Post'),
         automaticallyImplyLeading: false,
         actions: [
           Padding(
@@ -484,7 +474,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   const SizedBox(width: 12),
                   if (isPaid)
                     Text(
-                      // แสดงคร่าว ๆ ให้คนโพสต์เห็นว่าสุดท้ายเป็นสตางค์เท่าไร
                       '→ ${_priceCtrl.text.trim().isEmpty ? '' : _parseBahtToSatang(_priceCtrl.text).toString()} สต.',
                       style: TextStyle(color: Colors.grey.shade700),
                     ),
@@ -570,34 +559,41 @@ class _NewPostScreenState extends State<NewPostScreen> {
           ),
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 3, // หน้านี้คือ Add (index 3)
-        selectedItemColor: const Color.fromARGB(255, 31, 102, 160),
-        unselectedItemColor: Colors.grey,
-        type: BottomNavigationBarType.fixed,
-        onTap: (index) async {
+
+      // ✅ ใช้ navbar ที่รีใช้ซ้ำ
+      bottomNavigationBar: AppBottomNavBar(
+        currentIndex: 3, // Add tab
+        onTapAsync: (index) async {
           if (index == 0) {
             if (!mounted) return;
-            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const homescreen()));
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const homescreen()),
+            );
           } else if (index == 1) {
             if (!mounted) return;
-            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const SearchScreen()));
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const SearchScreen()),
+            );
           } else if (index == 2) {
             if (!mounted) return;
-            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const DocumentsScreen()));
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const DocumentsScreen()),
+            );
           } else if (index == 3) {
             // อยู่หน้า Add แล้ว
           } else if (index == 4) {
-            // ไปหน้าโปรไฟล์ถ้ามี
+            if (!mounted) return;
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ProfileScreen(userId: widget.userId),
+              ),
+            );
           }
         },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.search), label: 'Search'),
-          BottomNavigationBarItem(icon: Icon(Icons.folder_open), label: 'Documents'),
-          BottomNavigationBarItem(icon: Icon(Icons.add), label: 'Add'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_circle_outlined), label: 'Profile'),
-        ],
       ),
     );
   }
