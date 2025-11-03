@@ -815,6 +815,28 @@ class ApiService {
     return null;
   }
 
+  Future<Map<String, dynamic>> getWithdrawConfig() async {
+  final uri = Uri.parse('$host/api/withdrawals/config');
+
+  final res = await http.get(
+    uri,
+    headers: {
+      'Accept': 'application/json',
+      // ถ้ามี token ให้ใส่แบบนี้:
+      // 'Authorization': 'Bearer $token',
+    },
+  );
+
+  if (res.statusCode != 200) {
+    throw '(${res.statusCode}) ${res.body}';
+  }
+
+  final data = jsonDecode(res.body);
+  return (data is Map<String, dynamic>)
+      ? data
+      : <String, dynamic>{};
+}
+
   /// ดึงยอดเหรียญคงเหลือของผู้ใช้
   Future<int> getWalletBalance({int? userId}) async {
     // 1) /api/users/me (auth)

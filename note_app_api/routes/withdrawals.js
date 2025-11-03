@@ -11,10 +11,7 @@ const router = express.Router();
 const dir = path.join(process.cwd(), 'uploads', 'withdraw_qr');
 fs.mkdirSync(dir, { recursive: true });
 
-const upload = multer({
-  dest: dir,
-  limits: { fileSize: 25 * 1024 * 1024 },
-});
+const upload = multer({ dest: path.join(process.cwd(), 'uploads', 'slips') });
 
 /* ---------------- helpers ---------------- */
 async function getCoinRate(client) {
@@ -246,6 +243,54 @@ router.post('/api/admin/withdrawals/:id/reject', async (req, res) => {
     return res.status(code).json({ error: msg });
   } finally {
     client.release();
+  }
+});
+
+router.get('/config', (req, res) => {
+  const fee = Number(process.env.WITHDRAW_FEE_PERCENT || 5);
+  const min = Number(process.env.WITHDRAW_MIN_COINS || 100);
+  res.json({ fee_percent: fee, min_coins: min });
+});
+
+router.post('/create', upload.single('slip'), async (req, res, next) => {
+  try {
+    const userId = Number(req.body.user_id);
+    const coins = Number(req.body.coins || 0);
+
+    const feePercent = Number(process.env.WITHDRAW_FEE_PERCENT || 5);
+    const minCoins   = Number(process.env.WITHDRAW_MIN_COINS || 100);
+
+    if (!userId || !coins) {
+      return res.status(400).json({ message: 'missing user_id or coins' });
+    }
+    if (coins < minCoins) {
+      return res.status(400).json({ message: `ขั้นต่ำ ${minCoins} เหรียญ` });
+    }
+
+    const feeCoins = Math.floor((coins * feePercent) / 100);
+    const netCoins = coins - feeCoins;
+    if (netCoins <= 0) {
+      return res.status(400).json({ message: 'ยอดสุทธิไม่ถูกต้อง' });
+    }
+
+    const slipPath = req.file ? `/uploads/slips/${req.file.filename}` : null;
+
+    // TODO: เช็คยอดคงเหลือจาก DB และบันทึกรายการถอนจริง
+    // const result = await createWithdrawal(...)
+
+    res.status(201).json({
+      withdrawal: {
+        id: 'new-id',
+        user_id: userId,
+        coins,
+        fee_coins: feeCoins,
+        net_coins: netCoins,
+        slip_path: slipPath,
+        status: 'pending',
+      },
+    });
+  } catch (err) {
+    next(err);
   }
 });
 

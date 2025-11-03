@@ -19,70 +19,113 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   bool _loading = true;
   bool _submitting = false;
 
-  XFile? _qrFile;
+  // ค่าคอนฟิกจากเซิร์ฟเวอร์
+  double? _feePercent;  // มาจาก .env ทาง API
+  int? _minCoins;       // มาจาก .env ทาง API (เช่น 100)
 
+  XFile? _qrFile;
   final _api = ApiService();
 
   @override
   void initState() {
     super.initState();
-    _loadBalance();
+    _boot();
   }
 
-  Future<void> _loadBalance() async {
+  @override
+  void dispose() {
+    _coinsCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _boot() async {
     setState(() => _loading = true);
     try {
-      final bal = await _api.getWalletBalance(userId: widget.userId); // << ส่ง userId
-      setState(() => _balance = bal);
+      final results = await Future.wait([
+        _api.getWalletBalance(userId: widget.userId),
+        _api.getWithdrawConfig(), // ดึง feePercent + minCoins
+      ]);
+
+      final bal = results[0] as int;
+      final cfg = results[1] as Map<String, dynamic>;
+
+      setState(() {
+        _balance = bal;
+        _feePercent = (cfg['fee_percent'] as num?)?.toDouble();
+        _minCoins  = (cfg['min_coins'] as num?)?.toInt();
+      });
     } catch (e) {
-      setState(() => _balance = null);
-      _toast('โหลดยอดเหรียญไม่สำเร็จ: $e');
+      _toast('โหลดข้อมูลไม่สำเร็จ: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
 
+  Future<void> _reloadBalance() async {
+    try {
+      final bal = await _api.getWalletBalance(userId: widget.userId);
+      setState(() => _balance = bal);
+    } catch (e) {
+      _toast('โหลดยอดเหรียญไม่สำเร็จ: $e');
+    }
+  }
+
   Future<void> _pickQr() async {
     final picker = ImagePicker();
-    final file = await picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 85,
-    );
-    if (file != null && mounted) {
-      setState(() => _qrFile = file);
-    }
+    final file = await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+    if (file != null && mounted) setState(() => _qrFile = file);
+  }
+
+  int get _amount {
+    final n = int.tryParse(_coinsCtrl.text.trim());
+    return (n == null || n < 0) ? 0 : n;
+  }
+
+  int get _feeCoins {
+    final fp = _feePercent ?? 0;
+    return ((_amount * fp) / 100.0).floor();
+  }
+
+  int get _netCoins {
+    final net = _amount - _feeCoins;
+    return net < 0 ? 0 : net;
+  }
+
+  bool get _canSubmit {
+    final minOk = _minCoins == null ? true : _amount >= _minCoins!;
+    final balOk = _balance == null ? true : _amount <= _balance!;
+    return !_submitting &&
+        _amount > 0 &&
+        minOk &&
+        balOk &&
+        _netCoins > 0 &&
+        _qrFile != null &&
+        _feePercent != null; // ต้องมีคอนฟิกแล้ว
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-
+    if (_feePercent == null || _minCoins == null) {
+      _toast('ยังไม่ได้โหลดค่าธรรมเนียมหรือขั้นต่ำ กรุณาลองใหม่');
+      return;
+    }
     if (_qrFile == null) {
       _toast('กรุณาเลือกรูป QR ธนาคารก่อน');
-      return;
-    }
-
-    final coins = int.tryParse(_coinsCtrl.text.trim()) ?? 0;
-    if (coins <= 0) {
-      _toast('จำนวนเหรียญไม่ถูกต้อง');
-      return;
-    }
-    if (_balance != null && coins > _balance!) {
-      _toast('เหรียญไม่พอ (คงเหลือ: $_balance)');
       return;
     }
 
     setState(() => _submitting = true);
     try {
       final result = await _api.createWithdrawal(
-        userId: widget.userId,                 // << ส่ง userId
-        coins: coins,
+        userId: widget.userId,
+        coins: _amount,
         qrFile: File(_qrFile!.path),
       );
       _toast('ส่งคำขอถอนแล้ว (ID: ${result['id'] ?? result['withdrawal']?['id'] ?? '-'})');
 
       _coinsCtrl.clear();
       setState(() => _qrFile = null);
-      await _loadBalance();
+      await _reloadBalance();
     } catch (e) {
       _toast('ส่งคำขอไม่สำเร็จ: $e');
     } finally {
@@ -92,13 +135,16 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
   void _openHistory() {
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => _WithdrawHistoryPage(userId: widget.userId), // << ส่ง userId
+      builder: (_) => _WithdrawHistoryPage(userId: widget.userId),
     ));
   }
 
   @override
   Widget build(BuildContext context) {
-    final canSubmit = !_submitting;
+    final hintStyle = Theme.of(context)
+        .textTheme
+        .bodySmall
+        ?.copyWith(color: Theme.of(context).hintColor);
 
     return Scaffold(
       appBar: AppBar(title: const Text('ถอนเหรียญ')),
@@ -117,15 +163,17 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                       ),
                       trailing: IconButton(
                         icon: const Icon(Icons.refresh),
-                        onPressed: _loadBalance,
+                        onPressed: _reloadBalance,
                         tooltip: 'รีเฟรชยอด',
                       ),
                     ),
                   ),
                   const SizedBox(height: 16),
+
                   Form(
                     key: _formKey,
                     child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         TextFormField(
                           controller: _coinsCtrl,
@@ -134,48 +182,76 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                             labelText: 'จำนวนเหรียญที่ต้องการถอน',
                             border: OutlineInputBorder(),
                           ),
+                          onChanged: (_) => setState(() {}),
                           validator: (v) {
                             final n = int.tryParse((v ?? '').trim());
-                            if (n == null || n <= 0) {
-                              return 'กรอกจำนวนเหรียญเป็นตัวเลขมากกว่า 0';
+                            if (n == null || n <= 0) return 'กรอกจำนวนเหรียญเป็นตัวเลขมากกว่า 0';
+                            if (_minCoins != null && n < _minCoins!) {
+                              return 'ขั้นต่ำถอนได้ ${_minCoins!} เหรียญขึ้นไป';
+                            }
+                            if (_balance != null && n > _balance!) {
+                              return 'เหรียญไม่พอ (คงเหลือ: $_balance)';
                             }
                             return null;
                           },
                         ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: _pickQr,
-                                icon: const Icon(Icons.qr_code_2),
-                                label: Text(_qrFile == null ? 'เลือกรูป QR ธนาคาร' : 'เปลี่ยนรูป QR'),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            if (_qrFile != null)
-                              SizedBox(
-                                width: 64,
-                                height: 64,
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Image.file(File(_qrFile!.path), fit: BoxFit.cover),
-                                ),
-                              ),
-                          ],
+
+                        const SizedBox(height: 8),
+
+                        // ข้อความจาง ๆ แสดงค่าหัก + สุทธิ
+                        Text(
+                          (_feePercent == null)
+                              ? 'กำลังโหลดค่าธรรมเนียม…'
+                              : 'แอปจะหัก ${_feePercent!.toStringAsFixed(0)}% '
+                                '(≈ $_feeCoins เหรียญ) • รับสุทธิ ≈ $_netCoins เหรียญ'
+                                '${_minCoins != null ? ' • ขั้นต่ำ ${_minCoins} เหรียญ' : ''}',
+                          style: hintStyle,
                         ),
+
                         const SizedBox(height: 16),
+
+                        // ปุ่มแนบ/เปลี่ยนรูป QR — กว้างเต็มบรรทัด
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _submitting ? null : _pickQr,
+                            icon: const Icon(Icons.qr_code_2),
+                            label: Text(_qrFile == null ? 'แนบ/เปลี่ยนรูป QR' : 'เปลี่ยนรูป QR'),
+                          ),
+                        ),
+
+                        // แสดงรูปเหนือปุ่มยืนยัน เต็มความกว้าง
+                        if (_qrFile != null) ...[
+                          const SizedBox(height: 12),
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.file(
+                              File(_qrFile!.path),
+                              width: double.infinity,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ],
+
+                        const SizedBox(height: 20),
+
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton.icon(
-                            onPressed: canSubmit ? _submit : null,
-                            icon: const Icon(Icons.send),
+                            onPressed: _canSubmit ? _submit : null,
+                            icon: _submitting
+                                ? const SizedBox(
+                                    width: 18, height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : const Icon(Icons.send),
                             label: Text(_submitting ? 'กำลังส่ง...' : 'ยืนยันถอน'),
                           ),
                         ),
+
                         const SizedBox(height: 8),
                         TextButton.icon(
-                          onPressed: _openHistory,
+                          onPressed: _submitting ? null : _openHistory,
                           icon: const Icon(Icons.history),
                           label: const Text('ดูประวัติถอนของฉัน'),
                         ),
@@ -209,7 +285,7 @@ class _WithdrawHistoryPageState extends State<_WithdrawHistoryPage> {
   @override
   void initState() {
     super.initState();
-    _future = _api.getMyWithdrawals(userId: widget.userId); // << ส่ง userId
+    _future = _api.getMyWithdrawals(userId: widget.userId);
   }
 
   @override

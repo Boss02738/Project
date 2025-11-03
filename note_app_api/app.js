@@ -60,6 +60,7 @@ app.use(
 );
 app.use(express.urlencoded({ extended: true }));
 app.use(expressLayouts);
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads')))
 app.set("layout", "layouts/main");
 app.use("/api/reports", reportRoutes);
 
@@ -89,6 +90,7 @@ app.use(purchasesRouter);
 app.use("/api/friends", friendRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use(adminRoutes);
+app.use('/api/withdrawals', require('./routes/withdrawals'));
 
 /* ================= HEALTH ================= */
 app.get("/", (_req, res) =>
