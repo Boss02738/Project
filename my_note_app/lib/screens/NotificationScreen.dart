@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/widgets/post_card.dart';
+import 'package:my_note_app/screens/profile_screen.dart';
 
 /// ===== helpers =====
 String absUrl(String p) {
@@ -97,7 +98,6 @@ Map<String, dynamic> normalizePostForCard(Map raw) {
 }
 
 /// ===== Post Detail (เปิดจาก noti จะมาอันนี้) =====
-/// เปลี่ยนให้ใช้ PostCard โดยส่ง payload ที่ normalize แล้ว
 class PostDetailScreen extends StatefulWidget {
   final int postId;
   final int viewerUserId;
@@ -268,9 +268,19 @@ class _NotificationScreenState extends State<NotificationScreen> {
     await _future;
   }
 
+  Future<void> _openProfile(int userId) async {
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => ProfileScreen(userId: userId)),
+    );
+    await _refresh();
+  }
+
   Future<void> _openItem(Map<String, dynamic> n) async {
     final int? postId = _toInt(n['post_id']);
     final int? notiId = _toInt(n['id']);
+    final int? actorId = _toInt(n['actor_id']);
 
     // mark read (ไม่บล็อก)
     if (notiId != null) {
@@ -283,6 +293,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       } catch (_) {}
     }
 
+    // ถ้ามี post → เปิดโพสต์
     if (postId != null) {
       if (!mounted) return;
       await Navigator.push(
@@ -295,6 +306,12 @@ class _NotificationScreenState extends State<NotificationScreen> {
         ),
       );
       await _refresh();
+      return;
+    }
+
+    // ✅ ไม่มี post → เปิดโปรไฟล์ผู้กระทำ (รองรับ noti ประเภท friend, follow, ฯลฯ)
+    if (actorId != null) {
+      await _openProfile(actorId);
     }
   }
 
@@ -347,43 +364,60 @@ class _NotificationScreenState extends State<NotificationScreen> {
               itemCount: items.length,
               separatorBuilder: (_, __) => const SizedBox(height: 10),
               itemBuilder: (_, i) {
-final n        = (items[i] as Map).cast<String, dynamic>();
-final isRead   = (n['is_read'] ?? false) as bool;
-final msg      = (n['message'] ?? '').toString();
-final action   = (n['action'] ?? '').toString();
-final ts       = (n['created_at'] ?? '').toString();
-final actor    = (n['actor_name'] ?? '').toString();
+                final n        = (items[i] as Map).cast<String, dynamic>();
+                final isRead   = (n['is_read'] ?? false) as bool;
+                final msg      = (n['message'] ?? '').toString();
+                final action   = (n['action'] ?? '').toString();
+                final ts       = (n['created_at'] ?? '').toString();
+                final actor    = (n['actor_name'] ?? '').toString();
 
-// ✅ ใช้คีย์ให้ตรงกับ API
-final avatar   = (n['actor_avatar'] ?? '').toString();
-final thumb    = (n['post_image'] ?? '').toString();
+                // ✅ ใช้คีย์ให้ตรงกับ API
+                final avatar   = (n['actor_avatar'] ?? '').toString();
+                final thumb    = (n['post_image'] ?? '').toString();
 
-return Material(
-  color: isRead
-      ? Theme.of(context).colorScheme.surface
-      : Theme.of(context).colorScheme.surfaceTint.withOpacity(.10),
-  borderRadius: BorderRadius.circular(14),
-  child: ListTile(
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-    leading: _Avatar(url: avatar, name: actor),
-    title: Text(msg.isNotEmpty ? msg : action, maxLines: 2, overflow: TextOverflow.ellipsis),
-    subtitle: Text(_timeText(ts), maxLines: 1, overflow: TextOverflow.ellipsis),
+                return Material(
+                  color: isRead
+                      ? Theme.of(context).colorScheme.surface
+                      : Theme.of(context).colorScheme.surfaceTint.withOpacity(.10),
+                  borderRadius: BorderRadius.circular(14),
+                  child: ListTile(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
 
-    // ✅ แสดงรูปแรกของโพสต์ทางขวา
-    trailing: (thumb.isNotEmpty)
-        ? ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              absUrl(thumb),
-              width: 56, height: 56, fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported),
-            ),
-          )
-        : const Icon(Icons.chevron_right),
+                    // ✅ แตะ avatar เพื่อไปโปรไฟล์ของผู้กระทำ
+                    leading: InkWell(
+                      onTap: () {
+                        final actorId = _toInt(n['actor_id']);
+                        if (actorId != null) _openProfile(actorId);
+                      },
+                      child: _Avatar(url: avatar, name: actor),
+                    ),
 
-    onTap: () => _openItem(n),
-  ),
-);
+                    title: Text(
+                      msg.isNotEmpty ? msg : action,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      _timeText(ts),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+
+                    // ✅ แสดงรูปแรกของโพสต์ทางขวา
+                    trailing: (thumb.isNotEmpty)
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              absUrl(thumb),
+                              width: 56, height: 56, fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported),
+                            ),
+                          )
+                        : const Icon(Icons.chevron_right),
+
+                    onTap: () => _openItem(n),
+                  ),
+                );
               },
             ),
           );

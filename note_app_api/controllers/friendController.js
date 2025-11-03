@@ -1,298 +1,261 @@
+// controllers/friendController.js
 const pool = require("../models/db");
+const { createAndEmit } = require("./notificationController");
 
-// จัดคู่ให้ a<b เสมอ
-function orderPair(u1, u2) {
-  const a = Number(u1), b = Number(u2);
-  return a < b ? [a, b] : [b, a];
+function orderPair(a, b) { const x = Number(a), y = Number(b); return x < y ? [x, y] : [y, x]; }
+async function findEdge(a, b) {
+  const [ua, ub] = orderPair(a, b);
+  const { rows } = await pool.query(
+    `SELECT * FROM public.friend_edges WHERE user_a=$1 AND user_b=$2`,
+    [ua, ub]
+  );
+  return rows[0] || null;
 }
-
-// แปลงผลลัพธ์ status → สถานะที่ UI ใช้
-function toUiStatus(row, currentUserId) {
-  if (!row) return "none";
-  const s = row.status;
+function edgeStatusForViewer(edge, viewerId, otherId) {
+  if (!edge) return "none";
+  const s = edge.status;
   if (s === "accepted") return "friends";
+  if (s === "canceled" || s === "rejected") return "none";
   if (s === "pending") {
-    if (row.initiator_id && Number(row.initiator_id) === Number(currentUserId)) return "pending_out";
+    if (edge.initiator_id === viewerId) return "pending_out";
+    if (edge.initiator_id === otherId)  return "pending_in";
     return "pending_in";
   }
-  // rejected/canceled/blocked → ถือเป็น none (เริ่มใหม่ได้)
   return "none";
 }
 
-// สร้างคำขอเป็นเพื่อน
-exports.sendRequest = async (req, res) => {
+/* ---------------- GET /api/friends/status ---------------- */
+async function getStatus(req, res) {
+  try {
+    const userId = Number(req.query.user_id);
+    const otherId = Number(req.query.other_id);
+    if (!userId || !otherId) return res.status(400).json({ message: "bad_request" });
+    if (userId === otherId)  return res.json({ status: "self" });
+    const edge = await findEdge(userId, otherId);
+    return res.json({ status: edgeStatusForViewer(edge, userId, otherId) });
+  } catch (e) {
+    console.error("getStatus", e); res.status(500).json({ message: "internal_error" });
+  }
+}
+
+/* ---------------- POST /api/friends/request ---------------- */
+async function sendRequest(req, res) {
   const { from_user_id, to_user_id } = req.body || {};
-  if (!from_user_id || !to_user_id) {
-    return res.status(400).json({ message: "ต้องมี from_user_id และ to_user_id" });
-  }
-  if (Number(from_user_id) === Number(to_user_id)) {
-    return res.status(400).json({ message: "ห้ามส่งคำขอถึงตัวเอง" });
-  }
-
-  const [a, b] = orderPair(from_user_id, to_user_id);
+  const fromId = Number(from_user_id), toId = Number(to_user_id);
+  if (!fromId || !toId || fromId === toId) return res.status(400).json({ message: "bad_request" });
   try {
-    // ดู row เดิม (ถ้ามี)
-    const { rows } = await pool.query(
-      `SELECT user_a, user_b, status, initiator_id FROM public.friend_edges
-       WHERE user_a=$1 AND user_b=$2`,
-      [a, b]
-    );
+    const [ua, ub] = orderPair(fromId, toId);
+    const now = new Date();
+    const edge = await findEdge(fromId, toId);
 
-    if (!rows.length) {
-      // ยังไม่มี → แทรก pending
+    if (!edge) {
       await pool.query(
-        `INSERT INTO public.friend_edges(user_a, user_b, status, initiator_id)
-         VALUES($1,$2,'pending',$3)`,
-        [a, b, from_user_id]
+        `INSERT INTO public.friend_edges (user_a, user_b, status, initiator_id, created_at, updated_at)
+         VALUES ($1,$2,'pending',$3,$4,$4)`,
+        [ua, ub, fromId, now]
       );
-      return res.json({ ok: true, status: "pending_out" });
-    }
-
-    const row = rows[0];
-
-    if (row.status === "accepted") {
-      return res.status(409).json({ message: "เป็นเพื่อนกันอยู่แล้ว" });
-    }
-    if (row.status === "pending") {
-      // กันส่งซ้ำ
-      return res.status(409).json({ message: "มีคำขอที่รอดำเนินการอยู่แล้ว" });
-    }
-
-    // เคยถูก reject/canceled มาก่อน → อนุญาตเริ่มใหม่
-    await pool.query(
-      `UPDATE public.friend_edges
-       SET status='pending', initiator_id=$3, updated_at=NOW(), accepted_at=NULL
-       WHERE user_a=$1 AND user_b=$2`,
-      [a, b, from_user_id]
-    );
-    return res.json({ ok: true, status: "pending_out" });
-  } catch (err) {
-    console.error("sendRequest error:", err);
-    res.status(500).json({ message: "ส่งคำขอล้มเหลว" });
-  }
-};
-
-// ตอบคำขอ (accept/reject) — ผู้รับกด
-exports.respondRequest = async (req, res) => {
-  const { user_id, other_user_id, action } = req.body || {};
-  if (!user_id || !other_user_id || !action) {
-    return res.status(400).json({ message: "ต้องมี user_id, other_user_id, action" });
-  }
-  const act = String(action).toLowerCase();
-  if (!["accept","reject"].includes(act)) {
-    return res.status(400).json({ message: "action ต้องเป็น accept หรือ reject" });
-  }
-
-  const [a, b] = orderPair(user_id, other_user_id);
-  try {
-    const { rows } = await pool.query(
-      `SELECT status, initiator_id FROM public.friend_edges
-       WHERE user_a=$1 AND user_b=$2`,
-      [a, b]
-    );
-    if (!rows.length || rows[0].status !== "pending") {
-      return res.status(404).json({ message: "ไม่พบคำขอที่รอดำเนินการ" });
-    }
-
-    // ผู้รับต้องไม่ใช่ initiator
-    if (Number(rows[0].initiator_id) === Number(user_id)) {
-      return res.status(403).json({ message: "คุณเป็นผู้ส่งคำขอ ไม่สามารถตอบคำขอของตัวเอง" });
-    }
-
-    if (act === "reject") {
+    } else if (edge.status === "accepted") {
+      return res.json({ ok: true, status: "friends" });
+    } else {
       await pool.query(
         `UPDATE public.friend_edges
-         SET status='rejected', updated_at=NOW(), initiator_id=NULL
+           SET status='pending', initiator_id=$3, updated_at=$4, accepted_at=NULL
          WHERE user_a=$1 AND user_b=$2`,
-        [a, b]
+        [ua, ub, fromId, now]
+      );
+    }
+
+    // 🔔 สร้าง noti + realtime emit ไปยังผู้รับคำขอ
+    await createAndEmit(req.app, {
+      targetUserId: toId,
+      actorId: fromId,
+      action: "friend_request",
+      message: "ส่งคำขอเป็นเพื่อนถึงคุณ",
+      postId: null,
+    });
+
+    return res.json({ ok: true, status: "pending_out" });
+  } catch (e) {
+    console.error("sendRequest", e); res.status(500).json({ message: "internal_error" });
+  }
+}
+
+/* ---------------- POST /api/friends/respond ---------------- */
+async function respondRequest(req, res) {
+  const { user_id, other_user_id, action } = req.body || {};
+  const me = Number(user_id), other = Number(other_user_id);
+  if (!me || !other || me === other) return res.status(400).json({ message: "bad_request" });
+  if (!["accept", "reject"].includes(String(action))) return res.status(400).json({ message: "invalid_action" });
+
+  try {
+    const [ua, ub] = orderPair(me, other);
+    const edge = await findEdge(me, other);
+    if (!edge || edge.status !== "pending") return res.status(404).json({ message: "no_pending_request" });
+    if (edge.initiator_id === me)       return res.status(403).json({ message: "initiator_cannot_respond" });
+
+    const now = new Date();
+    if (action === "accept") {
+      await pool.query(
+        `UPDATE public.friend_edges
+           SET status='accepted', accepted_at=$3, updated_at=$3
+         WHERE user_a=$1 AND user_b=$2`,
+        [ua, ub, now]
+      );
+
+      // 🔔 แจ้งผู้ส่งคำขอว่า “ถูกยอมรับแล้ว” + realtime
+      await createAndEmit(req.app, {
+        targetUserId: other,
+        actorId: me,
+        action: "friend_accept",
+        message: "คำขอเป็นเพื่อนของคุณได้รับการยอมรับแล้ว",
+        postId: null,
+      });
+
+      return res.json({ ok: true, status: "friends" });
+    } else {
+      await pool.query(
+        `UPDATE public.friend_edges
+           SET status='rejected', updated_at=$3
+         WHERE user_a=$1 AND user_b=$2`,
+        [ua, ub, now]
       );
       return res.json({ ok: true, status: "none" });
     }
-
-    // accept
-    await pool.query(
-      `UPDATE public.friend_edges
-       SET status='accepted', accepted_at=NOW(), updated_at=NOW(), initiator_id=NULL
-       WHERE user_a=$1 AND user_b=$2`,
-      [a, b]
-    );
-    return res.json({ ok: true, status: "friends" });
-  } catch (err) {
-    console.error("respondRequest error:", err);
-    res.status(500).json({ message: "ตอบคำขอล้มเหลว" });
-  }
-};
-
-// ยกเลิกคำขอ — ฝั่งผู้ส่ง
-exports.cancelRequest = async (req, res) => {
-  const { user_id, other_user_id } = req.body || {};
-  if (!user_id || !other_user_id) {
-    return res.status(400).json({ message: "ต้องมี user_id และ other_user_id" });
-  }
-  const [a, b] = orderPair(user_id, other_user_id);
-  try {
-    const { rows } = await pool.query(
-      `SELECT status, initiator_id FROM public.friend_edges
-       WHERE user_a=$1 AND user_b=$2`,
-      [a, b]
-    );
-    if (!rows.length || rows[0].status !== "pending") {
-      return res.status(404).json({ message: "ไม่มีคำขอ pending" });
-    }
-    if (Number(rows[0].initiator_id) !== Number(user_id)) {
-      return res.status(403).json({ message: "คุณไม่ใช่ผู้ส่งคำขอ" });
-    }
-    await pool.query(
-      `UPDATE public.friend_edges
-       SET status='canceled', updated_at=NOW(), initiator_id=NULL
-       WHERE user_a=$1 AND user_b=$2`,
-      [a, b]
-    );
-    res.json({ ok: true, status: "none" });
-  } catch (err) {
-    console.error("cancelRequest error:", err);
-    res.status(500).json({ message: "ยกเลิกคำขอล้มเหลว" });
-  }
-};
-
-// เลิกเป็นเพื่อน
-exports.unfriend = async (req, res) => {
-  const { user_id } = req.query || {};
-  const other = req.params.other_user_id;
-  if (!user_id || !other) {
-    return res.status(400).json({ message: "ต้องมี user_id และ other_user_id" });
-  }
-  const [a, b] = orderPair(user_id, other);
-  try {
-    const upd = await pool.query(
-      `UPDATE public.friend_edges
-       SET status='canceled', updated_at=NOW(), initiator_id=NULL
-       WHERE user_a=$1 AND user_b=$2 AND status='accepted'`,
-      [a, b]
-    );
-    if (!upd.rowCount) return res.status(404).json({ message: "ยังไม่ได้เป็นเพื่อนกัน" });
-    res.json({ ok: true, status: "none" });
-  } catch (err) {
-    console.error("unfriend error:", err);
-    res.status(500).json({ message: "เลิกเป็นเพื่อนล้มเหลว" });
-  }
-};
-
-// รายชื่อเพื่อน (accepted)
-exports.listFriends = async (req, res) => {
-  const { user_id } = req.query || {};
-  if (!user_id) return res.status(400).json({ message: "ต้องมี user_id" });
-
-  const q = `
-    SELECT
-      u.id_user,
-      u.username,
-      COALESCE(u.avatar_url, '/uploads/avatars/default.png') AS avatar_url,
-      COALESCE(u.bio, '') AS bio
-    FROM public.friend_edges fe
-    JOIN public.users u
-      ON u.id_user = CASE WHEN fe.user_a = $1 THEN fe.user_b ELSE fe.user_a END
-    WHERE (fe.user_a = $1 OR fe.user_b = $1)
-      AND fe.status = 'accepted'
-    ORDER BY u.username NULLS LAST, u.id_user
-  `;
-  try {
-    const { rows } = await pool.query(q, [user_id]);
-    res.json({ friends: rows });
-  } catch (err) {
-    console.error("listFriends error:", err);
-    res.status(500).json({ message: "ดึงรายชื่อเพื่อนล้มเหลว" });
-  }
-};
-
-// คิว incoming (รอฉันตอบ)
-exports.listIncoming = async (req, res) => {
-  const { user_id } = req.query || {};
-  if (!user_id) return res.status(400).json({ message: "ต้องมี user_id" });
-
-  const q = `
-    SELECT fe.user_a, fe.user_b, fe.initiator_id, fe.created_at,
-           CASE WHEN fe.user_a=$1 THEN fe.user_b ELSE fe.user_a END AS other_id,
-           u.username, u.avatar_url
-    FROM public.friend_edges fe
-    JOIN public.users u
-         ON u.id_user = CASE WHEN fe.user_a=$1 THEN fe.user_b ELSE fe.user_a END
-    WHERE (fe.user_a=$1 OR fe.user_b=$1)
-      AND fe.status='pending'
-      AND fe.initiator_id <> $1
-    ORDER BY fe.created_at DESC;
-  `;
-  try {
-    const { rows } = await pool.query(q, [user_id]);
-    res.json({ incoming: rows });
-  } catch (err) {
-    console.error("listIncoming error:", err);
-    res.status(500).json({ message: "ดึง incoming ล้มเหลว" });
-  }
-};
-
-// คิว outgoing (ฉันเป็นผู้ส่ง)
-exports.listOutgoing = async (req, res) => {
-  const { user_id } = req.query || {};
-  if (!user_id) return res.status(400).json({ message: "ต้องมี user_id" });
-
-  const q = `
-    SELECT fe.user_a, fe.user_b, fe.initiator_id, fe.created_at,
-           CASE WHEN fe.user_a=$1 THEN fe.user_b ELSE fe.user_a END AS other_id,
-           u.username, u.avatar_url
-    FROM public.friend_edges fe
-    JOIN public.users u
-         ON u.id_user = CASE WHEN fe.user_a=$1 THEN fe.user_b ELSE fe.user_a END
-    WHERE (fe.user_a=$1 OR fe.user_b=$1)
-      AND fe.status='pending'
-      AND fe.initiator_id = $1
-    ORDER BY fe.created_at DESC;
-  `;
-  try {
-    const { rows } = await pool.query(q, [user_id]);
-    res.json({ outgoing: rows });
-  } catch (err) {
-    console.error("listOutgoing error:", err);
-    res.status(500).json({ message: "ดึง outgoing ล้มเหลว" });
-  }
-};
-
-// ตรวจสถานะระหว่างฉันกับอีกคน
-exports.getStatus = async (req, res) => {
-  const { user_id, other_id } = req.query || {};
-  if (!user_id || !other_id) {
-    return res.status(400).json({ message: "ต้องมี user_id และ other_id" });
-  }
-  const [a, b] = orderPair(user_id, other_id);
-  try {
-    const { rows } = await pool.query(
-      `SELECT status, initiator_id FROM public.friend_edges
-       WHERE user_a=$1 AND user_b=$2`,
-      [a, b]
-    );
-    const status = toUiStatus(rows[0], user_id);
-    res.json({ status });
-  } catch (err) {
-    console.error("getStatus error:", err);
-    res.status(500).json({ message: "เช็คสถานะล้มเหลว" });
-  }
-};
-
-exports.incomingCount = async (req, res) => {
-  const { user_id } = req.query || {};
-  if (!user_id) return res.status(400).json({ message: "ต้องมี user_id" });
-  try {
-    const { rows } = await pool.query(
-      `SELECT COUNT(*)::int AS cnt
-       FROM public.friend_edges
-       WHERE (user_a=$1 OR user_b=$1)
-         AND status='pending'
-         AND initiator_id <> $1`,
-      [user_id]
-    );
-    res.json({ count: rows[0]?.cnt ?? 0 });
   } catch (e) {
-    console.error("incomingCount error:", e);
-    res.status(500).json({ message: "นับคำขอล้มเหลว" });
+    console.error("respondRequest", e); res.status(500).json({ message: "internal_error" });
   }
+}
+
+/* ---------------- POST /api/friends/cancel ---------------- */
+async function cancelRequest(req, res) {
+  const { user_id, other_user_id } = req.body || {};
+  const me = Number(user_id), other = Number(other_user_id);
+  if (!me || !other || me === other) return res.status(400).json({ message: "bad_request" });
+
+  try {
+    const [ua, ub] = orderPair(me, other);
+    const edge = await findEdge(me, other);
+    if (!edge || edge.status !== "pending" || edge.initiator_id !== me) {
+      return res.status(404).json({ message: "no_pending_out" });
+    }
+    await pool.query(
+      `UPDATE public.friend_edges SET status='canceled', updated_at=now()
+       WHERE user_a=$1 AND user_b=$2`,
+      [ua, ub]
+    );
+    return res.json({ ok: true, status: "none" });
+  } catch (e) {
+    console.error("cancelRequest", e); res.status(500).json({ message: "internal_error" });
+  }
+}
+
+/* ---------------- DELETE /api/friends/unfriend/:other_user_id ---------------- */
+async function unfriend(req, res) {
+  const me = Number(req.query.user_id);
+  const other = Number(req.params.other_user_id);
+  if (!me || !other || me === other) return res.status(400).json({ message: "bad_request" });
+
+  try {
+    const [ua, ub] = orderPair(me, other);
+    const edge = await findEdge(me, other);
+    if (!edge || edge.status !== "accepted") {
+      return res.status(404).json({ message: "not_friends" });
+    }
+    await pool.query(
+      `UPDATE public.friend_edges SET status='canceled', updated_at=now()
+       WHERE user_a=$1 AND user_b=$2`,
+      [ua, ub]
+    );
+    return res.json({ ok: true, status: "none" });
+  } catch (e) {
+    console.error("unfriend", e); res.status(500).json({ message: "internal_error" });
+  }
+}
+
+/* ---------------- lists ---------------- */
+async function listFriends(req, res) {
+  const me = Number(req.query.user_id);
+  if (!me) return res.status(400).json({ message: "bad_request" });
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT CASE WHEN user_a=$1 THEN user_b ELSE user_a END AS friend_id,
+             status, initiator_id, accepted_at, updated_at
+        FROM public.friend_edges
+       WHERE status='accepted' AND (user_a=$1 OR user_b=$1)
+       ORDER BY updated_at DESC
+      `,
+      [me]
+    );
+    res.json({ friends: rows });
+  } catch (e) {
+    console.error("listFriends", e); res.status(500).json({ message: "internal_error" });
+  }
+}
+async function listIncoming(req, res) {
+  const me = Number(req.query.user_id);
+  if (!me) return res.status(400).json({ message: "bad_request" });
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT CASE WHEN user_a=$1 THEN user_b ELSE user_a END AS other_id,
+             status, initiator_id, created_at, updated_at
+        FROM public.friend_edges
+       WHERE status='pending' AND (user_a=$1 OR user_b=$1) AND initiator_id <> $1
+       ORDER BY created_at DESC
+      `,
+      [me]
+    );
+    res.json({ incoming: rows });
+  } catch (e) {
+    console.error("listIncoming", e); res.status(500).json({ message: "internal_error" });
+  }
+}
+async function listOutgoing(req, res) {
+  const me = Number(req.query.user_id);
+  if (!me) return res.status(400).json({ message: "bad_request" });
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT CASE WHEN user_a=$1 THEN user_b ELSE user_a END AS other_id,
+             status, initiator_id, created_at, updated_at
+        FROM public.friend_edges
+       WHERE status='pending' AND (user_a=$1 OR user_b=$1) AND initiator_id = $1
+       ORDER BY created_at DESC
+      `,
+      [me]
+    );
+    res.json({ outgoing: rows });
+  } catch (e) {
+    console.error("listOutgoing", e); res.status(500).json({ message: "internal_error" });
+  }
+}
+async function incomingCount(req, res) {
+  const me = Number(req.query.user_id);
+  if (!me) return res.status(400).json({ message: "bad_request" });
+  try {
+    const { rows } = await pool.query(
+      `
+      SELECT COUNT(*)::int AS n
+        FROM public.friend_edges
+       WHERE status='pending' AND (user_a=$1 OR user_b=$1) AND initiator_id <> $1
+      `,
+      [me]
+    );
+    res.json({ count: rows[0]?.n ?? 0 });
+  } catch (e) {
+    console.error("incomingCount", e); res.status(500).json({ message: "internal_error" });
+  }
+}
+
+module.exports = {
+  getStatus,
+  sendRequest,
+  respondRequest,
+  cancelRequest,
+  unfriend,
+  listFriends,
+  listIncoming,
+  listOutgoing,
+  incomingCount,
 };

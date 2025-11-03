@@ -1,197 +1,127 @@
 // controllers/notificationController.js
-const pool = require('../models/db');
-
-function actionToVerb(action) {
-  switch (String(action || '').toLowerCase()) {
-    case 'like':     return 'liked';
-    case 'comment':  return 'commented';
-    case 'purchase': return 'purchased';
-    case 'system':   return 'notified';
-    default:         return 'notified';
-  }
-}
+const pool = require("../models/db");
 
 /**
- * ใช้ได้ 2 แบบ:
- * 1) createAndEmit(io, { userId, actorId?, postId?, action, message? })
- * 2) createAndEmit({ userId, actorId?, postId?, action, message? })  // ไม่มี io
+ * สร้างแถวใน notifications แล้ว emit แบบ realtime ไปยังผู้รับ
+ * payload: { targetUserId, actorId, action, message, postId? }
+ * action: like | comment | friend_request | friend_accept | ...
  */
-async function createAndEmit(arg1, arg2) {
-  try {
-    // รองรับทั้งสอง signature
-    let io = null;
-    let opt = null;
-
-    if (arg2 && typeof arg2 === 'object') {
-      io = arg1 || null;
-      opt = arg2;
-    } else if (arg1 && typeof arg1 === 'object') {
-      // กรณีเรียกแบบไม่มี io
-      io = null;
-      opt = arg1;
-    }
-
-    if (!opt || typeof opt !== 'object') {
-      return { ok: false, error: 'invalid_args' };
-    }
-
-    // ดึงค่าพร้อมแปลงชนิดและ default
-    const userId   = Number(opt.userId) || Number(opt.receiverId) || 0;
-    const actorId  = opt.actorId == null ? null : Number(opt.actorId);
-    const postId   = opt.postId == null ? null : Number(opt.postId);
-    const action   = String(opt.action || opt.verb || '').trim().toLowerCase();
-    const message  = (opt.message == null || String(opt.message).trim() === '')
-      ? (action || 'notified')
-      : String(opt.message).trim();
-
-    // guard ขั้นพื้นฐาน
-    if (!userId || !action) return { ok: false, error: 'invalid_args' };
-    if (actorId && Number(actorId) === Number(userId)) {
-      // ไม่แจ้งเตือนตัวเอง
-      return { ok: false, skipped: 'self' };
-    }
-
-    const verb = actionToVerb(action);
-
-    // INSERT ระบุชื่อคอลัมน์ชัดเจนกันสลับตำแหน่ง
-    const ins = await pool.query(
-      `INSERT INTO public.notifications
-         (user_id, actor_id, post_id, action, message, verb, is_read, created_at)
-       VALUES ($1,$2,$3,$4,$5,$6,false, now())
-       RETURNING id, user_id, actor_id, post_id, action, verb, message, is_read, created_at`,
-      [userId, actorId, postId, action, message, verb]
-    );
-
-    const row = ins.rows[0];
-
-    // ยิง socket ถ้ามี io
-    try {
-      if (io && typeof io.to === 'function') {
-        io.to(`user:${userId}`).emit('notify', {
-          id: row.id,
-          action: row.action,
-          verb: row.verb,
-          message: row.message,
-          post_id: row.post_id,
-          actor_id: row.actor_id,
-          created_at: row.created_at,
-        });
-      }
-    } catch (e) {
-      // ไม่ให้การส่ง socket ทำให้ endpoint พัง
-      console.warn('socket emit failed:', e.message);
-    }
-
-    return { ok: true, row };
-  } catch (e) {
-    console.error('createAndEmit error:', e);
-    return { ok: false, error: 'server_error' };
+async function createAndEmit(app, payload) {
+  const { targetUserId, actorId, action, message, postId = null } = payload || {};
+  if (!targetUserId || !actorId || !action) {
+    throw new Error("missing fields for notification");
   }
+
+  // ✅ ใส่ค่า verb ด้วย (ให้เท่ากับ action) เพื่อกัน NOT NULL
+  const ins = await pool.query(
+    `INSERT INTO public.notifications
+       (user_id, actor_id, verb, action, message, post_id, is_read)
+     VALUES ($1,$2,$3,$3,$4,$5,false)
+     RETURNING id, user_id, actor_id, verb, action, message, post_id, is_read, created_at`,
+    [targetUserId, actorId, action, message || "", postId]
+  );
+  const row = ins.rows[0];
+
+  // enrich ด้วยชื่อ/รูปคนกระทำ + รูปแรกของโพสต์ (ถ้ามี)
+  const q = await pool.query(
+    `
+    SELECT n.id, n.user_id, n.actor_id, n.verb, n.action, n.message, n.post_id, n.is_read, n.created_at,
+           a.username AS actor_name,
+           COALESCE(a.avatar_url,'') AS actor_avatar,
+           (SELECT pi.image_url
+              FROM public.post_images pi
+             WHERE n.post_id IS NOT NULL AND pi.post_id = n.post_id
+             ORDER BY pi.id ASC
+             LIMIT 1) AS post_image
+      FROM public.notifications n
+      JOIN public.users a ON a.id_user = n.actor_id
+     WHERE n.id = $1
+    `,
+    [row.id]
+  );
+  const item = q.rows[0] || row;
+
+  // realtime emit
+  try {
+    const io = app.get("io");
+    if (io) io.to(`user:${targetUserId}`).emit("notification:new", item);
+  } catch (e) {
+    console.warn("emit notification failed:", e);
+  }
+
+  return item;
 }
 
-/** GET /api/notifications  (query: user_id, unread_only?, limit?, offset?) */
+/** GET /api/notifications?user_id=&limit= */
 async function listNotifications(req, res) {
   try {
     const userId = Number(req.query.user_id);
-    if (!userId) return res.status(400).json({ message: 'user_id required' });
+    const limit = Math.min(Number(req.query.limit) || 50, 100);
+    if (!userId) return res.status(400).json({ message: "bad_request" });
 
-    const unreadOnly = String(req.query.unread_only || 'false').toLowerCase() === 'true';
-    const limit  = Math.min(Number(req.query.limit) || 30, 100);
-    const offset = Number(req.query.offset) || 0;
-
-    const r = await pool.query(`
-      SELECT
-        n.id, n.user_id, n.actor_id, n.post_id, n.action, n.verb, n.message,
-        n.is_read, n.created_at,
-
-        /* ผู้กระทำ (ไว้แสดงรูปวงกลมซ้าย) */
-        COALESCE(a.username,'') AS actor_name,
-        COALESCE(a.avatar_url, '/uploads/avatars/default.png') AS actor_avatar,
-
-        /* ข้อความโพสต์ + รูปแรกของโพสต์ (ไว้แสดงทางขวา) */
-        COALESCE(p.text,'') AS post_text,
-        (
-          SELECT pi.image_url
-          FROM post_images pi
-          WHERE pi.post_id = n.post_id
-          ORDER BY pi.id ASC
-          LIMIT 1
-        ) AS post_image
-
-      FROM notifications n
-      LEFT JOIN users a ON a.id_user = n.actor_id
-      LEFT JOIN posts p ON p.id      = n.post_id
-      WHERE n.user_id = $1
-        ${unreadOnly ? 'AND n.is_read = false' : ''}
-      ORDER BY n.created_at DESC
-      LIMIT $2 OFFSET $3
-    `, [userId, limit, offset]);
-
-    res.json({ items: r.rows, limit, offset });
+    const { rows } = await pool.query(
+      `
+      SELECT n.id, n.user_id, n.actor_id, n.verb, n.action, n.message, n.post_id, n.is_read, n.created_at,
+             a.username AS actor_name,
+             COALESCE(a.avatar_url,'') AS actor_avatar,
+             (SELECT pi.image_url
+                FROM public.post_images pi
+               WHERE n.post_id IS NOT NULL AND pi.post_id = n.post_id
+               ORDER BY pi.id ASC
+               LIMIT 1) AS post_image
+        FROM public.notifications n
+        JOIN public.users a ON a.id_user = n.actor_id
+       WHERE n.user_id = $1
+       ORDER BY n.created_at DESC
+       LIMIT $2
+      `,
+      [userId, limit]
+    );
+    res.json({ items: rows });
   } catch (e) {
-    console.error('listNotifications error:', e);
-    res.status(500).json({ message: 'server_error' });
+    console.error("listNotifications", e);
+    res.status(500).json({ message: "internal_error" });
   }
 }
 
-/** GET /api/notifications/unread-count?user_id= */
 async function getUnreadCount(req, res) {
   try {
     const userId = Number(req.query.user_id);
-    if (!userId) return res.status(400).json({ message: 'user_id required' });
-
-    const r = await pool.query(
+    if (!userId) return res.status(400).json({ message: "bad_request" });
+    const { rows } = await pool.query(
       `SELECT COUNT(*)::int AS unread FROM public.notifications WHERE user_id=$1 AND is_read=false`,
       [userId]
     );
-    res.json({ unread: r.rows[0].unread });
+    res.json({ unread: rows[0]?.unread || 0 });
   } catch (e) {
-    console.error('getUnreadCount error:', e);
-    res.status(500).json({ message: 'server_error' });
+    console.error("getUnreadCount", e);
+    res.status(500).json({ message: "internal_error" });
   }
 }
 
-/** POST /api/notifications/:id/read  body: { user_id } */
 async function markRead(req, res) {
   try {
     const id = Number(req.params.id);
     const userId = Number(req.body.user_id);
-    if (!id || !userId) return res.status(400).json({ message: 'id & user_id required' });
-
-    const r = await pool.query(
-      `UPDATE public.notifications SET is_read=true WHERE id=$1 AND user_id=$2 RETURNING id`,
-      [id, userId]
-    );
-    if (r.rowCount === 0) return res.status(404).json({ message: 'not_found' });
-
+    if (!id || !userId) return res.status(400).json({ message: "bad_request" });
+    await pool.query(`UPDATE public.notifications SET is_read=true WHERE id=$1 AND user_id=$2`, [id, userId]);
     res.json({ ok: true });
   } catch (e) {
-    console.error('markRead error:', e);
-    res.status(500).json({ message: 'server_error' });
+    console.error("markRead", e);
+    res.status(500).json({ message: "internal_error" });
   }
 }
 
-/** POST /api/notifications/mark-all-read  body: { user_id } */
 async function markAllRead(req, res) {
   try {
-    const userId = Number(req.body.user_id);
-    if (!userId) return res.status(400).json({ message: 'user_id required' });
-
-    await pool.query(
-      `UPDATE public.notifications SET is_read=true WHERE user_id=$1 AND is_read=false`,
-      [userId]
-    );
+    const userId = Number(req.body.user_id || req.query.user_id);
+    if (!userId) return res.status(400).json({ message: "bad_request" });
+    await pool.query(`UPDATE public.notifications SET is_read=true WHERE user_id=$1 AND is_read=false`, [userId]);
     res.json({ ok: true });
   } catch (e) {
-    console.error('markAllRead error:', e);
-    res.status(500).json({ message: 'server_error' });
+    console.error("markAllRead", e);
+    res.status(500).json({ message: "internal_error" });
   }
 }
 
-module.exports = {
-  listNotifications,
-  getUnreadCount,
-  markRead,
-  markAllRead,
-  createAndEmit,
-};
+module.exports = { createAndEmit, listNotifications, getUnreadCount, markRead, markAllRead };
