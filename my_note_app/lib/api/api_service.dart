@@ -19,7 +19,7 @@ class ApiService {
       return 'http://localhost:3000';
     }
     if (Platform.isAndroid) return 'http://10.0.2.2:3000'; // Android emulator
-    return 'http://192.168.1.36:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
+    return 'http://192.168.1.38:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
   }
 
   // -------- Base paths --------
@@ -667,10 +667,23 @@ static Future<int> getUnreadCount(int userId) async {
       );
     }
   }
-  Future<bool> deletePost(int id) async {
-    final r = await http.delete(Uri.parse('$_posts/$id')).timeout(_reqTimeout);
-    return r.statusCode == 200;
-  }
+  // Future<bool> deletePost(int id) async {
+  //   final r = await http.delete(Uri.parse('$_posts/$id')).timeout(_reqTimeout);
+  //   return r.statusCode == 200;
+  // }
+Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
+  final uri = Uri.parse('$_posts/$id');
+  final res = await http
+      .delete(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: (userId == null) ? null : jsonEncode({'user_id': userId}),
+      )
+      .timeout(_reqTimeout);
+
+  final data = jsonDecode(res.body);
+  return {'ok': res.statusCode == 200, 'message': data['message'] ?? ''};
+}
 
   // ============== Friends ==============
 
