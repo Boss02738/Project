@@ -1,6 +1,9 @@
 // lib/services/api_service.dart
 import 'dart:convert';
-import 'dart:io' show File, Platform; // ถ้าจะ build เป็น Flutter Web ให้แยกไฟล์/หลีกเลี่ยง import นี้
+import 'dart:io'
+    show
+        File,
+        Platform; // ถ้าจะ build เป็น Flutter Web ให้แยกไฟล์/หลีกเลี่ยง import นี้
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -208,8 +211,9 @@ class ApiService {
     required int postId,
     required int viewerUserId,
   }) async {
-    final uri = Uri.parse('$_posts/$postId')
-        .replace(queryParameters: {'userId': '$viewerUserId'});
+    final uri = Uri.parse(
+      '$_posts/$postId',
+    ).replace(queryParameters: {'userId': '$viewerUserId'});
     final r = await http.get(uri).timeout(_reqTimeout);
     _ensureOk(r);
     return _decode(r.body);
@@ -218,9 +222,9 @@ class ApiService {
   static Future<List<dynamic>> getFeed(int userId) async {
     final resp = await http
         .get(
-          Uri.parse('$_posts/feed').replace(
-            queryParameters: {'user_id': '$userId'},
-          ),
+          Uri.parse(
+            '$_posts/feed',
+          ).replace(queryParameters: {'user_id': '$userId'}),
         )
         .timeout(_reqTimeout);
     if (resp.statusCode == 200) {
@@ -233,9 +237,9 @@ class ApiService {
     String subject,
     int userId,
   ) async {
-    final url = Uri.parse('$_posts/by-subject').replace(
-      queryParameters: {'subject': subject, 'user_id': '$userId'},
-    );
+    final url = Uri.parse(
+      '$_posts/by-subject',
+    ).replace(queryParameters: {'subject': subject, 'user_id': '$userId'});
     final res = await http.get(url).timeout(_reqTimeout);
     if (res.statusCode == 200) {
       return jsonDecode(res.body) as List<dynamic>;
@@ -244,8 +248,9 @@ class ApiService {
   }
 
   static Future<Map<String, dynamic>> getCounts(int postId) async {
-    final r =
-        await http.get(Uri.parse('$_posts/posts/$postId/counts')).timeout(_reqTimeout);
+    final r = await http
+        .get(Uri.parse('$_posts/posts/$postId/counts'))
+        .timeout(_reqTimeout);
     if (r.statusCode != 200) throw Exception('counts fail');
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
@@ -319,15 +324,18 @@ class ApiService {
   }
 
   static Future<List<dynamic>> getSavedFeed(int userId) async {
-    final r =
-        await http.get(Uri.parse('$_posts/saved?user_id=$userId')).timeout(_reqTimeout);
+    final r = await http
+        .get(Uri.parse('$_posts/saved?user_id=$userId'))
+        .timeout(_reqTimeout);
     if (r.statusCode != 200) throw Exception('saved feed fail');
     return jsonDecode(r.body) as List<dynamic>;
   }
 
   // ---------------- Search ----------------
   static Future<List<dynamic>> searchUsers(String query) async {
-    final uri = Uri.parse('$_search/users').replace(queryParameters: {'q': query});
+    final uri = Uri.parse(
+      '$_search/users',
+    ).replace(queryParameters: {'q': query});
     final resp = await http.get(uri).timeout(_reqTimeout);
     if (resp.statusCode == 200) {
       return (jsonDecode(resp.body) as List).cast<dynamic>();
@@ -336,8 +344,9 @@ class ApiService {
   }
 
   static Future<List<String>> searchSubjects(String query) async {
-    final uri =
-        Uri.parse('$_search/subjects').replace(queryParameters: {'q': query});
+    final uri = Uri.parse(
+      '$_search/subjects',
+    ).replace(queryParameters: {'q': query});
     final resp = await http.get(uri).timeout(_reqTimeout);
     if (resp.statusCode == 200) {
       return (jsonDecode(resp.body) as List).map((e) => e.toString()).toList();
@@ -365,8 +374,9 @@ class ApiService {
   }
 
   static Future<List<dynamic>> getPurchasedPosts(int userId) async {
-    final uri = Uri.parse('$_posts/purchased')
-        .replace(queryParameters: {'user_id': '$userId'});
+    final uri = Uri.parse(
+      '$_posts/purchased',
+    ).replace(queryParameters: {'user_id': '$userId'});
     final r = await http.get(uri).timeout(_reqTimeout);
     _ensureOk(r);
     return (jsonDecode(r.body) as List).cast<dynamic>();
@@ -376,8 +386,9 @@ class ApiService {
     required int profileUserId,
     required int viewerId,
   }) async {
-    final uri = Uri.parse('$host/api/posts/user/$profileUserId')
-        .replace(queryParameters: {'viewer_id': '$viewerId'});
+    final uri = Uri.parse(
+      '$host/api/posts/user/$profileUserId',
+    ).replace(queryParameters: {'viewer_id': '$viewerId'});
     final resp = await http.get(uri).timeout(_reqTimeout);
     if (resp.statusCode == 200) {
       return (jsonDecode(resp.body) as List).cast<dynamic>();
@@ -395,8 +406,9 @@ class ApiService {
   }
 
   static Future<List<dynamic>> getSavedPosts(int userId) async {
-    final res =
-        await http.get(Uri.parse('$_posts/posts/saved/$userId')).timeout(_reqTimeout);
+    final res = await http
+        .get(Uri.parse('$_posts/posts/saved/$userId'))
+        .timeout(_reqTimeout);
     if (res.statusCode == 200) {
       return json.decode(res.body);
     } else {
@@ -405,8 +417,9 @@ class ApiService {
   }
 
   static Future<List<dynamic>> getLikedPosts(int userId) async {
-    final res =
-        await http.get(Uri.parse('$_posts/posts/liked/$userId')).timeout(_reqTimeout);
+    final res = await http
+        .get(Uri.parse('$_posts/posts/liked/$userId'))
+        .timeout(_reqTimeout);
     if (res.statusCode == 200) {
       return json.decode(res.body);
     } else {
@@ -420,15 +433,17 @@ class ApiService {
     String? bio,
   }) async {
     final uri = Uri.parse('$_auth/profile/update-by-id');
-    final res = await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'user_id': userId,
-        if (username != null) 'username': username,
-        if (bio != null) 'bio': bio,
-      }),
-    ).timeout(_reqTimeout);
+    final res = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'user_id': userId,
+            if (username != null) 'username': username,
+            if (bio != null) 'bio': bio,
+          }),
+        )
+        .timeout(_reqTimeout);
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw 'Update profile failed (${res.statusCode}) ${res.body}';
     }
@@ -462,9 +477,9 @@ class ApiService {
     required int postId,
     required int viewerUserId,
   }) async {
-    final uri = Uri.parse('$_posts/$postId/images').replace(
-      queryParameters: {'user_id': '$viewerUserId'},
-    );
+    final uri = Uri.parse(
+      '$_posts/$postId/images',
+    ).replace(queryParameters: {'user_id': '$viewerUserId'});
     final res = await http.get(uri).timeout(_reqTimeout);
     if (res.statusCode != 200) {
       throw HttpException('Images error (${res.statusCode}): ${res.body}');
@@ -496,7 +511,9 @@ class ApiService {
   }
 
   Future<List<String>> fetchPostImages(int postId, int viewerUserId) async {
-    final list = await _getJson('$host/api/posts/$postId/images?user_id=$viewerUserId');
+    final list = await _getJson(
+      '$host/api/posts/$postId/images?user_id=$viewerUserId',
+    );
     return (list as List).cast<String>();
   }
 
@@ -526,7 +543,9 @@ class ApiService {
           .timeout(_reqTimeout);
 
       if (r.statusCode < 200 || r.statusCode >= 300) {
-        throw HttpException('HTTP ${r.statusCode} ${r.reasonPhrase}: ${r.body}');
+        throw HttpException(
+          'HTTP ${r.statusCode} ${r.reasonPhrase}: ${r.body}',
+        );
       }
       return _decode(r.body);
     }
@@ -618,10 +637,12 @@ class ApiService {
     if (r.statusCode == 200) return jsonDecode(r.body) as List;
     throw Exception('load archived failed');
   }
+
   // ============== Notifications ==============
-static Future<int> getUnreadCount(int userId) async {
-    final uri = Uri.parse('$host/api/notifications/unread-count')
-        .replace(queryParameters: {'user_id': '$userId'});
+  static Future<int> getUnreadCount(int userId) async {
+    final uri = Uri.parse(
+      '$host/api/notifications/unread-count',
+    ).replace(queryParameters: {'user_id': '$userId'});
     final res = await http.get(uri).timeout(_reqTimeout);
 
     if (res.statusCode == 200) {
@@ -642,8 +663,9 @@ static Future<int> getUnreadCount(int userId) async {
   }
 
   static Future<List<dynamic>> getNotifications(int userId) async {
-    final uri = Uri.parse('$host/api/notifications')
-        .replace(queryParameters: {'user_id': '$userId'});
+    final uri = Uri.parse(
+      '$host/api/notifications',
+    ).replace(queryParameters: {'user_id': '$userId'});
     final res = await http.get(uri).timeout(_reqTimeout);
     if (res.statusCode == 200) {
       return jsonDecode(res.body) as List<dynamic>;
@@ -693,7 +715,9 @@ Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
     required int userId,
     required int otherUserId,
   }) async {
-    final res = await getJson('/api/friends/status?user_id=$userId&other_id=$otherUserId');
+    final res = await getJson(
+      '/api/friends/status?user_id=$userId&other_id=$otherUserId',
+    );
     return (res['status'] as String?) ?? 'none';
   }
 
@@ -737,8 +761,9 @@ Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
     required int userId,
     required int otherUserId,
   }) async {
-    final uri = Uri.parse('$_friends/unfriend/$otherUserId')
-        .replace(queryParameters: {'user_id': '$userId'});
+    final uri = Uri.parse(
+      '$_friends/unfriend/$otherUserId',
+    ).replace(queryParameters: {'user_id': '$userId'});
     final r = await http.delete(uri).timeout(_reqTimeout);
     _ensureOk(r);
   }
@@ -753,7 +778,9 @@ Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
   }
 
   /// คิวคำขอที่ “ฉันต้องตอบ” (incoming)
-  static Future<List<Map<String, dynamic>>> listIncomingRequests(int userId) async {
+  static Future<List<Map<String, dynamic>>> listIncomingRequests(
+    int userId,
+  ) async {
     final res = await getJson('/api/friends/requests/incoming?user_id=$userId');
     final list = (res['incoming'] as List? ?? const []);
     return list
@@ -762,12 +789,27 @@ Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
   }
 
   /// คิวคำขอที่ “ฉันเป็นคนส่ง” (outgoing)
-  static Future<List<Map<String, dynamic>>> listOutgoingRequests(int userId) async {
+  static Future<List<Map<String, dynamic>>> listOutgoingRequests(
+    int userId,
+  ) async {
     final res = await getJson('/api/friends/requests/outgoing?user_id=$userId');
     final list = (res['outgoing'] as List? ?? const []);
     return list
         .map<Map<String, dynamic>>((e) => (e as Map).cast<String, dynamic>())
         .toList();
+  }
+
+  static Future<List<Map<String, dynamic>>> getFriends(int userId) async {
+    final url = Uri.parse('$host/api/friends/list?user_id=$userId');
+    final resp = await http.get(url).timeout(_reqTimeout);
+    if (resp.statusCode != 200) {
+      throw Exception('โหลดรายชื่อเพื่อนไม่สำเร็จ: HTTP ${resp.statusCode}');
+    }
+    final data = jsonDecode(resp.body) as Map<String, dynamic>;
+    final list = (data['friends'] as List? ?? [])
+        .map<Map<String, dynamic>>((e) => Map<String, dynamic>.from(e))
+        .toList();
+    return list;
   }
 
   // ============== Wallet/Coins ==============
@@ -809,8 +851,9 @@ Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
         'ต้องระบุ userId เมื่อไม่มี token (fallback /api/wallet)',
       );
     }
-    final uri2 = Uri.parse('${ApiService.host}/api/wallet')
-        .replace(queryParameters: {'user_id': '$userId'});
+    final uri2 = Uri.parse(
+      '${ApiService.host}/api/wallet',
+    ).replace(queryParameters: {'user_id': '$userId'});
     final r2 = await http.get(uri2).timeout(_reqTimeout);
     if (r2.statusCode != 200) {
       throw HttpException('โหลดยอดไม่สำเร็จ (${r2.statusCode}): ${r2.body}');
@@ -852,8 +895,9 @@ Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
   Future<List<Map<String, dynamic>>> getMyWithdrawals({
     required int userId,
   }) async {
-    final uri = Uri.parse('${ApiService.host}/api/withdrawals/my')
-        .replace(queryParameters: {'user_id': '$userId'});
+    final uri = Uri.parse(
+      '${ApiService.host}/api/withdrawals/my',
+    ).replace(queryParameters: {'user_id': '$userId'});
     final r = await http
         .get(uri, headers: await _jsonAuthHeaders())
         .timeout(_reqTimeout);
@@ -898,7 +942,6 @@ Future<void> reportPost({
   if (r.statusCode < 200 || r.statusCode >= 300) {
     throw Exception('HTTP ${r.statusCode}: ${r.body}');
   }
-  
 }
 
 // Error อ่านง่ายขึ้นเวลามี status >= 400
@@ -908,3 +951,4 @@ class HttpException implements Exception {
   @override
   String toString() => message;
 }
+

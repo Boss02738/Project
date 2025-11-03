@@ -6,17 +6,15 @@ import 'package:my_note_app/screens/settings_screen.dart';
 import 'package:my_note_app/screens/edit_profile_screen.dart';
 import 'package:my_note_app/widgets/friend_action_button.dart';
 
-// ⬇️ เพิ่ม import สำหรับ bottom nav และหน้าที่จะนำทางไป
-import 'package:my_note_app/widgets/app_bottom_nav_bar.dart';
+// ⬇️ หน้าต่าง ๆ
 import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/search_screen.dart';
 import 'package:my_note_app/screens/documents_screen.dart';
 import 'package:my_note_app/screens/NewPost.dart';
+import 'package:my_note_app/screens/friends_list_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
-  /// โปรไฟล์ที่ต้องการเปิดดู; ถ้าไม่ส่งมา จะเปิดโปรไฟล์ตนเอง
   final int? userId;
-
   const ProfileScreen({super.key, this.userId});
 
   @override
@@ -24,11 +22,11 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  int? _viewerId; // id ของคนที่กำลังดู
-  int? _profileUserId; // id ของโปรไฟล์ที่เปิด
+  int? _viewerId;
+  int? _profileUserId;
   bool _loading = true;
 
-  Map<String, dynamic>? _profile; // username, avatar_url, bio, ...
+  Map<String, dynamic>? _profile;
   List<dynamic> _posts = [];
 
   bool get _isMe => _viewerId != null && _viewerId == _profileUserId;
@@ -46,9 +44,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (targetId == null) {
       if (!mounted) return;
-      setState(() {
-        _loading = false;
-      });
+      setState(() => _loading = false);
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('กรุณาเข้าสู่ระบบ')));
       return;
@@ -69,7 +65,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Map<String, dynamic>? p;
     List<dynamic> posts = [];
 
-    // 1) โหลดโปรไฟล์
     try {
       p = await ApiService.getUserProfile(_profileUserId!);
     } catch (e) {
@@ -80,7 +75,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    // 2) โหลดโพสต์
     try {
       posts = await ApiService.getPostsByUser(
         profileUserId: _profileUserId!,
@@ -103,7 +97,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _refresh() async => _loadAll();
 
-  // ---------------- UI ----------------
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -144,52 +137,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ],
               ),
             ),
-
-      // ✅ ใช้ AppBottomNavBar (index 4 = Profile)
-      bottomNavigationBar: AppBottomNavBar(
-        currentIndex: 4,
-        onTapAsync: (index) async {
-          if (index == 0) {
-            if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const homescreen()),
-            );
-          } else if (index == 1) {
-            if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const SearchScreen()),
-            );
-          } else if (index == 2) {
-            if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const DocumentsScreen()),
-            );
-          } else if (index == 3) {
-            // ไปหน้าเพิ่มโพสต์ ต้องมี userId และ username
-            final sp = await SharedPreferences.getInstance();
-            final uid = sp.getInt('user_id');
-            final uname = sp.getString('username') ?? '';
-            if (uid == null) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('กรุณาเข้าสู่ระบบก่อนโพสต์')),
-              );
-              return;
-            }
-            if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => NewPostScreen(userId: uid, username: uname),
-              ),
-            );
-          } else if (index == 4) {
-            // อยู่หน้า Profile แล้ว — ไม่ต้องทำอะไร
-          }
-        },
-      ),
+      // ❌ ลบ bottomNavigationBar ออก เพื่อไม่ให้ซ้อนกับของ parent
     );
   }
 
@@ -198,9 +146,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final bio = (_profile?['bio'] as String?) ?? '';
     final username = (_profile?['username'] as String?) ?? '';
 
-    // นับโพสต์จากที่โหลดมา (หรือให้ backend ส่ง count มาก็ได้)
     final postCount = _posts.length;
-    // ใช้ friends_count ถ้ามี (รองรับ friend_count เดิมเป็น fallback)
     final friendCount =
         (_profile?['friends_count'] as int?) ?? (_profile?['friend_count'] as int?) ?? 0;
 
@@ -209,15 +155,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ชื่อ
           Text(
             username.isNotEmpty ? username : 'user#${_profileUserId ?? ''}',
             style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
 
-          // avatar + counters
+          // avatar + counters (ช่องไฟเท่ากัน)
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               CircleAvatar(
                 radius: 36,
@@ -226,22 +172,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     : const AssetImage('assets/default_avatar.png')
                         as ImageProvider,
               ),
-              const SizedBox(width: 24),
-              _Counter(label: 'post', value: postCount),
-              const SizedBox(width: 24),
-              _Counter(label: 'friends', value: friendCount),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Center(
+                        child: _RightStat(label: 'post', value: postCount),
+                      ),
+                    ),
+                    Expanded(
+                      child: Center(
+                        child: InkWell(
+                          onTap: () {
+                            final uid = _profileUserId;
+                            if (uid != null) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => FriendsListScreen(userId: uid),
+                                ),
+                              );
+                            }
+                          },
+                          child: _RightStat(label: 'friends', value: friendCount),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
 
           const SizedBox(height: 12),
 
-          // bio
           if (bio.trim().isNotEmpty)
             Text(bio, style: const TextStyle(color: Colors.black87)),
 
           const SizedBox(height: 12),
 
-          // ===== ปุ่มด้านล่างรูปโปรไฟล์ =====
           SizedBox(
             width: double.infinity,
             child: _isMe
@@ -285,8 +255,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                         child: const Text('กรุณาเข้าสู่ระบบเพื่อเพิ่มเพื่อน'),
                       )
-                    : // ใช้ FriendActionButton ที่เชื่อม API แล้ว
-                    FriendActionButton(
+                    : FriendActionButton(
                         meId: _viewerId!,
                         otherId: _profileUserId!,
                       )),
@@ -301,21 +270,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 }
 
-class _Counter extends StatelessWidget {
+class _RightStat extends StatelessWidget {
   final String label;
   final int value;
-  const _Counter({required this.label, required this.value});
+  const _RightStat({required this.label, required this.value});
 
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           '$value',
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 2),
-        Text(label, style: const TextStyle(color: Colors.black54)),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.black54, fontSize: 12),
+        ),
       ],
     );
   }
