@@ -207,6 +207,12 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                                 '${_minCoins != null ? ' • ขั้นต่ำ ${_minCoins} เหรียญ' : ''}',
                           style: hintStyle,
                         ),
+                        Text(
+                          (_feePercent == null)
+                              ? ''
+                              : 'โปรดตรวจสอบ QR code ว่าถูกต้องจะใช้เวลาทำการประมาณ 3 วัน',
+                          style: hintStyle,
+                        ),
 
                         const SizedBox(height: 16),
 
