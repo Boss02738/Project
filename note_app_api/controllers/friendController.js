@@ -184,12 +184,17 @@ exports.listFriends = async (req, res) => {
   if (!user_id) return res.status(400).json({ message: "ต้องมี user_id" });
 
   const q = `
-    SELECT u.id_user, u.username, u.avatar_url
+    SELECT
+      u.id_user,
+      u.username,
+      COALESCE(u.avatar_url, '/uploads/avatars/default.png') AS avatar_url,
+      COALESCE(u.bio, '') AS bio
     FROM public.friend_edges fe
     JOIN public.users u
       ON u.id_user = CASE WHEN fe.user_a = $1 THEN fe.user_b ELSE fe.user_a END
-    WHERE (fe.user_a=$1 OR fe.user_b=$1) AND fe.status='accepted'
-    ORDER BY u.username NULLS LAST, u.id_user;
+    WHERE (fe.user_a = $1 OR fe.user_b = $1)
+      AND fe.status = 'accepted'
+    ORDER BY u.username NULLS LAST, u.id_user
   `;
   try {
     const { rows } = await pool.query(q, [user_id]);
