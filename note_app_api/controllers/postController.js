@@ -641,45 +641,115 @@ async function unarchivePost(req, res) {
     res.status(500).json({ message: "internal error" });
   }
 }
-
 async function hardDeletePost(req, res) {
   const postId = Number(req.params.id);
-  if (!postId) return res.status(400).json({ message: "missing post_id" });
+  const userId = Number(req.body?.user_id || req.query?.user_id || 0);
+  if (!postId || !userId) {
+    return res.status(400).json({ message: "missing post_id/user_id" });
+  }
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
+    // ล็อกแถว + ตรวจสิทธิ์เจ้าของโพสต์
     const { rows } = await client.query(
-      `SELECT image_url, file_url FROM public.posts WHERE id=$1`,
+      `SELECT id, user_id, image_url, file_url
+         FROM public.posts
+        WHERE id = $1
+        FOR UPDATE`,
       [postId]
     );
     if (!rows.length) {
       await client.query("ROLLBACK");
-      return res.status(404).json({ message: "post not found" });
+      return res.status(404).json({ message: "post_not_found" });
     }
-    const { image_url, file_url } = rows[0];
+    const post = rows[0];
+    if (Number(post.user_id) !== userId) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "no_permission" });
+    }
 
-    await client.query(`DELETE FROM public.posts WHERE id=$1`, [postId]);
+    // ❗ กันลบถ้าถูกซื้อแล้ว (เช็คทั้ง purchased_posts และ purchases ที่ approved)
+    const bought1 = await client.query(
+      `SELECT 1 FROM public.purchased_posts WHERE post_id=$1 LIMIT 1`,
+      [postId]
+    );
+    if (bought1.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "cannot_delete_purchased_post" });
+    }
+
+    const bought2 = await client.query(
+      `SELECT 1 FROM public.purchases
+        WHERE post_id=$1 AND status='approved'
+        LIMIT 1`,
+      [postId]
+    );
+    if (bought2.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "cannot_delete_purchased_post" });
+    }
+
+    // ลบข้อมูล + ไฟล์ประกอบ
     await client.query(`DELETE FROM public.post_images WHERE post_id=$1`, [postId]);
+    await client.query(`DELETE FROM public.posts WHERE id=$1`, [postId]);
 
     await client.query("COMMIT");
 
-    // ลบไฟล์บนดิสก์ (ถ้ามี)
-    [image_url, file_url].filter(Boolean).forEach((p) => {
-      const fp = path.join(process.cwd(), p);
+    // ลบไฟล์ในดิสก์ (ถ้ามี)
+    [post.image_url, post.file_url].filter(Boolean).forEach((p) => {
+      const fp = path.join(process.cwd(), p.replace(/^\//, ""));
       fs.unlink(fp, () => {});
     });
 
-    res.json({ ok: true, message: "deleted" });
+    return res.json({ ok: true, message: "deleted" });
   } catch (e) {
     try { await client.query("ROLLBACK"); } catch {}
     console.error("hardDeletePost error:", e);
-    res.status(500).json({ message: "internal error" });
+    return res.status(500).json({ message: "internal error" });
   } finally {
     client.release();
   }
 }
+// async function hardDeletePost(req, res) {
+//   const postId = Number(req.params.id);
+//   if (!postId) return res.status(400).json({ message: "missing post_id" });
+
+//   const client = await pool.connect();
+//   try {
+//     await client.query("BEGIN");
+
+//     const { rows } = await client.query(
+//       `SELECT image_url, file_url FROM public.posts WHERE id=$1`,
+//       [postId]
+//     );
+//     if (!rows.length) {
+//       await client.query("ROLLBACK");
+//       return res.status(404).json({ message: "post not found" });
+//     }
+//     const { image_url, file_url } = rows[0];
+
+//     await client.query(`DELETE FROM public.posts WHERE id=$1`, [postId]);
+//     await client.query(`DELETE FROM public.post_images WHERE post_id=$1`, [postId]);
+
+//     await client.query("COMMIT");
+
+//     // ลบไฟล์บนดิสก์ (ถ้ามี)
+//     [image_url, file_url].filter(Boolean).forEach((p) => {
+//       const fp = path.join(process.cwd(), p);
+//       fs.unlink(fp, () => {});
+//     });
+
+//     res.json({ ok: true, message: "deleted" });
+//   } catch (e) {
+//     try { await client.query("ROLLBACK"); } catch {}
+//     console.error("hardDeletePost error:", e);
+//     res.status(500).json({ message: "internal error" });
+//   } finally {
+//     client.release();
+//   }
+// }
 
 /* ===================== ARCHIVED LIST =================== */
 async function getArchivedPosts(req, res) {
