@@ -12,6 +12,7 @@ import 'package:my_note_app/widgets/post_card.dart';
 
 class homescreen extends StatefulWidget {
   const homescreen({super.key});
+
   @override
   State<homescreen> createState() => _HomeState();
 }
@@ -61,8 +62,6 @@ class _HomeState extends State<homescreen> {
       if (!mounted) return;
       setState(() => _unreadCount = res);
     } catch (_) {}
-
-    await _loadUnreadCount();
   }
 
   Future<void> _reload() async {

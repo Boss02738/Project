@@ -30,13 +30,15 @@ router.post("/admin/logout", (req, res) => {
 
 /* ------------ dashboard ------------- */
 router.get("/admin", requireAdmin, async (_req, res) => {
-  const [{ rows: p1 }, { rows: p2 }] = await Promise.all([
+  const [{ rows: p1 }, { rows: p2 }, { rows: p3 }] = await Promise.all([
     pool.query(`SELECT count(*) FROM purchases WHERE status='pending'`),
-    pool.query(`SELECT count(*) FROM withdrawals WHERE status='pending'`), // ✅ ใช้ withdrawals
+    pool.query(`SELECT count(*) FROM withdrawals WHERE status='pending'`),
+    pool.query(`SELECT count(*) FROM post_reports WHERE status='pending'`) // ✅ ใช้ withdrawals
   ]);
   res.render("admin_home", {
     pendingPurchases: Number(p1[0].count || 0),
     pendingPayouts: Number(p2[0].count || 0),
+    pendingReports:   Number(p3[0].count || 0),
   });
 });
 
