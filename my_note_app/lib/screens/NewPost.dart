@@ -578,7 +578,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
         onTap: (index) async {
           if (index == 0) {
             if (!mounted) return;
-            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const homeScreen()));
+            Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const homescreen()));
           } else if (index == 1) {
             if (!mounted) return;
             Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const SearchScreen()));

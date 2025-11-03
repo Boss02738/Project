@@ -13,17 +13,15 @@ import 'package:my_note_app/widgets/post_card.dart';
 class homescreen extends StatefulWidget {
   const homescreen({super.key});
   @override
-  State<homeScreen> createState() => _HomeState();
+  State<homescreen> createState() => _HomeState();
 }
 
-class _HomeState extends State<homeScreen> {
+class _HomeState extends State<homescreen> {
   int _currentIndex = 0;
-  Future<List<dynamic>>? _futureFeed;
   Future<List<dynamic>>? _futureFeed;
   int? _userId;
   String? _username;
   bool _loadingUser = true;
-  int _unreadCount = 0; // 🔔 ตัวนับแจ้งเตือนที่ยังไม่อ่าน
   int _unreadCount = 0; // 🔔 ตัวนับแจ้งเตือนที่ยังไม่อ่าน
 
   @override
@@ -65,15 +63,6 @@ class _HomeState extends State<homeScreen> {
     } catch (_) {}
 
     await _loadUnreadCount();
-  }
-
-  Future<void> _loadUnreadCount() async {
-    if (_userId == null) return;
-    try {
-      final res = await ApiService.getUnreadCount(_userId!);
-      if (!mounted) return;
-      setState(() => _unreadCount = res);
-    } catch (_) {}
   }
 
   Future<void> _reload() async {

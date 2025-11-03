@@ -8,6 +8,7 @@ const router = express.Router();
 
 const pool = require('../models/db');
 const { generatePromptPayPayload } = require('../utils/promptpay');
+const purchaseCtrl = require('../controllers/purchaseController');
 
 // === storage สำหรับ slip (เก็บเป็นไฟล์) ===
 const uploadsDir = path.join(process.cwd(), 'uploads', 'slips');
@@ -17,6 +18,8 @@ const upload = multer({
   dest: uploadsDir,
   limits: { fileSize: 25 * 1024 * 1024 },
 });
+
+router.get('/:userId/posts', purchaseCtrl.listPurchasedPosts);
 
 /* ---------------------------- helpers ---------------------------- */
 

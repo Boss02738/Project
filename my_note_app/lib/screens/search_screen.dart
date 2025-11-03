@@ -383,7 +383,7 @@ class _SearchScreenState extends State<SearchScreen> {
           if (index == 0) {
             Navigator.pushReplacement(
               context,
-              MaterialPageRoute(builder: (_) => const homeScreen()),
+              MaterialPageRoute(builder: (_) => const homescreen()),
             );
           } else if (index == 2) {
             final prefs = await SharedPreferences.getInstance();
