@@ -238,3 +238,47 @@ exports.rejectPurchase = async (req, res) => {
     res.status(500).json({ error: 'internal_error' });
   }
 };
+
+exports.listPurchasedPosts = async (req, res) => {
+  try {
+    const userId = Number(req.params.userId);
+    if (!userId) return res.status(400).json({ error: 'missing userId' });
+
+    const sql = `
+      SELECT
+        p.id,
+        p.user_id,                              -- เจ้าของโพสต์
+        p.text,
+        p.subject,
+        p.year_label,
+        p.image_url,
+        p.file_url,
+        p.price_type,
+        p.price_amount_satang,
+
+        -- ข้อมูลผู้โพสต์ (JOIN users)
+        u.username,
+        COALESCE(u.avatar_url, '') AS avatar_url,
+
+        -- รวมรูปหลายใบถ้ามีตาราง post_images
+        ARRAY_REMOVE(ARRAY_AGG(pi.image_path ORDER BY pi.id), NULL) AS images,
+
+        -- เวลาที่ได้รับสิทธิ์
+        pp.created_at,
+        pp.granted_at
+      FROM public.purchased_posts pp
+      JOIN public.posts p      ON p.id = pp.post_id
+      JOIN public.users u      ON u.id_user = p.user_id
+      LEFT JOIN public.post_images pi ON pi.post_id = p.id
+      WHERE pp.user_id = $1              -- ถ้าสคีมาของคุณใช้ buyer_id ให้เปลี่ยนเป็น pp.buyer_id
+      GROUP BY p.id, u.username, u.avatar_url, pp.created_at, pp.granted_at
+      ORDER BY pp.id DESC;
+    `;
+
+    const { rows } = await pool.query(sql, [userId]);
+    return res.json(rows);
+  } catch (e) {
+    console.error('listPurchasedPosts error:', e);
+    return res.status(500).json({ error: 'internal_error' });
+  }
+};

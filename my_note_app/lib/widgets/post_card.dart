@@ -1,4 +1,4 @@
-// lib/widgets/post_card.dart  (หรือไฟล์ที่คุณวาง PostCard อยู่)
+// lib/widgets/post_card.dart
 
 import 'dart:convert';
 import 'dart:io';
@@ -14,6 +14,23 @@ import 'package:open_file/open_file.dart';
 
 // ถ้ามี dialog เลือกเหตุผลรายงาน
 import 'package:my_note_app/widgets/report_post_dialog.dart';
+
+/// ======================= helpers =======================
+/// ทำ URL ให้เป็น absolute โดยไม่ต่อ host ซ้ำ
+String _abs(String? url) {
+  final u = (url ?? '').trim();
+  if (u.isEmpty) return '';
+  if (u.startsWith('http://') || u.startsWith('https://')) return u;
+  if (u.startsWith('/')) return '${ApiService.host}$u';
+  return '${ApiService.host}/$u';
+}
+
+/// สร้าง ImageProvider สำหรับ avatar (รองรับ http หรือ path)
+ImageProvider _avatarProvider(String? avatar) {
+  final a = (avatar ?? '').trim();
+  if (a.isEmpty) return const AssetImage('assets/default_avatar.png');
+  return NetworkImage(_abs(a));
+}
 
 /// ======================= Fullscreen Gallery =======================
 class GalleryViewer extends StatefulWidget {
@@ -327,7 +344,7 @@ class _PostCardState extends State<PostCard> {
     }
   }
 
-  /// ===== ยิงรีพอร์ตตรงผ่าน HTTP (ไม่พึ่ง ApiService.reportPost) =====
+  // ===== Handler ส่งรีพอร์ต (ยิง HTTP ตรง) =====
   Future<void> _sendReportDirect({
     required int postId,
     required int userId,
@@ -355,7 +372,6 @@ class _PostCardState extends State<PostCard> {
     }
   }
 
-  // ===== Handler ส่งรีพอร์ต =====
   Future<void> _handleReportSubmit({
     required String reason,
     String? details,
@@ -390,7 +406,6 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  // เปิด dialog เลือกเหตุผลรายงาน
   Future<void> _openReportDialog() async {
     final postId = widget.post['id'] as int?;
     if (postId == null) return;
@@ -405,8 +420,11 @@ class _PostCardState extends State<PostCard> {
     );
   }
 
-  // ===== Action Sheet (เมนูสวย ๆ แทน Popup) =====
+  /// ====== Action Sheet (เมนู) ======
   Future<void> _openActionsSheet(bool canDelete) async {
+    // ปิดคีย์บอร์ดกัน layout กระตุก
+    FocusScope.of(context).unfocus();
+
     await showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
@@ -482,13 +500,22 @@ class _PostCardState extends State<PostCard> {
     final p = widget.post;
 
     // Normalize URL (/uploads -> http)
-    List<String> _fixUrls(List<String> arr) =>
-        arr.map((e) => e.startsWith('http') ? e : '${ApiService.host}$e').toList();
+    List<String> _fixUrls(List<String> arr) => arr.map((e) => _abs(e)).toList();
 
-    final avatar = (p['avatar_url'] as String?) ?? '';
+    // รองรับหลายชื่อคีย์ avatar / username
+    final avatar = (p['avatar_url'] ??
+            p['author_avatar'] ??
+            p['seller_avatar'] ??
+            p['user_avatar'] ??
+            '') as String?;
+    final name = (p['username'] ??
+            p['author_name'] ??
+            p['seller_name'] ??
+            p['name'] ??
+            '') as String;
+
     final file = (p['file_url'] as String?) ?? '';
     final fileName = file.isNotEmpty ? file.split('/').last : null;
-    final name = p['username'] as String? ?? '';
     final text = p['text'] as String? ?? '';
     final subject = p['subject'] as String? ?? '';
     final year = p['year_label'] as String? ?? '';
@@ -500,7 +527,7 @@ class _PostCardState extends State<PostCard> {
     final allImagesRaw = [...images, if ((legacy ?? '').isNotEmpty && images.isEmpty) legacy!];
     final allImages = _fixUrls(allImagesRaw);
 
-    // owner id (รองรับ author_id/user_id)
+    // owner id (รองรับ author_id/user_id/owner_id/created_by)
     int? ownerId;
     final rawOwner = p['author_id'] ?? p['owner_id'] ?? p['created_by'] ?? p['user_id'];
     if (rawOwner is int) {
@@ -532,6 +559,9 @@ class _PostCardState extends State<PostCard> {
     final showSeeMore = text.trim().length > 80;
     final canDelete = isOwner;
 
+    // แสดงป้าย "ซื้อแล้ว" เฉพาะโพสต์แบบเสียเงินที่เรามีสิทธิ์ดู/ดาวน์โหลด
+    final showPurchasedChip = isPaid && !isOwner && purchased;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
@@ -541,9 +571,7 @@ class _PostCardState extends State<PostCard> {
           ListTile(
             leading: CircleAvatar(
               radius: 22,
-              backgroundImage: avatar.isNotEmpty
-                  ? NetworkImage('${ApiService.host}$avatar')
-                  : const AssetImage('assets/default_avatar.png') as ImageProvider,
+              backgroundImage: _avatarProvider(avatar),
             ),
             title: Row(
               children: [
@@ -562,10 +590,12 @@ class _PostCardState extends State<PostCard> {
             ),
             subtitle: Text(subject, overflow: TextOverflow.ellipsis),
 
-            // ✅ ปุ่มเปิด Action Sheet
+            // ปุ่มเปิด Action Sheet (แก้ชนิด callback แล้ว)
             trailing: IconButton(
               icon: const Icon(Icons.more_horiz),
-              onPressed: () => _openActionsSheet(canDelete),
+              onPressed: () async {
+                await _openActionsSheet(canDelete);
+              },
             ),
           ),
 
@@ -685,24 +715,31 @@ class _PostCardState extends State<PostCard> {
           // -------- Actions --------
           Padding(
             padding: const EdgeInsets.only(left: 6, right: 6, top: 6),
-            child: Row(children: [
-              IconButton(
-                icon: Icon(_likedByMe ? Icons.favorite : Icons.favorite_border),
-                onPressed: _toggleLike,
-              ),
-              Text('$_likeCount'),
-              const SizedBox(width: 12),
-              IconButton(
-                icon: const Icon(Icons.mode_comment_outlined),
-                onPressed: _openComments,
-              ),
-              Text('$_commentCount'),
-              const Spacer(),
-              IconButton(
-                icon: Icon(_savedByMe ? Icons.bookmark : Icons.bookmark_border_outlined),
-                onPressed: _toggleSave,
-              ),
-            ]),
+            child: Row(
+              children: [
+                IconButton(
+                  icon: Icon(_likedByMe ? Icons.favorite : Icons.favorite_border),
+                  onPressed: _toggleLike,
+                ),
+                Text('$_likeCount'),
+                const SizedBox(width: 12),
+                IconButton(
+                  icon: const Icon(Icons.mode_comment_outlined),
+                  onPressed: _openComments,
+                ),
+                Text('$_commentCount'),
+                const Spacer(),
+
+                // ป้าย "ซื้อแล้ว"
+                if (showPurchasedChip) const _PurchasedChip(),
+                if (showPurchasedChip) const SizedBox(width: 6),
+
+                IconButton(
+                  icon: Icon(_savedByMe ? Icons.bookmark : Icons.bookmark_border_outlined),
+                  onPressed: _toggleSave,
+                ),
+              ],
+            ),
           ),
 
           // -------- Text --------
@@ -959,8 +996,9 @@ class _CommentsSheetState extends State<_CommentsSheet> {
                         separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (_, i) {
                           final c = _items[i];
-                          final name = c['username'] ?? '';
-                          final avatar = c['avatar_url'] ?? '';
+                          final name = c['username'] ?? c['author_name'] ?? c['name'] ?? '';
+                          final avatar = c['avatar_url'] ?? c['author_avatar'] ?? c['user_avatar'] ?? '';
+
                           final text = c['text'] ?? '';
                           final createdAt = c['created_at'] ?? '';
 
@@ -985,9 +1023,7 @@ class _CommentsSheetState extends State<_CommentsSheet> {
 
                           return ListTile(
                             leading: CircleAvatar(
-                              backgroundImage: avatar.toString().isNotEmpty
-                                  ? NetworkImage('${ApiService.host}$avatar')
-                                  : const AssetImage('assets/default_avatar.png') as ImageProvider,
+                              backgroundImage: _avatarProvider(avatar),
                             ),
                             title: Row(
                               children: [
@@ -1103,6 +1139,37 @@ class _ActionItem extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// -------- ป้าย "ซื้อแล้ว" (ติดล่างขวาก่อน Bookmark ในแถวปุ่ม) --------
+class _PurchasedChip extends StatelessWidget {
+  const _PurchasedChip();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF22C55E),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Icon(Icons.check_circle, size: 14, color: Colors.white),
+          SizedBox(width: 4),
+          Text(
+            'ซื้อแล้ว',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

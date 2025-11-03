@@ -1,7 +1,8 @@
+// lib/screens/purchased_posts_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/widgets/post_card.dart';
-import 'package:my_note_app/widgets/purchased_overlay.dart';
 
 class PurchasedPostsScreen extends StatefulWidget {
   final int userId;
@@ -26,7 +27,7 @@ class _PurchasedPostsScreenState extends State<PurchasedPostsScreen> {
     });
   }
 
-  /// เติม host ให้ path ที่ขึ้นต้นด้วย / หรือไม่มี http
+  // ---------- helpers ----------
   String _abs(String? url) {
     if (url == null || url.isEmpty) return '';
     if (url.startsWith('http')) return url;
@@ -34,38 +35,54 @@ class _PurchasedPostsScreenState extends State<PurchasedPostsScreen> {
     return '${ApiService.host}/$url';
   }
 
-  /// แปลงแถวจาก API -> โครงสำหรับ PostCard
-  Map<String, dynamic> _toPostCardData(Map<String, dynamic> r) {
-    // รูปภาพ (บางเคส api ส่งมาเป็น relative path)
-    final List imgs = (r['images'] is List) ? r['images'] : const [];
-    final fixedImgs = imgs.map((e) => _abs('$e')).toList();
+  int? _asInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    return int.tryParse('$v');
+  }
 
-    // normalize ชนิดราคา
+  Map<String, dynamic> _toPostCardData(Map r) {
+    // รูปหลายใบ (relative -> absolute)
+    final List imgs = (r['images'] is List) ? r['images'] : const [];
+    final List<String> fixedImgs = imgs.map((e) => _abs('$e')).cast<String>().toList();
+
+    // owner id (ลองหลาย key)
+    final ownerId = _asInt(r['user_id'] ?? r['author_id'] ?? r['owner_id'] ?? r['created_by']);
+
     final priceType = (r['price_type'] ?? 'free').toString().toLowerCase().trim();
 
     return <String, dynamic>{
-      'id': r['id'],
-      'user_id': r['user_id'],                       // เจ้าของโพสต์ (owner)
+      'id': _asInt(r['id']) ?? r['id'],
+      'user_id': ownerId,
       'username': (r['username'] ?? '').toString(),
-      'avatar_url': _abs(r['avatar_url']),
+      // รองรับหลายชื่อคีย์ avatar + ทำเป็น absolute
+      'avatar_url': _abs(r['avatar_url'] ?? r['avatar'] ?? r['profile_image'] ?? r['photo']),
       'text': (r['text'] ?? '').toString(),
       'subject': (r['subject'] ?? '').toString(),
       'year_label': (r['year_label'] ?? '').toString(),
       'created_at': (r['created_at'] ?? r['granted_at'])?.toString(),
-      'granted_at': r['granted_at'],                 // เผื่อ PostCard ใช้ตรวจ purchased
+
+      // รูป + legacy single image
       'images': fixedImgs,
-      'image_url': _abs(r['image_url']),             // legacy single img
-      'file_url': _abs(r['file_url']),
+      'image_url': _abs('${r['image_url'] ?? ''}'),
+
+      // ไฟล์แนบ
+      'file_url': _abs('${r['file_url'] ?? ''}'),
+
+      // สถิติ
       'like_count': r['like_count'] ?? 0,
       'comment_count': r['comment_count'] ?? 0,
       'liked_by_me': r['liked_by_me'] == true,
+
+      // ราคา/สิทธิ์
       'price_type': priceType,
       'price_amount_satang': r['price_amount_satang'] ?? 0,
 
-      // สำคัญ: บอกการ์ดว่า "โพสต์นี้ซื้อแล้ว"
+      // บอกการ์ดว่า “ซื้อแล้ว/เข้าถึงได้”
       'purchased': true,
-      'purchased_by_me': true,
       'is_purchased': true,
+      'purchased_by_me': true,
+      'granted_at': r['granted_at'],
     };
   }
 
@@ -76,12 +93,10 @@ class _PurchasedPostsScreenState extends State<PurchasedPostsScreen> {
       body: FutureBuilder<List<dynamic>>(
         future: _future,
         builder: (context, snap) {
-          // กำลังโหลด
           if (snap.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          // โหลดพลาด
           if (snap.hasError) {
             return RefreshIndicator(
               onRefresh: _reload,
@@ -106,9 +121,8 @@ class _PurchasedPostsScreenState extends State<PurchasedPostsScreen> {
             );
           }
 
-          // ข้อมูลว่าง
-          final raw = (snap.data ?? const []);
-          if (raw.isEmpty) {
+          final data = snap.data ?? const [];
+          if (data.isEmpty) {
             return RefreshIndicator(
               onRefresh: _reload,
               child: ListView(
@@ -120,8 +134,13 @@ class _PurchasedPostsScreenState extends State<PurchasedPostsScreen> {
             );
           }
 
-          // สร้างลิสต์การ์ด
-          final rows = raw.cast<Map>().map((e) => e.cast<String, dynamic>()).toList();
+          // map เป็น payload ที่ PostCard ต้องการ
+          final rows = <Map<String, dynamic>>[];
+          for (final it in data) {
+            if (it is Map) {
+              rows.add(_toPostCardData(it));
+            }
+          }
 
           return RefreshIndicator(
             onRefresh: _reload,
@@ -129,14 +148,7 @@ class _PurchasedPostsScreenState extends State<PurchasedPostsScreen> {
               padding: const EdgeInsets.only(bottom: 24),
               separatorBuilder: (_, __) => const Divider(height: 1),
               itemCount: rows.length,
-              itemBuilder: (_, i) {
-                final post = _toPostCardData(rows[i]);
-
-                // ครอบด้วยป้าย "ซื้อแล้ว" และส่งให้ PostCard
-                return PurchasedOverlay(
-                  child: PostCard(post: post),
-                );
-              },
+              itemBuilder: (_, i) => PostCard(post: rows[i]),
             ),
           );
         },

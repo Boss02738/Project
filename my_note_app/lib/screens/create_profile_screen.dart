@@ -102,7 +102,7 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
         if (!mounted) return;
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('บันทึกโปรไฟล์สำเร็จ')));
-        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const homescreen()));
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const homeScreen()));
       } else {
         if (!mounted) return;
         final data = jsonDecode(res.body);

@@ -12,6 +12,7 @@ import 'package:my_note_app/screens/purchased_posts_screen.dart';
 import 'package:my_note_app/screens/withdraw_screen.dart';
 import 'package:my_note_app/screens/login_screen.dart';
 import 'package:my_note_app/screens/change_password_screen.dart';
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -112,13 +113,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     _SettingsItem(
                       icon: Icons.shopping_bag_outlined,
                       title: 'Purchased posts',
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              PurchasedPostsScreen(userId: _userId!),
-                        ),
-                      ),
+                      onTap: () async {
+                        final sp = await SharedPreferences.getInstance();
+                        final uid = sp.getInt(
+                          'user_id',
+                        ); // <-- อ่าน user_id ที่เคยเก็บตอนล็อกอิน
+
+                        if (!context.mounted) return;
+
+                        if (uid == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'กรุณาเข้าสู่ระบบก่อนดูโพสต์ที่ซื้อ',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => PurchasedPostsScreen(
+                              userId: uid,
+                            ), // <-- ส่งค่า uid ที่ได้จริง
+                          ),
+                        );
+                      },
                     ),
 
                     _SettingsItem(
@@ -143,17 +165,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ),
                     _SettingsItem(
-  icon: Icons.lock_outline,
-  title: 'Change Password',
-  onTap: () {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ChangePasswordScreen(userId: _userId!),
-      ),
-    );
-  },
-),
+                      icon: Icons.lock_outline,
+                      title: 'Change Password',
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) =>
+                                ChangePasswordScreen(userId: _userId!),
+                          ),
+                        );
+                      },
+                    ),
 
                     _SettingsItem(
                       icon: Icons.logout,
@@ -230,4 +253,3 @@ class _SettingsItem extends StatelessWidget {
     );
   }
 }
-
