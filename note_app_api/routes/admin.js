@@ -33,12 +33,12 @@ router.get("/admin", requireAdmin, async (_req, res) => {
   const [{ rows: p1 }, { rows: p2 }, { rows: p3 }] = await Promise.all([
     pool.query(`SELECT count(*) FROM purchases WHERE status='pending'`),
     pool.query(`SELECT count(*) FROM withdrawals WHERE status='pending'`),
-    pool.query(`SELECT count(*) FROM post_reports WHERE status='pending'`) // ✅ ใช้ withdrawals
+    pool.query(`SELECT count(*) FROM post_reports WHERE status='pending'`), // ✅ ใช้ withdrawals
   ]);
   res.render("admin_home", {
     pendingPurchases: Number(p1[0].count || 0),
     pendingPayouts: Number(p2[0].count || 0),
-    pendingReports:   Number(p3[0].count || 0),
+    pendingReports: Number(p3[0].count || 0),
   });
 });
 
@@ -235,25 +235,34 @@ router.get("/admin/reports", requireAdmin, async (req, res) => {
     const { rows } = await pool.query(
       `
       SELECT
-        r.id,
-        r.post_id,
-        r.reporter_id,
-        r.reason,
-        r.details,
-        r.status,
-        r.created_at,
-        p.text      AS post_text,       -- ถ้าโพสต์ใช้ชื่อคอลัมน์อื่นให้แก้ตรงนี้
-        p.is_banned AS post_is_banned,
-        COALESCE(u.username, u.email, u.phone::text) AS reporter_name
-      FROM post_reports r
-      JOIN posts  p ON p.id = r.post_id
-      LEFT JOIN users u ON u.id_user = r.reporter_id
-      WHERE r.status = $1
-      ORDER BY r.created_at ASC
+    r.id,
+    r.post_id,
+    r.reporter_id,
+    r.reason,
+    r.details,
+    r.status,
+    r.created_at,
+
+    -- เพิ่มฟิลด์จากโพสต์
+    p.text        AS post_text,
+    p.subject     AS post_subject,
+    p.year_label  AS post_year_label,
+    p.image_url   AS post_cover,
+    p.file_url    AS post_file_url,
+    p.price_type,
+    p.price_amount_satang,
+    p.is_banned   AS post_is_banned,
+
+    COALESCE(u.username, u.email, u.phone::text) AS reporter_name
+  FROM post_reports r
+  JOIN posts  p ON p.id = r.post_id
+  LEFT JOIN users u ON u.id_user = r.reporter_id
+  WHERE r.status = $1
+  ORDER BY r.created_at ASC
       `,
       [status]
     );
-    
+
     return res.render("reports", { items: rows, status });
   } catch (e) {
     console.error("[/admin/reports] error:", e?.message || e);
@@ -262,19 +271,19 @@ router.get("/admin/reports", requireAdmin, async (req, res) => {
 });
 
 // อนุมัติรายงาน -> ตั้งสถานะ approved และแบนโพสต์
-router.post('/admin/reports/:id/approve', requireAdmin, async (req, res) => {
+router.post("/admin/reports/:id/approve", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await client.query("BEGIN");
 
     const cur = await client.query(
       `SELECT id, post_id, status FROM post_reports WHERE id=$1 FOR UPDATE`,
       [id]
     );
-    if (cur.rowCount === 0) throw new Error('report_not_found');
+    if (cur.rowCount === 0) throw new Error("report_not_found");
     const r = cur.rows[0];
-    if (r.status !== 'pending') throw new Error('invalid_status');
+    if (r.status !== "pending") throw new Error("invalid_status");
 
     await client.query(
       `UPDATE post_reports
@@ -282,16 +291,15 @@ router.post('/admin/reports/:id/approve', requireAdmin, async (req, res) => {
        WHERE id=$1`,
       [id]
     );
-    await client.query(
-      `UPDATE posts SET is_banned=TRUE WHERE id=$1`,
-      [r.post_id]
-    );
+    await client.query(`UPDATE posts SET is_banned=TRUE WHERE id=$1`, [
+      r.post_id,
+    ]);
 
-    await client.query('COMMIT');
-    res.redirect('/admin/reports?status=pending');
+    await client.query("COMMIT");
+    res.redirect("/admin/reports?status=pending");
   } catch (e) {
-    await client.query('ROLLBACK');
-    console.error('approve report error:', e);
+    await client.query("ROLLBACK");
+    console.error("approve report error:", e);
     res.status(500).send(String(e));
   } finally {
     client.release();
@@ -299,7 +307,7 @@ router.post('/admin/reports/:id/approve', requireAdmin, async (req, res) => {
 });
 
 // ปฏิเสธรายงาน -> ตั้งสถานะ rejected
-router.post('/admin/reports/:id/reject', requireAdmin, async (req, res) => {
+router.post("/admin/reports/:id/reject", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   try {
     const q = await pool.query(
@@ -308,15 +316,13 @@ router.post('/admin/reports/:id/reject', requireAdmin, async (req, res) => {
        WHERE id=$1 AND status='pending'`,
       [id]
     );
-    if (q.rowCount === 0) return res.status(400).send('invalid_status_or_not_found');
-    res.redirect('/admin/reports?status=pending');
+    if (q.rowCount === 0)
+      return res.status(400).send("invalid_status_or_not_found");
+    res.redirect("/admin/reports?status=pending");
   } catch (e) {
-    console.error('reject report error:', e);
+    console.error("reject report error:", e);
     res.status(500).send(String(e));
   }
 });
-
-
-
 
 module.exports = router;

@@ -349,6 +349,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     final subjectItems = subjects
         .map((e) => DropdownMenuItem<String>(value: e, child: Text(e)))
         .toList();
@@ -372,10 +373,12 @@ class _NewPostScreenState extends State<NewPostScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // ====== แถวหัวฟอร์ม (แก้ overflow อย่างเดียว) ======
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Flexible(
+                  // ชื่อผู้ใช้
+                  Expanded(
                     child: Text(
                       _username,
                       style: const TextStyle(
@@ -383,72 +386,103 @@ class _NewPostScreenState extends State<NewPostScreen> {
                         fontSize: 16,
                       ),
                       overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // ปี
-                  Flexible(
-                    flex: 1,
+
+                  // ปี (จำกัดความกว้างคงที่ป้องกันดันออก)
+                  SizedBox(
+                    width: 96,
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade400),
+                        border: Border.all(color: cs.outlineVariant),
                         borderRadius: BorderRadius.circular(12),
-                        color: const Color(0xFFFBFBFB),
+                        color: cs.surface,
                       ),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           isExpanded: true,
                           value: selectedYear,
                           items: years
-                              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                              .map((e) => DropdownMenuItem(
+                                    value: e,
+                                    child: Text(
+                                      e,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(color: cs.onSurface),
+                                    ),
+                                  ))
                               .toList(),
                           onChanged: (val) {
                             if (val == null) return;
                             setState(() {
                               selectedYear = val;
-                              selectedSubject = subjects.isNotEmpty ? subjects.first : null;
+                              selectedSubject =
+                                  subjects.isNotEmpty ? subjects.first : null;
                             });
                           },
+                          dropdownColor: cs.surface,
+                          style: TextStyle(color: cs.onSurface),
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  // วิชา
-                  Flexible(
+
+                  // วิชา (ให้กินพื้นที่ที่เหลือ)
+                  Expanded(
                     flex: 2,
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.shade400),
+                        border: Border.all(color: cs.outlineVariant),
                         borderRadius: BorderRadius.circular(12),
-                        color: const Color(0xFFFBFBFB),
+                        color: cs.surface,
                       ),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           isExpanded: true,
-                          value: subjects.contains(selectedSubject) ? selectedSubject : null,
-                          hint: const Text('รายวิชา'),
+                          value:
+                              subjects.contains(selectedSubject) ? selectedSubject : null,
+                          hint: Text('รายวิชา', style: TextStyle(color: cs.onSurfaceVariant)),
                           items: subjectItems,
                           selectedItemBuilder: (context) => subjects.map((e) {
-                            return Text(e, maxLines: 1, overflow: TextOverflow.ellipsis);
+                            return Text(
+                              e,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: cs.onSurface),
+                            );
                           }).toList(),
                           onChanged: (val) => setState(() => selectedSubject = val),
+                          dropdownColor: cs.surface,
+                          style: TextStyle(color: cs.onSurface),
                         ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  ElevatedButton(
-                    onPressed: _submitting ? null : _handlePost,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+
+                  // ปุ่มโพสต์ (ความสูงคงที่ให้ไม่ล้น)
+                  SizedBox(
+                    height: 40,
+                    child: ElevatedButton(
+                      onPressed: _submitting ? null : _handlePost,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: _submitting
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('โพสต์'),
                     ),
-                    child: _submitting
-                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Text('โพสต์'),
                   ),
                 ],
               ),
@@ -483,7 +517,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 const SizedBox(height: 8),
                 TextField(
                   controller: _priceCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   decoration: const InputDecoration(
                     labelText: 'ใส่ราคา (บาท)',
                     prefixText: '฿ ',
@@ -508,7 +543,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
                     tooltip: 'แนบไฟล์',
                   ),
                   const SizedBox(width: 8),
-                  Text('รูป ${_images.length}/$_maxImages', style: TextStyle(color: Colors.grey.shade700)),
+                  Text('รูป ${_images.length}/$_maxImages',
+                      style: TextStyle(color: Colors.grey.shade700)),
                 ],
               ),
               const SizedBox(height: 8),
@@ -518,7 +554,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 maxLines: 5,
                 decoration: InputDecoration(
                   hintText: 'รายละเอียดโพสต์',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  border:
+                      OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const SizedBox(height: 16),
@@ -528,7 +565,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
               if (_file != null && _fileName != null)
                 Container(
                   margin: const EdgeInsets.only(top: 8),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
                     border: Border.all(color: Colors.grey.shade300),
                     borderRadius: BorderRadius.circular(12),
@@ -539,7 +577,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
                       const Icon(Icons.insert_drive_file, size: 20),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(_fileName!, maxLines: 1, overflow: TextOverflow.ellipsis),
+                        child: Text(_fileName!,
+                            maxLines: 1, overflow: TextOverflow.ellipsis),
                       ),
                       const SizedBox(width: 8),
                       const Icon(Icons.check_circle, color: Colors.green),

@@ -1,5 +1,78 @@
-<% /* views/reports.ejs  (ใช้ร่วมกับ layouts/_layout.ejs) */ %>
+<% /* views/reports.ejs (ใช้ร่วมกับ layouts/_layout.ejs) */ %>
 <section style="max-width:1100px;margin:0 auto;padding:24px">
+  <style>
+    /* ===== Table layout fixed & column sizing ===== */
+    table.reports { width:100%; border-collapse:collapse; table-layout:fixed; }
+    table.reports th, table.reports td {
+      border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left; vertical-align:middle;
+    }
+    table.reports thead th { white-space:nowrap; }
+
+    /* col widths (ID, Post, Reporter, Reason, Details, Created, Action) */
+    .col-id      { width: 6%;  }
+    .col-post    { width: 8%;  }
+    .col-report  { width: 12%; }
+    .col-reason  { width: 14%; }
+    .col-details { width: 38%; }  /* หลักแสดงพรีวิวโพสต์ */
+    .col-created { width: 16%; }  /* กว้างขึ้น ไม่ชนปุ่ม */
+    .col-action  { width: 12%; }  /* คงที่ */
+
+    /* ===== Details cell ===== */
+    td.details-cell { overflow:hidden; position:relative; }
+    .rep-details { display:flex; gap:14px; align-items:flex-start; max-width:100%; }
+    .rep-cover   { width:96px; height:96px; object-fit:cover; border-radius:10px; border:1px solid #334155; flex:0 0 auto; cursor:zoom-in; }
+    .img-btn     { border:0; padding:0; background:transparent; line-height:0; }
+    .rep-meta    { display:flex; flex-direction:column; gap:4px; min-width:220px; max-width:100%; }
+    .rep-title   { font-weight:700; line-height:1.25; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .rep-text    { opacity:.9;  line-height:1.3;  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+    .rep-tags    { font-size:12px; opacity:.8; display:flex; gap:10px; flex-wrap:wrap; }
+    .badge       { background:#0b5; color:#fff; border-radius:999px; padding:2px 10px; font-size:11px; }
+    .pill        { margin-left:6px; padding:2px 8px; border:1px solid #334155; border-radius:8px; font-size:12px; }
+
+    /* ===== Created: ซ้าย, แยกบรรทัด ===== */
+    td.created-cell { text-align:left; }
+    .created-date { font-weight:600; }
+    .created-time { opacity:.85; }
+
+    /* ===== Action: แนวตั้ง + กึ่งกลางแนวตั้งของแถว ===== */
+    td.action-cell {
+      position:relative;
+      display:flex; align-items:center; justify-content:flex-end;
+      padding-top:6px;
+    }
+    .action-stack  { display:flex; flex-direction:column; align-items:flex-end; gap:10px; margin-top:4px; }
+    .btn { display:inline-block; padding:10px 14px; border-radius:10px; border:1px solid #334155;
+           text-align:center; font-size:14px; line-height:1; white-space:nowrap; cursor:pointer; }
+    .btn-approve { background:#0b5; color:#fff; }
+    .btn-reject  { background:#933; color:#fff; }
+    .action-stack .btn { min-width:150px; }
+
+    /* ===== Image Modal (lightbox) — FIX close button ===== */
+    .img-modal {
+      position:fixed; inset:0; background:rgba(0,0,0,.8);
+      display:none; align-items:center; justify-content:center; z-index:9999;
+    }
+    .img-modal.open { display:flex; }
+    .img-modal .wrap { max-width:92vw; max-height:92vh; position:relative; }
+    .img-modal img  { max-width:92vw; max-height:92vh; border-radius:12px; display:block; }
+    .img-modal .close{
+      position:absolute; top:8px; right:8px;
+      width:36px; height:36px; border-radius:999px;
+      border:1px solid #334155; background:rgba(17,24,39,.95);
+      color:#fff; cursor:pointer; z-index:2;
+      display:flex; align-items:center; justify-content:center;
+      font-size:18px; line-height:1;
+      pointer-events:auto;
+    }
+    .img-modal .close:focus { outline:2px solid #22d3ee; outline-offset:2px; }
+
+    @media (max-width: 640px){
+      .rep-cover{ width:80px; height:80px; }
+      .action-stack .btn { min-width:130px; }
+      .col-details { width:auto; }
+    }
+  </style>
+
   <h1 style="margin:0 0 16px 0">Reports (<%= status %>)</h1>
 
   <div style="margin:0 0 16px 0; display:flex; gap:12px;">
@@ -11,47 +84,144 @@
   <% if (!items || !items.length) { %>
     <p style="opacity:.7">No items</p>
   <% } else { %>
-    <table style="width:100%; border-collapse:collapse;">
-      <thead>
+
+  <table class="reports">
+    <colgroup>
+      <col class="col-id" />
+      <col class="col-post" />
+      <col class="col-report" />
+      <col class="col-reason" />
+      <col class="col-details" />
+      <col class="col-created" />
+      <col class="col-action" />
+    </colgroup>
+
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Post</th>
+        <th>Reporter</th>
+        <th>Reason</th>
+        <th>Details</th>
+        <th>Created</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+
+    <tbody>
+      <% items.forEach(it => { %>
         <tr>
-          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">ID</th>
-          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Post</th>
-          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Reporter</th>
-          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Reason</th>
-          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Details</th>
-          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Created</th>
-          <th style="border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left;">Action</th>
+          <td>#<%= it.id %></td>
+
+          <td>
+            P:<%= it.post_id %>
+            <% if (it.post_is_banned) { %><span class="pill">banned</span><% } %>
+          </td>
+
+          <td><%= it.reporter_name || '-' %></td>
+          <td><%= it.reason %></td>
+
+          <!-- Details -->
+          <td class="details-cell">
+            <% if (it.post_text || it.post_cover) { %>
+              <div class="rep-details">
+                <% if (it.post_cover) { %>
+                  <button type="button" class="img-btn" data-src="<%= it.post_cover %>" aria-label="Open image">
+                    <img class="rep-cover" src="<%= it.post_cover %>" alt="cover">
+                  </button>
+                <% } %>
+                <div class="rep-meta">
+                  <div class="rep-title">
+                    <%= it.post_subject || '-' %>
+                    <% if (it.post_year_label) { %><span style="opacity:.7"> · <%= it.post_year_label %></span><% } %>
+                  </div>
+                  <div class="rep-text"><%= it.post_text || '-' %></div>
+                  <div class="rep-tags">
+                    <% if (it.price_type === 'paid') { %>
+                      <span>paid — <%= (it.price_amount_satang || 0)/100 %> THB</span>
+                    <% } else if (it.price_type) { %>
+                      <span>free</span>
+                    <% } %>
+                    <% if (it.post_is_banned) { %><span class="badge">banned</span><% } %>
+                    <% if (it.details) { %><span title="Report note">report note: <%= it.details %></span><% } %>
+                  </div>
+                </div>
+              </div>
+            <% } else { %>
+              -
+            <% } %>
+          </td>
+
+          <!-- Created (ซ้าย, 2 บรรทัด) -->
+          <td class="created-cell">
+            <div class="created-date"><%= new Date(it.created_at).toLocaleDateString('th-TH') %></div>
+            <div class="created-time"><%= new Date(it.created_at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }) %></div>
+          </td>
+
+          <!-- Action -->
+          <td class="action-cell">
+            <% if (status === 'pending') { %>
+              <div class="action-stack">
+                <form action="/admin/reports/<%= it.id %>/approve" method="post">
+                  <button type="submit" class="btn btn-approve">Approve &amp; Ban</button>
+                </form>
+                <form action="/admin/reports/<%= it.id %>/reject" method="post">
+                  <button type="submit" class="btn btn-reject">Reject</button>
+                </form>
+              </div>
+            <% } else { %>
+              <span style="opacity:.75"><%= status %></span>
+            <% } %>
+          </td>
         </tr>
-      </thead>
-      <tbody>
-        <% items.forEach(it => { %>
-          <tr>
-            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;">#<%= it.id %></td>
-            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;">
-              P:<%= it.post_id %>
-              <% if (it.post_is_banned) { %>
-                <span style="margin-left:6px; padding:2px 8px; border:1px solid #334155; border-radius:8px; font-size:12px;">banned</span>
-              <% } %>
-            </td>
-            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;"><%= it.reporter_name || '-' %></td>
-            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;"><%= it.reason %></td>
-            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;"><%= it.details || '-' %></td>
-            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;"><%= new Date(it.created_at).toLocaleString('th-TH') %></td>
-            <td style="border-bottom:1px solid #1f2937; padding:10px 8px;">
-              <% if (status === 'pending') { %>
-                <form action="/admin/reports/<%= it.id %>/approve" method="post" style="display:inline">
-                  <button type="submit" style="padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#0b5; color:#fff; cursor:pointer;">Approve & Ban</button>
-                </form>
-                <form action="/admin/reports/<%= it.id %>/reject" method="post" style="display:inline; margin-left:6px;">
-                  <button type="submit" style="padding:6px 10px; border-radius:8px; border:1px solid #334155; background:#933; color:#fff; cursor:pointer;">Reject</button>
-                </form>
-              <% } else { %>
-                <span style="opacity:.75"><%= status %></span>
-              <% } %>
-            </td>
-          </tr>
-        <% }) %>
-      </tbody>
-    </table>
+      <% }) %>
+    </tbody>
+  </table>
+
   <% } %>
+
+  <!-- ===== Image Modal ===== -->
+  <div id="imgModal" class="img-modal" aria-hidden="true">
+    <div class="wrap">
+      <button class="close" type="button" aria-label="Close">×</button>
+      <img id="imgModalImg" alt="preview">
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      const modal = document.getElementById('imgModal');
+      const imgEl = document.getElementById('imgModalImg');
+      const closeBtn = modal.querySelector('.close');
+
+      const open = (src) => {
+        imgEl.src = src;
+        modal.classList.add('open');
+        modal.setAttribute('aria-hidden', 'false');
+      };
+      const close = () => {
+        modal.classList.remove('open');
+        modal.setAttribute('aria-hidden', 'true');
+        imgEl.src = '';
+      };
+
+      // เปิดจากปุ่มรูป
+      document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.img-btn');
+        if (btn && btn.dataset.src) {
+          e.preventDefault();
+          open(btn.dataset.src);
+        }
+      });
+
+      // ปิดเมื่อคลิกพื้นหลัง/กด X/กด ESC
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) close();
+      });
+      closeBtn.addEventListener('click', close);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') close();
+      });
+    })();
+  </script>
 </section>

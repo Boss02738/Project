@@ -935,35 +935,24 @@ Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
 }
 
 // ===== Report Post API =====
-Future<void> reportPost({
+Future<bool> reportPost({
   required int postId,
-  required int userId,
+  required int reporterId,
   required String reason,
   String? details,
 }) async {
-  // ถ้าในคลาสมีตัวแปร host อยู่แล้ว เช่น: static String host = 'http://...';
-  // ให้เรียกผ่าน ApiService.host เพื่อกันชื่อซ้ำ/scope ผิด
-  final uri = Uri.parse('${ApiService.host}/api/reports');
-
-  final payload = <String, dynamic>{
-    'post_id': postId,
-    'reporter_id': userId,
-    'reason': reason,
-    if ((details ?? '').trim().isNotEmpty) 'details': (details ?? '').trim(),
-  };
-
-  final r = await http
-      .post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode(payload),
-      )
-      .timeout(const Duration(seconds: 20)); // แทน _reqTimeout
-
-  // ถ้าไฟล์นี้ไม่มี _ensureOk ให้ใช้เช็คสถานะแบบนี้
-  if (r.statusCode < 200 || r.statusCode >= 300) {
-    throw Exception('HTTP ${r.statusCode}: ${r.body}');
-  }
+  final url = Uri.parse('host/api/reports');
+  final res = await http.post(
+    url,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({
+      'post_id': postId,
+      'reporter_id': reporterId,
+      'reason': reason,
+      'details': details,
+    }),
+  );
+  return res.statusCode == 200;
 }
 
 // Error อ่านง่ายขึ้นเวลามี status >= 400

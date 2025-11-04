@@ -15,6 +15,14 @@ import 'package:scribble/scribble.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
+// ====== [ADDED] Save & Open files ======
+import 'package:file_saver/file_saver.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:pdf/pdf.dart';
+import 'package:open_file/open_file.dart';
+// ======================================
+
 /* ------------------ CONFIG ------------------ */
 
 String get baseServerUrl =>
@@ -633,7 +641,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     }
   }
 
-  /* ---------------- SAVE DOC ---------------- */
+  /* ---------------- SAVE DOC (server) ---------------- */
 
   Future<void> _saveDocument() async {
     _pages[_pageIndex] = _notifier.currentSketch;
@@ -673,7 +681,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       images: _imagePages.isNotEmpty ? _imagePages.first : null,
     );
 
-    // If cover generation failed, notify briefly (helps debugging)
     if (coverBase64 == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -682,7 +689,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       }
     }
 
-    // To be tolerant with server naming, send both camelCase and snake_case keys
     final payload = {
       if (widget.documentId != null) 'id': widget.documentId,
       'title': titleCtrl.text.trim().isEmpty ? 'Untitled' : titleCtrl.text.trim(),
@@ -691,7 +697,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       'pages': pages,
       'coverPng': coverBase64,
       'cover_png': coverBase64,
-      // owner_id is expected in snake_case on the server
       if ((await SharedPreferences.getInstance()).getInt('user_id') != null)
         'owner_id': (await SharedPreferences.getInstance()).getInt('user_id'),
     };
@@ -716,6 +721,106 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('บันทึกไม่สำเร็จ')));
     }
+  }
+
+  /* ---------------- Local save/export helpers [ADDED] ---------------- */
+
+  Future<void> _ensureStoragePermission() async {
+    try {
+      await Permission.storage.request();
+    } catch (_) {}
+  }
+
+  Future<void> _announceAndOpen(String label, String? savedPath) async {
+    if (!mounted) return;
+    final text = (savedPath != null && savedPath.isNotEmpty)
+        ? 'บันทึกแล้ว: $label\n$savedPath'
+        : 'บันทึกแล้ว: $label';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    if (savedPath != null && savedPath.isNotEmpty) {
+      await OpenFile.open(savedPath);
+    }
+  }
+
+  Future<void> _saveCurrentPageAsPNG() async {
+    await _ensureStoragePermission();
+    final b64 = await _sketchToPngBase64(
+      _notifier.currentSketch,
+      width: 1400,
+      height: 2000,
+      texts: _textsPages[_pageIndex],
+      images: _imagePages[_pageIndex],
+    );
+    if (b64 == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('แปลงภาพไม่สำเร็จ')),
+        );
+      }
+      return;
+    }
+    final bytes = base64Decode(b64);
+    final fileName = 'note_page_${_pageIndex + 1}.png';
+
+    final savedPath = await FileSaver.instance.saveFile(
+      name: fileName,
+      bytes: bytes,
+      ext: 'png',
+      mimeType: MimeType.png,
+    );
+
+    await _announceAndOpen(fileName, savedPath);
+  }
+
+  Future<void> _exportAllPagesAsPDF() async {
+    await _ensureStoragePermission();
+
+    final List<Uint8List> pagePngs = [];
+    for (int i = 0; i < _pages.length; i++) {
+      final b64 = await _sketchToPngBase64(
+        _pages[i],
+        width: 1400,
+        height: 2000,
+        texts: _textsPages[i],
+        images: _imagePages[i],
+      );
+      if (b64 != null) pagePngs.add(base64Decode(b64));
+    }
+    if (pagePngs.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ไม่มีหน้าสำหรับส่งออก')),
+        );
+      }
+      return;
+    }
+
+    final doc = pw.Document();
+    for (final png in pagePngs) {
+      final img = pw.MemoryImage(png);
+      doc.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          build: (_) => pw.Center(
+            child: pw.FittedBox(
+              fit: pw.BoxFit.contain,
+              child: pw.Image(img),
+            ),
+          ),
+        ),
+      );
+    }
+    final pdfBytes = await doc.save();
+    final fileName = 'notes_${DateTime.now().millisecondsSinceEpoch}.pdf';
+
+    final savedPath = await FileSaver.instance.saveFile(
+      name: fileName,
+      bytes: pdfBytes,
+      ext: 'pdf',
+      mimeType: MimeType.pdf,
+    );
+
+    await _announceAndOpen(fileName, savedPath);
   }
 
   /* ---------------- UI ---------------- */
@@ -764,10 +869,24 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             icon: const Icon(Icons.text_fields),
           ),
           IconButton(
-            tooltip: 'Save as Document',
+            tooltip: 'Save as Document (server)',
             onPressed: _saveDocument,
             icon: const Icon(Icons.save),
           ),
+          // ====== [ADDED] Export/Save local ======
+          PopupMenuButton<String>(
+            tooltip: 'Export',
+            icon: const Icon(Icons.download),
+            onSelected: (v) {
+              if (v == 'png') _saveCurrentPageAsPNG();
+              if (v == 'pdf') _exportAllPagesAsPDF();
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem<String>(value: 'png', child: Text('Save this page as PNG')),
+              PopupMenuItem<String>(value: 'pdf', child: Text('Export ALL pages as PDF')),
+            ],
+          ),
+          // =======================================
           if (!offline) ...[
             IconButton(
               tooltip: 'Sync snapshot',
@@ -1005,7 +1124,28 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               IconButton(
                 tooltip: 'Delete this page',
                 onPressed: (_pages.length > 1)
-                    ? () {
+                    ? () async {
+                        // ====== [ADDED] Confirm before delete ======
+                        final ok = await showDialog<bool>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('ลบหน้ากระดาษนี้?'),
+                            content: Text('ยืนยันจะลบหน้า ${_pageIndex + 1} ใช่ไหม'),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('ยกเลิก'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text('ลบ'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (ok != true) return;
+                        // ==========================================
+
                         final deletedIndex = _pageIndex;
                         _pendingSelfDeleteIndex = deletedIndex;
                         setState(() {
@@ -1798,7 +1938,7 @@ class _RainbowPanel2DState extends State<_RainbowPanel2D> {
               Container(
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
-                gradient: LinearGradient(
+                  gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [Colors.transparent, Colors.black.withOpacity(0.95)],

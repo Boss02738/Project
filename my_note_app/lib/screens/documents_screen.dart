@@ -10,19 +10,10 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 import 'drawing_screen.dart'; // NoteScribblePage, TextBoxData, ImageLayerData
 
-// ⬇️ เพิ่ม bottom nav + หน้าที่จะโยงไป (ให้ตรงกับโปรเจกต์คุณ)
-import 'package:my_note_app/widgets/app_bottom_nav_bar.dart';
-import 'package:my_note_app/screens/home_screen.dart';
-import 'package:my_note_app/screens/search_screen.dart';
-import 'package:my_note_app/screens/NewPost.dart' show NewPostScreen;
-
-// -----------------------------------------------
-// Realtime server (Android Emulator ใช้ 10.0.2.2)
-// -----------------------------------------------
+// ===== Server base =====
 String get baseServerUrl =>
     Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
 
-// ล้าง prefix data:image/...;base64, ถ้ามี
 String _cleanB64(String? s) {
   if (s == null) return '';
   return s.replaceFirst(RegExp(r'^data:image/[^;]+;base64,'), '');
@@ -45,7 +36,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     _loadDocs();
   }
 
-
+  // ---------- Join / Create ----------
   Future<void> _joinRoomDialog() async {
     final roomIdCtrl = TextEditingController();
     final pwdCtrl = TextEditingController();
@@ -63,8 +54,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             ),
             TextField(
               controller: pwdCtrl,
-              decoration:
-                  const InputDecoration(labelText: 'Password (if required)'),
+              decoration: const InputDecoration(labelText: 'Password (if required)'),
               obscureText: true,
             ),
           ],
@@ -100,7 +90,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           if (pwdCtrl.text.isNotEmpty) 'password': pwdCtrl.text
         });
       });
-
       socket.on('join_ok', (_) => joinResult = true);
       socket.on('join_error', (data) {
         joinResult = false;
@@ -142,7 +131,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       }
     } catch (_) {
       if (!mounted) return;
-      Navigator.pop(context); // close loading
+      Navigator.pop(context);
       socket.dispose();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Could not connect to server')),
@@ -160,14 +149,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(labelText: 'Room name (optional)'),
-            ),
-            TextField(
-              controller: pwdCtrl,
-              decoration: const InputDecoration(labelText: 'Password (optional)'),
-            ),
+            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Room name (optional)')),
+            TextField(controller: pwdCtrl, decoration: const InputDecoration(labelText: 'Password (optional)')),
           ],
         ),
         actions: [
@@ -193,8 +176,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         final roomId = j['roomId'] as String? ?? j['id'] as String?;
         if (roomId == null) {
           if (!mounted) return;
-          ScaffoldMessenger.of(context)
-              .showSnackBar(const SnackBar(content: Text('สร้างห้องไม่สำเร็จ (no id)')));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('สร้างห้องไม่สำเร็จ (no id)')),
+          );
           return;
         }
 
@@ -223,16 +207,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         );
       } else {
         if (!mounted) return;
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('สร้างห้องไม่สำเร็จ (${r.statusCode})')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('สร้างห้องไม่สำเร็จ (${r.statusCode})')),
+        );
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('สร้างห้องไม่สำเร็จ')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('สร้างห้องไม่สำเร็จ')),
+      );
     }
   }
 
+  // ---------- Documents ----------
   Future<void> _loadDocs() async {
     setState(() => _loading = true);
     try {
@@ -252,8 +239,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('โหลดรายการเอกสารไม่สำเร็จ')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('โหลดรายการเอกสารไม่สำเร็จ')),
+      );
     }
   }
 
@@ -285,19 +273,19 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final boardId = (rawBoard is String) ? rawBoard.trim() : null;
       final title = (data['title'] as String?) ?? 'Untitled';
 
-      // 1) raw pages
+      // raw pages
       final rawPages = (data['pages'] as List)
           .map((p) => Map<String, dynamic>.from((p as Map)['data'] as Map))
           .toList();
 
-      // 2) lines -> Sketch
+      // lines -> Sketch
       final pagesSketch = rawPages.map<sc.Sketch>((m) {
         final mm = Map<String, dynamic>.from(m);
         final lines = (mm['lines'] is List) ? (mm['lines'] as List) : const [];
         return sc.Sketch.fromJson({'lines': lines});
       }).toList();
 
-      // 3) texts
+      // texts
       final pagesTexts = rawPages.map<List<TextBoxData>>((m) {
         final mm = Map<String, dynamic>.from(m);
         final arr = (mm['texts'] as List?) ?? const [];
@@ -306,7 +294,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             .toList();
       }).toList();
 
-      // 4) images (ล้าง prefix base64)
+      // images (clean base64 prefix)
       final pagesImages = rawPages.map<List<ImageLayerData>>((m) {
         final mm = Map<String, dynamic>.from(m);
         final arr = (mm['images'] as List?) ?? const [];
@@ -318,7 +306,6 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         }).toList();
       }).toList();
 
-      // 5) ถ้ามี boardId จริง -> พยายาม join live room
       final hasRealBoard =
           boardId != null && boardId.isNotEmpty && boardId.toLowerCase() != 'offline';
 
@@ -337,9 +324,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
         void closeSpinnerSafe() {
           if (!mounted) return;
-          try {
-            Navigator.of(context, rootNavigator: true).pop();
-          } catch (_) {}
+          try { Navigator.of(context, rootNavigator: true).pop(); } catch (_) {}
         }
 
         void openLive() {
@@ -387,12 +372,16 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
         socket.on('join_ok', (_) => openLive());
 
+        // ✅ คืนบล็อค "ถามรหัสแล้วลองใหม่" เมื่อ join_error
         socket.on('join_error', (data) async {
           final msg = (data is Map && data['message'] is String)
               ? data['message'] as String
               : 'เข้าห้องไม่สำเร็จ';
 
-          if (msg.toLowerCase().contains('password')) {
+          final needsPassword = msg.toLowerCase().contains('password') ||
+              msg.toLowerCase().contains('require');
+
+          if (needsPassword) {
             if (!mounted) return;
             final pwdCtrl = TextEditingController();
             final retry = await showDialog<bool>(
@@ -402,7 +391,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('ห้องนี้ต้องการรหัสผ่านเพื่อเข้าร่วม'),
+                    Text(msg),
                     const SizedBox(height: 8),
                     TextField(
                       controller: pwdCtrl,
@@ -421,10 +410,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
             if (retry == true && pwdCtrl.text.trim().isNotEmpty) {
               socket.emit('join', {'boardId': boardId, 'password': pwdCtrl.text.trim()});
-              return; // รอ join_ok / join_error
+              return; // รอ join_ok/join_error รอบถัดไป
             }
-            openOffline(msg);
-            return;
           }
 
           openOffline(msg);
@@ -436,7 +423,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return;
       }
 
-      // 6) ไม่มี boardId -> เปิดออฟไลน์
+      // ไม่มี boardId ใช้ live -> ออฟไลน์
       if (!mounted) return;
       Navigator.push(
         context,
@@ -454,65 +441,76 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       );
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('เปิดเอกสารไม่สำเร็จ')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('เปิดเอกสารไม่สำเร็จ')),
+      );
     }
   }
 
+  // ---------- UI (ไม่มี Scaffold/AppBar เพื่อไม่ให้ซ้อน) ----------
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      // ✅ เหลือ AppBar ชั้นเดียว + ย้ายไอคอนทั้งหมดขึ้นมาที่นี่
-      appBar: AppBar(
-        title: const Text('Document'),
-        actions: [
-          IconButton(
-            tooltip: 'Join Room',
-            onPressed: _joinRoomDialog,
-            icon: const Icon(Icons.login_outlined),
-          ),
-          IconButton(
-            tooltip: 'Create Room',
-            onPressed: _createRoomDialog,
-            icon: const Icon(Icons.add_box_outlined),
-          ),
-          IconButton(
-            tooltip: 'Refresh',
-            onPressed: _loadDocs,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
-      ),
+    if (_loading) return const Center(child: CircularProgressIndicator());
 
-      // ✅ ไม่มีหัวข้อซ้ำใน body แล้ว
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _docs.isEmpty
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+          child: Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: _joinRoomDialog,
+                icon: const Icon(Icons.input),
+                label: const Text('เข้าห้อง'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: _createRoomDialog,
+                icon: const Icon(Icons.meeting_room),
+                label: const Text('สร้างห้อง'),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: 'รีเฟรช',
+                onPressed: _loadDocs,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _docs.isEmpty
               ? const Center(child: Text('ยังไม่มีเอกสาร'))
-              : Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: GridView.builder(
-                    itemCount: _docs.length,
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      childAspectRatio: 0.9,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
+              : RefreshIndicator(
+                  onRefresh: _loadDocs,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: GridView.builder(
+                      itemCount: _docs.length,
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        childAspectRatio: 0.9,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                      ),
+                      itemBuilder: (_, i) {
+                        final d = _docs[i];
+                        return _DocCard(
+                          item: d,
+                          onTap: () => _openDocument(d),
+                          onDelete: () => _delete(d),
+                        );
+                      },
                     ),
-                    itemBuilder: (_, i) {
-                      final d = _docs[i];
-                      return _DocCard(
-                        item: d,
-                        onTap: () => _openDocument(d),
-                        onDelete: () => _delete(d),
-                      );
-                    },
                   ),
                 ),
+        ),
+      ],
     );
   }
 }
 
+// ===== Models & Cards =====
 class _DocItem {
   final String id;
   final String? title;
@@ -520,31 +518,19 @@ class _DocItem {
   final String? coverPng;
   final DateTime? updatedAt;
 
-  _DocItem({
-    required this.id,
-    this.title,
-    this.boardId,
-    this.coverPng,
-    this.updatedAt,
-  });
+  _DocItem({required this.id, this.title, this.boardId, this.coverPng, this.updatedAt});
 
   factory _DocItem.fromJson(Map<String, dynamic> j) => _DocItem(
         id: j['id'] as String,
         title: j['title'] as String?,
         boardId: (j['board_id'] ?? j['boardId']) as String?,
         coverPng: (j['cover_png'] ?? j['coverPng']) as String?,
-        updatedAt: j['updated_at'] != null
-            ? DateTime.tryParse(j['updated_at'].toString())
-            : null,
+        updatedAt: j['updated_at'] != null ? DateTime.tryParse(j['updated_at'].toString()) : null,
       );
 }
 
 class _DocCard extends StatelessWidget {
-  const _DocCard({
-    required this.item,
-    required this.onTap,
-    required this.onDelete,
-  });
+  const _DocCard({required this.item, required this.onTap, required this.onDelete});
 
   final _DocItem item;
   final VoidCallback onTap;
@@ -596,9 +582,7 @@ class _DocCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          item.updatedAt != null
-                              ? 'อัปเดตล่าสุด: ${item.updatedAt!.toLocal()}'
-                              : '—',
+                          item.updatedAt != null ? 'อัปเดตล่าสุด: ${item.updatedAt!.toLocal()}' : '—',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall,
