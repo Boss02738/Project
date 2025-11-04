@@ -477,6 +477,8 @@ class _PostCardState extends State<PostCard> {
                 ),
                 const SizedBox(height: 8),
 
+              // แสดงปุ่มรายงานเฉพาะเมื่อ "ไม่ใช่" เจ้าของโพสต์
+              if (!isOwner)
                 _ActionItem(
                   icon: Icons.flag_outlined,
                   label: 'รายงานโพสต์',

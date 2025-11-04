@@ -35,14 +35,24 @@ exports.createReport = async (req, res) => {
       return res.status(400).json({ message: 'post_id, reporter_id, reason are required' });
     }
 
-    // ถ้าโพสต์ถูกแบนแล้ว ไม่ต้องรับรายงานใหม่
-    const chk = await pool.query('SELECT is_banned FROM posts WHERE id=$1', [post_id]);
+    // เอา owner มาเช็กด้วย
+    const chk = await pool.query(
+      'SELECT user_id AS owner_id, is_banned FROM posts WHERE id=$1',
+      [post_id]
+    );
     if (!chk.rowCount) return res.status(404).json({ message: 'Post not found' });
-    if (chk.rows[0].is_banned === true) {
+
+    const { owner_id, is_banned } = chk.rows[0];
+
+    // กันรายงานโพสต์ตัวเอง
+    if (Number(owner_id) === reporter_id) {
+      return res.status(400).json({ message: 'You cannot report your own post' });
+    }
+
+    if (is_banned === true) {
       return res.status(200).json({ message: 'Post already banned; report ignored' });
     }
 
-    // พยายาม UPSERT โดยยึดคู่ (reporter_id, post_id)
     const upsertSql = `
       INSERT INTO post_reports (post_id, reporter_id, reason, details)
       VALUES ($1,$2,$3, NULLIF($4,''))
@@ -58,11 +68,7 @@ exports.createReport = async (req, res) => {
     try {
       ({ rows } = await pool.query(upsertSql, [post_id, reporter_id, reason, details]));
     } catch (e) {
-      // เผื่อยังไม่มี unique index -> ลบรายการเก่าแล้วค่อยใส่ใหม่ (fallback)
-      await pool.query(
-        'DELETE FROM post_reports WHERE reporter_id=$1 AND post_id=$2',
-        [reporter_id, post_id]
-      );
+      await pool.query('DELETE FROM post_reports WHERE reporter_id=$1 AND post_id=$2', [reporter_id, post_id]);
       const ins = await pool.query(
         `INSERT INTO post_reports (post_id, reporter_id, reason, details)
          VALUES ($1,$2,$3,NULLIF($4,'')) RETURNING *;`,
