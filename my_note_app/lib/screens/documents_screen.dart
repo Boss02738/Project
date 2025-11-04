@@ -10,8 +10,14 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 import 'drawing_screen.dart'; // NoteScribblePage, TextBoxData, ImageLayerData
 
+// ⬇️ เพิ่ม bottom nav + หน้าที่จะโยงไป (ให้ตรงกับโปรเจกต์คุณ)
+import 'package:my_note_app/widgets/app_bottom_nav_bar.dart';
+import 'package:my_note_app/screens/home_screen.dart';
+import 'package:my_note_app/screens/search_screen.dart';
+import 'package:my_note_app/screens/NewPost.dart' show NewPostScreen;
+
 // -----------------------------------------------
-// ตั้งค่า server realtime (3000)
+// Realtime server (Android Emulator ใช้ 10.0.2.2)
 // -----------------------------------------------
 String get baseServerUrl =>
     Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
@@ -39,6 +45,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     _loadDocs();
   }
 
+
   Future<void> _joinRoomDialog() async {
     final roomIdCtrl = TextEditingController();
     final pwdCtrl = TextEditingController();
@@ -63,12 +70,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           ],
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Join')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Join')),
         ],
       ),
     );
@@ -158,22 +161,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-                controller: nameCtrl,
-                decoration:
-                    const InputDecoration(labelText: 'Room name (optional)')),
+              controller: nameCtrl,
+              decoration: const InputDecoration(labelText: 'Room name (optional)'),
+            ),
             TextField(
-                controller: pwdCtrl,
-                decoration:
-                    const InputDecoration(labelText: 'Password (optional)')),
+              controller: pwdCtrl,
+              decoration: const InputDecoration(labelText: 'Password (optional)'),
+            ),
           ],
         ),
         actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel')),
-          FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('Create')),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Create')),
         ],
       ),
     );
@@ -184,16 +183,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         if (nameCtrl.text.trim().isNotEmpty) 'name': nameCtrl.text.trim(),
         if (pwdCtrl.text.trim().isNotEmpty) 'password': pwdCtrl.text.trim(),
       };
-      final r = await http.post(Uri.parse('$baseServerUrl/rooms'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode(body));
+      final r = await http.post(
+        Uri.parse('$baseServerUrl/rooms'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      );
       if (r.statusCode == 200) {
         final j = jsonDecode(r.body) as Map<String, dynamic>;
         final roomId = j['roomId'] as String? ?? j['id'] as String?;
         if (roomId == null) {
           if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('สร้างห้องไม่สำเร็จ (no id)')));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('สร้างห้องไม่สำเร็จ (no id)')));
           return;
         }
 
@@ -202,8 +203,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
         );
         socket.connect();
-        socket.onConnect((_) => socket.emit('join',
-            {'boardId': roomId, 'password': pwdCtrl.text.trim()}));
+        socket.onConnect((_) =>
+            socket.emit('join', {'boardId': roomId, 'password': pwdCtrl.text.trim()}));
 
         if (!mounted) return;
         Navigator.push(
@@ -213,9 +214,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               boardId: roomId,
               socket: socket,
               documentId: null,
-              initialTitle: nameCtrl.text.trim().isEmpty
-                  ? 'Untitled'
-                  : nameCtrl.text.trim(),
+              initialTitle: nameCtrl.text.trim().isEmpty ? 'Untitled' : nameCtrl.text.trim(),
               initialPages: const <sc.Sketch>[],
               initialTextsPerPage: const <List<TextBoxData>>[],
               initialImagesPerPage: const <List<ImageLayerData>>[],
@@ -224,13 +223,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         );
       } else {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('สร้างห้องไม่สำเร็จ (${r.statusCode})')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('สร้างห้องไม่สำเร็จ (${r.statusCode})')));
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('สร้างห้องไม่สำเร็จ')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('สร้างห้องไม่สำเร็จ')));
     }
   }
 
@@ -240,25 +239,21 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final prefs = await SharedPreferences.getInstance();
       final uid = prefs.getInt('user_id');
       final uri = (uid != null)
-          ? Uri.parse('$baseServerUrl/documents')
-              .replace(queryParameters: {'user_id': '$uid'})
+          ? Uri.parse('$baseServerUrl/documents').replace(queryParameters: {'user_id': '$uid'})
           : Uri.parse('$baseServerUrl/documents');
 
       final r = await http.get(uri);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final list = (jsonDecode(r.body) as List).cast<Map>();
       setState(() {
-        _docs = list
-            .map((e) => _DocItem.fromJson(Map<String, dynamic>.from(e)))
-            .toList();
+        _docs = list.map((e) => _DocItem.fromJson(Map<String, dynamic>.from(e))).toList();
         _loading = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('โหลดรายการเอกสารไม่สำเร็จ')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('โหลดรายการเอกสารไม่สำเร็จ')));
     }
   }
 
@@ -267,8 +262,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final prefs = await SharedPreferences.getInstance();
       final uid = prefs.getInt('user_id');
       final uri = (uid != null)
-          ? Uri.parse('$baseServerUrl/documents/${d.id}')
-              .replace(queryParameters: {'user_id': '$uid'})
+          ? Uri.parse('$baseServerUrl/documents/${d.id}').replace(queryParameters: {'user_id': '$uid'})
           : Uri.parse('$baseServerUrl/documents/${d.id}');
       final r = await http.delete(uri);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
@@ -287,8 +281,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final data = jsonDecode(r.body) as Map<String, dynamic>;
 
-  final rawBoard = data['boardId'] ?? data['board_id'];
-  final boardId = (rawBoard is String) ? rawBoard.trim() : null;
+      final rawBoard = data['boardId'] ?? data['board_id'];
+      final boardId = (rawBoard is String) ? rawBoard.trim() : null;
       final title = (data['title'] as String?) ?? 'Untitled';
 
       // 1) raw pages
@@ -312,29 +306,26 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             .toList();
       }).toList();
 
-      // 4) images (สำคัญ: map + ล้าง prefix base64)
+      // 4) images (ล้าง prefix base64)
       final pagesImages = rawPages.map<List<ImageLayerData>>((m) {
         final mm = Map<String, dynamic>.from(m);
         final arr = (mm['images'] as List?) ?? const [];
         return arr.map((e) {
           final map = Map<String, dynamic>.from(e as Map);
           final b64 = map['bytesB64'] as String?;
-          if (b64 != null) {
-            map['bytesB64'] = _cleanB64(b64);
-          }
+          if (b64 != null) map['bytesB64'] = _cleanB64(b64);
           return ImageLayerData.fromJson(map);
         }).toList();
       }).toList();
 
-  // 5) ถ้ามี boardId (และไม่ใช่ sentinel 'offline') -> พยายาม join live room ก่อน
-  final hasRealBoard = boardId != null && boardId.isNotEmpty && boardId.toLowerCase() != 'offline';
-  if (hasRealBoard) {
+      // 5) ถ้ามี boardId จริง -> พยายาม join live room
+      final hasRealBoard =
+          boardId != null && boardId.isNotEmpty && boardId.toLowerCase() != 'offline';
+
+      if (hasRealBoard) {
         final socket = IO.io(
           baseServerUrl,
-          IO.OptionBuilder()
-              .setTransports(['websocket'])
-              .disableAutoConnect()
-              .build(),
+          IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
         );
 
         if (!mounted) return;
@@ -358,13 +349,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             context,
             MaterialPageRoute(
               builder: (_) => NoteScribblePage(
-                boardId: boardId,
+                boardId: boardId!,
                 socket: socket,
                 documentId: d.id,
                 initialTitle: title,
                 initialPages: pagesSketch,
                 initialTextsPerPage: pagesTexts,
-                initialImagesPerPage: pagesImages, // ✅
+                initialImagesPerPage: pagesImages,
               ),
             ),
           );
@@ -377,13 +368,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             context,
             MaterialPageRoute(
               builder: (_) => NoteScribblePage(
-                boardId: boardId,
+                boardId: boardId ?? 'offline',
                 socket: null,
                 documentId: d.id,
                 initialTitle: title,
                 initialPages: pagesSketch,
                 initialTextsPerPage: pagesTexts,
-                initialImagesPerPage: pagesImages, // ✅
+                initialImagesPerPage: pagesImages,
               ),
             ),
           );
@@ -415,28 +406,22 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: pwdCtrl,
-                      decoration:
-                          const InputDecoration(labelText: 'Password'),
+                      decoration: const InputDecoration(labelText: 'Password'),
                       obscureText: true,
                       autofocus: true,
                     ),
                   ],
                 ),
                 actions: [
-                  TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('ยกเลิก')),
-                  FilledButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('ส่ง')),
+                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ยกเลิก')),
+                  FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ส่ง')),
                 ],
               ),
             );
 
             if (retry == true && pwdCtrl.text.trim().isNotEmpty) {
-              socket.emit(
-                  'join', {'boardId': boardId, 'password': pwdCtrl.text.trim()});
-              return; // wait for join_ok / join_error
+              socket.emit('join', {'boardId': boardId, 'password': pwdCtrl.text.trim()});
+              return; // รอ join_ok / join_error
             }
             openOffline(msg);
             return;
@@ -451,7 +436,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         return;
       }
 
-      // 6) ไม่มี boardId ที่ใช้ join ได้ -> เปิดออฟไลน์
+      // 6) ไม่มี boardId -> เปิดออฟไลน์
       if (!mounted) return;
       Navigator.push(
         context,
@@ -463,37 +448,43 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             initialTitle: title,
             initialPages: pagesSketch,
             initialTextsPerPage: pagesTexts,
-            initialImagesPerPage: pagesImages, // ✅
+            initialImagesPerPage: pagesImages,
           ),
         ),
       );
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('เปิดเอกสารไม่สำเร็จ')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('เปิดเอกสารไม่สำเร็จ')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // ✅ เหลือ AppBar ชั้นเดียว + ย้ายไอคอนทั้งหมดขึ้นมาที่นี่
       appBar: AppBar(
-        title: const Text('Documents'),
+        title: const Text('Document'),
         actions: [
           IconButton(
             tooltip: 'Join Room',
             onPressed: _joinRoomDialog,
-            icon: const Icon(Icons.input),
+            icon: const Icon(Icons.login_outlined),
           ),
           IconButton(
             tooltip: 'Create Room',
             onPressed: _createRoomDialog,
-            icon: const Icon(Icons.meeting_room),
+            icon: const Icon(Icons.add_box_outlined),
           ),
-          IconButton(onPressed: _loadDocs, icon: const Icon(Icons.refresh)),
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: _loadDocs,
+            icon: const Icon(Icons.refresh),
+          ),
         ],
       ),
+
+      // ✅ ไม่มีหัวข้อซ้ำใน body แล้ว
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _docs.isEmpty
@@ -502,8 +493,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   padding: const EdgeInsets.all(12),
                   child: GridView.builder(
                     itemCount: _docs.length,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       childAspectRatio: 0.9,
                       crossAxisSpacing: 12,
@@ -541,8 +531,8 @@ class _DocItem {
   factory _DocItem.fromJson(Map<String, dynamic> j) => _DocItem(
         id: j['id'] as String,
         title: j['title'] as String?,
-    boardId: (j['board_id'] ?? j['boardId']) as String?,
-    coverPng: (j['cover_png'] ?? j['coverPng']) as String?,
+        boardId: (j['board_id'] ?? j['boardId']) as String?,
+        coverPng: (j['cover_png'] ?? j['coverPng']) as String?,
         updatedAt: j['updated_at'] != null
             ? DateTime.tryParse(j['updated_at'].toString())
             : null,
@@ -586,8 +576,7 @@ class _DocCard extends StatelessWidget {
             AspectRatio(
               aspectRatio: 4 / 3,
               child: ClipRRect(
-                borderRadius:
-                    const BorderRadius.vertical(top: Radius.circular(14)),
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
                 child: cover,
               ),
             ),
@@ -603,8 +592,7 @@ class _DocCard extends StatelessWidget {
                           item.title ?? 'Untitled',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600, fontSize: 14),
+                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
                         ),
                         const SizedBox(height: 4),
                         Text(

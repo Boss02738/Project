@@ -1,16 +1,12 @@
+// lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/widgets/post_card.dart';
 import 'package:my_note_app/screens/settings_screen.dart';
 import 'package:my_note_app/screens/edit_profile_screen.dart';
 import 'package:my_note_app/widgets/friend_action_button.dart';
-
-// ⬇️ หน้าต่าง ๆ
-import 'package:my_note_app/screens/home_screen.dart';
-import 'package:my_note_app/screens/search_screen.dart';
-import 'package:my_note_app/screens/documents_screen.dart';
-import 'package:my_note_app/screens/NewPost.dart';
 import 'package:my_note_app/screens/friends_list_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -62,37 +58,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (_profileUserId == null) return;
     setState(() => _loading = true);
 
-    Map<String, dynamic>? p;
-    List<dynamic> posts = [];
-
     try {
-      p = await ApiService.getUserProfile(_profileUserId!);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _loading = false);
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('โหลดโปรไฟล์ไม่สำเร็จ: $e')));
-      return;
-    }
-
-    try {
-      posts = await ApiService.getPostsByUser(
+      final p = await ApiService.getUserProfile(_profileUserId!);
+      final posts = await ApiService.getPostsByUser(
         profileUserId: _profileUserId!,
         viewerId: _viewerId ?? 0,
       );
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('โหลดโพสต์ไม่สำเร็จ')));
-      }
+      if (!mounted) return;
+      setState(() {
+        _profile = p;
+        _posts = posts;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('โหลดข้อมูลไม่สำเร็จ: $e')),
+      );
     }
-
-    if (!mounted) return;
-    setState(() {
-      _profile = p;
-      _posts = posts;
-      _loading = false;
-    });
   }
 
   Future<void> _refresh() async => _loadAll();
@@ -101,7 +85,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isMe ? 'Profile' : (_profile?['username'] ?? 'Profile')),
+        title:
+            Text(_isMe ? 'Profile' : (_profile?['username'] ?? 'Profile')),
         automaticallyImplyLeading: true,
         actions: [
           if (_isMe)
@@ -122,46 +107,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onRefresh: _refresh,
               child: CustomScrollView(
                 slivers: [
-                  SliverToBoxAdapter(child: _buildHeader()),
+                  SliverToBoxAdapter(child: _buildHeader(context)),
                   if (_posts.isEmpty)
                     const SliverFillRemaining(
                       hasScrollBody: false,
                       child: Center(child: Text('ยังไม่มีโพสต์')),
                     )
                   else
-                    SliverList.separated(
-                      itemCount: _posts.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) => PostCard(post: _posts[i]),
+                    // Flutter ไม่มี SliverList.separated -> แทรก Divider เอง
+                    SliverList(
+                      delegate: SliverChildBuilderDelegate(
+                        (context, index) {
+                          if (index.isOdd) {
+                            return Divider(
+                              height: 1,
+                              color: Theme.of(context).dividerColor,
+                            );
+                          }
+                          final i = index ~/ 2;
+                          return PostCard(post: _posts[i]);
+                        },
+                        childCount: _posts.length * 2 - 1,
+                      ),
                     ),
                 ],
               ),
             ),
-      // ❌ ลบ bottomNavigationBar ออก เพื่อไม่ให้ซ้อนกับของ parent
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final text = theme.textTheme;
+
     final avatar = (_profile?['avatar_url'] as String?) ?? '';
     final bio = (_profile?['bio'] as String?) ?? '';
     final username = (_profile?['username'] as String?) ?? '';
 
     final postCount = _posts.length;
     final friendCount =
-        (_profile?['friends_count'] as int?) ?? (_profile?['friend_count'] as int?) ?? 0;
+        (_profile?['friends_count'] as int?) ??
+            (_profile?['friend_count'] as int?) ??
+            0;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ชื่อผู้ใช้
           Text(
             username.isNotEmpty ? username : 'user#${_profileUserId ?? ''}',
-            style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+            style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
 
-          // avatar + counters (ช่องไฟเท่ากัน)
+          // ✅ เอา container การ์ดออก เหลือแค่แถวโปร่ง ๆ
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -176,29 +178,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Expanded(
                 child: Row(
                   children: [
-                    Expanded(
-                      child: Center(
-                        child: _RightStat(label: 'post', value: postCount),
-                      ),
+                    const Spacer(),
+                    _RightStat(label: 'post', value: postCount),
+                    const Spacer(),
+                    InkWell(
+                      onTap: () {
+                        final uid = _profileUserId;
+                        if (uid != null) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => FriendsListScreen(userId: uid),
+                            ),
+                          );
+                        }
+                      },
+                      child: _RightStat(label: 'friends', value: friendCount),
                     ),
-                    Expanded(
-                      child: Center(
-                        child: InkWell(
-                          onTap: () {
-                            final uid = _profileUserId;
-                            if (uid != null) {
-                              Navigator.push(
-                                context,
-                                MaterialPageRoute(
-                                  builder: (_) => FriendsListScreen(userId: uid),
-                                ),
-                              );
-                            }
-                          },
-                          child: _RightStat(label: 'friends', value: friendCount),
-                        ),
-                      ),
-                    ),
+                    const Spacer(),
                   ],
                 ),
               ),
@@ -208,14 +205,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 12),
 
           if (bio.trim().isNotEmpty)
-            Text(bio, style: const TextStyle(color: Colors.black87)),
+            Text(
+              bio,
+              style: text.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+            ),
 
           const SizedBox(height: 12),
 
+          // ปุ่มหลัก
           SizedBox(
             width: double.infinity,
             child: _isMe
-                ? ElevatedButton(
+                ? FilledButton(
                     onPressed: () async {
                       final changed = await Navigator.push<bool>(
                         context,
@@ -232,27 +233,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       );
                       if (changed == true) _refresh();
                     },
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      backgroundColor: Colors.blueGrey.shade700,
-                      foregroundColor: Colors.white,
-                    ),
                     child: const Text('Edit Profile'),
                   )
                 : (_viewerId == null
-                    ? ElevatedButton(
+                    ? FilledButton.tonal(
                         onPressed: null,
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          backgroundColor: Colors.grey,
-                          foregroundColor: Colors.white,
-                        ),
                         child: const Text('กรุณาเข้าสู่ระบบเพื่อเพิ่มเพื่อน'),
                       )
                     : FriendActionButton(
@@ -262,7 +247,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
 
           const SizedBox(height: 12),
-          const Divider(height: 1),
+          Divider(height: 1, color: theme.dividerColor),
           const SizedBox(height: 8),
         ],
       ),
@@ -277,19 +262,28 @@ class _RightStat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           '$value',
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: cs.onSurface,
+          ),
         ),
         const SizedBox(height: 2),
         Text(
           label,
-          style: const TextStyle(color: Colors.black54, fontSize: 12),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: cs.onSurfaceVariant,
+          ),
         ),
       ],
     );
   }
 }
+

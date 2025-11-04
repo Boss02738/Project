@@ -13,6 +13,9 @@ import 'package:my_note_app/screens/withdraw_screen.dart';
 import 'package:my_note_app/screens/login_screen.dart';
 import 'package:my_note_app/screens/change_password_screen.dart';
 
+// ✅ นำเข้า ThemeController ที่เราสร้างไว้ใน main.dart
+import 'package:my_note_app/main.dart' show ThemeController;
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -39,6 +42,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _futureProfile = ApiService.getUserProfile(uid);
       }
     });
+  }
+
+  // ---------- UI helpers ----------
+  String _themeLabel(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.light:
+        return 'Light';
+      case ThemeMode.dark:
+        return 'Dark';
+      default:
+        return 'ตามระบบ (System)';
+    }
+  }
+
+  void _pickTheme(BuildContext context, ThemeMode current) {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              RadioListTile<ThemeMode>(
+                title: const Text('ตามระบบ (System)'),
+                value: ThemeMode.system,
+                groupValue: current,
+                onChanged: (v) {
+                  if (v != null) ThemeController.instance.setMode(v);
+                  Navigator.pop(context);
+                },
+              ),
+              RadioListTile<ThemeMode>(
+                title: const Text('Light'),
+                value: ThemeMode.light,
+                groupValue: current,
+                onChanged: (v) {
+                  if (v != null) ThemeController.instance.setMode(v);
+                  Navigator.pop(context);
+                },
+              ),
+              RadioListTile<ThemeMode>(
+                title: const Text('Dark'),
+                value: ThemeMode.dark,
+                groupValue: current,
+                onChanged: (v) {
+                  if (v != null) ThemeController.instance.setMode(v);
+                  Navigator.pop(context);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -70,7 +128,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         backgroundImage: avatar.isNotEmpty
                             ? NetworkImage('${ApiService.host}$avatar')
                             : const AssetImage('assets/default_avatar.png')
-                                  as ImageProvider,
+                                as ImageProvider,
                       ),
                       title: Text(
                         username,
@@ -83,9 +141,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const Divider(height: 1),
 
-                    const _SettingsItem(
-                      icon: Icons.brightness_6_outlined,
-                      title: 'Theme',
+                    // ✅ Theme (interactive)
+                    ValueListenableBuilder<ThemeMode>(
+                      valueListenable: ThemeController.instance,
+                      builder: (_, mode, __) {
+                        return _SettingsItem(
+                          icon: Icons.brightness_6_outlined,
+                          title: 'Theme',
+                          // โชว์สถานะธีมปัจจุบัน
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _themeLabel(mode),
+                                style: Theme.of(context).textTheme.bodyMedium,
+                              ),
+                              const SizedBox(width: 8),
+                              const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                          onTap: () => _pickTheme(context, mode),
+                        );
+                      },
                     ),
 
                     _SettingsItem(
@@ -115,9 +192,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title: 'Purchased posts',
                       onTap: () async {
                         final sp = await SharedPreferences.getInstance();
-                        final uid = sp.getInt(
-                          'user_id',
-                        ); // <-- อ่าน user_id ที่เคยเก็บตอนล็อกอิน
+                        final uid = sp.getInt('user_id');
 
                         if (!context.mounted) return;
 
@@ -135,9 +210,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => PurchasedPostsScreen(
-                              userId: uid,
-                            ), // <-- ส่งค่า uid ที่ได้จริง
+                            builder: (_) => PurchasedPostsScreen(userId: uid),
                           ),
                         );
                       },
@@ -164,6 +237,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                       ),
                     ),
+
                     _SettingsItem(
                       icon: Icons.lock_outline,
                       title: 'Change Password',
@@ -197,7 +271,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                   child: const Text('ยกเลิก'),
                                 ),
                                 FilledButton(
-                                  onPressed: () => Navigator.pop(context, true),
+                                  onPressed: () =>
+                                      Navigator.pop(context, true),
                                   child: const Text('ออกจากระบบ'),
                                 ),
                               ],
@@ -205,10 +280,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           },
                         );
 
-                        if (confirm != true)
-                          return; // ถ้ากดยกเลิก ก็ไม่ทำอะไรต่อ
+                        if (confirm != true) return;
 
-                        // ถ้ากดยืนยัน → ล้างข้อมูลผู้ใช้
                         final sp = await SharedPreferences.getInstance();
                         await sp.clear();
 
@@ -219,7 +292,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           );
 
-                          // เด้งไปหน้า Login และเคลียร์ navigation stack
                           Navigator.pushNamedAndRemoveUntil(
                             context,
                             '/login',
@@ -240,15 +312,21 @@ class _SettingsItem extends StatelessWidget {
   final IconData icon;
   final String title;
   final VoidCallback? onTap;
+  final Widget? trailing;
 
-  const _SettingsItem({required this.icon, required this.title, this.onTap});
+  const _SettingsItem({
+    required this.icon,
+    required this.title,
+    this.onTap,
+    this.trailing,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
       leading: Icon(icon),
       title: Text(title),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: trailing ?? const Icon(Icons.chevron_right),
       onTap: onTap,
     );
   }
