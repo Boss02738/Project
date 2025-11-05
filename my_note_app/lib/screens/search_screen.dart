@@ -1,13 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:my_note_app/screens/documents_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:my_note_app/api/api_service.dart';
-import 'package:my_note_app/screens/home_screen.dart';
-import 'package:my_note_app/screens/NewPost.dart';
 import 'package:my_note_app/screens/subject_feed_screen.dart';
-import 'package:my_note_app/screens/profile_screen.dart'; // ✅ เพิ่มตรงนี้
-import 'package:my_note_app/widgets/app_bottom_nav_bar.dart'; 
+import 'package:my_note_app/screens/profile_screen.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -53,7 +49,15 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   @override
+  void deactivate() {
+    // กันคีย์บอร์ดค้างเมื่อสลับแท็บ
+    FocusScope.of(context).unfocus();
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
+    _debouncer.dispose(); // ยกเลิก timer ให้เรียบร้อย
     _controller.dispose();
     super.dispose();
   }
@@ -117,9 +121,8 @@ class _SearchScreenState extends State<SearchScreen> {
       }
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('ค้นหาไม่สำเร็จ')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('ค้นหาไม่สำเร็จ')));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -151,6 +154,7 @@ class _SearchScreenState extends State<SearchScreen> {
             await _saveRecent(subject);
             if (!mounted) return;
             Navigator.pop(ctx);
+            // เปิดฟีดวิชาแบบ push (สแต็กของแท็บ Search)
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -169,6 +173,7 @@ class _SearchScreenState extends State<SearchScreen> {
         Expanded(
           child: TextField(
             controller: _controller,
+            autofocus: false, // กันเด้งคีย์บอร์ดอัตโนมัติ
             onChanged: _onQueryChanged,
             onSubmitted: _onSubmit,
             decoration: InputDecoration(
@@ -201,10 +206,7 @@ class _SearchScreenState extends State<SearchScreen> {
           itemBuilder: (_) => const [
             PopupMenuItem(value: SearchFilter.all, child: Text('All')),
             PopupMenuItem(value: SearchFilter.users, child: Text('Users')),
-            PopupMenuItem(
-              value: SearchFilter.subjects,
-              child: Text('Subjects'),
-            ),
+            PopupMenuItem(value: SearchFilter.subjects, child: Text('Subjects')),
           ],
         ),
       ],
@@ -273,8 +275,9 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _buildResults() {
-    if (_loading)
+    if (_loading) {
       return const Expanded(child: Center(child: CircularProgressIndicator()));
+    }
 
     final hasUser = _userResults.isNotEmpty;
     final hasSubject = _subjectResults.isNotEmpty;
@@ -305,7 +308,6 @@ class _SearchScreenState extends State<SearchScreen> {
             ..._userResults.map((u) {
               final username = u['username'] as String? ?? '';
               final avatar = u['avatar_url'] as String? ?? '';
-              // ✅ ดึง id_user แบบปลอดภัย
               final int? targetUserId = (u['id_user'] as num?)?.toInt();
 
               return ListTile(
@@ -313,21 +315,18 @@ class _SearchScreenState extends State<SearchScreen> {
                   backgroundImage: avatar.isNotEmpty
                       ? NetworkImage('${ApiService.host}$avatar')
                       : const AssetImage('assets/default_avatar.png')
-                            as ImageProvider,
+                          as ImageProvider,
                 ),
                 title: Text(username),
                 trailing: const Icon(Icons.north_east, size: 18),
                 onTap: () async {
-                  if (targetUserId == null) return; // กัน null
-
+                  if (targetUserId == null) return;
                   await _saveRecent(username);
                   if (!mounted) return;
-
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) =>
-                          ProfileScreen(userId: targetUserId), // ✅ ส่ง id ไป
+                      builder: (_) => ProfileScreen(userId: targetUserId),
                     ),
                   );
                 },
@@ -368,66 +367,21 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   Widget build(BuildContext context) {
-
-return Scaffold(
-  body: SafeArea(
-    bottom: false,
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-      child: Column(children: [_buildSearchBar(), _buildResults()]),
-    ),
-  ),
-
-  // ⬇⬇⬇ แทนส่วนนี้แทนของเก่า ⬇⬇⬇
-  bottomNavigationBar: AppBottomNavBar(
-    currentIndex: 1, // เพราะหน้า Search คือ index 1
-    onTapAsync: (index) async {
-      if (index == 0) {
-        // ไปหน้า Home
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const homescreen()),
-        );
-      } else if (index == 2) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const DocumentsScreen()),
-        );
-      } else if (index == 3) {
-        // ปุ่ม Add
-        final prefs = await SharedPreferences.getInstance();
-        final userId = prefs.getInt('user_id');
-        final username = prefs.getString('username');
-
-        if (userId == null || username == null) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('กรุณาเข้าสู่ระบบใหม่')),
-          );
-          return;
-        }
-
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => NewPostScreen(userId: userId, username: username),
+    return Scaffold(
+      // ไม่มี bottomNavigationBar ตรงนี้แล้ว (ให้ home_screen จัดการ)
+      body: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: Column(
+            children: [
+              _buildSearchBar(),
+              _buildResults(),
+            ],
           ),
-        );
-      } else if (index == 4) {
-        // ไปหน้าโปรไฟล์
-        final prefs = await SharedPreferences.getInstance();
-        final userId = prefs.getInt('user_id');
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ProfileScreen(userId: userId ?? 0),
-          ),
-        );
-      }
-    },
-  ),
-);
-
+        ),
+      ),
+    );
   }
 }
 
@@ -440,6 +394,10 @@ class _Debouncer {
   void run(void Function() fn) {
     _t?.cancel();
     _t = Timer(delay, fn);
+  }
+
+  void dispose() {
+    _t?.cancel();
   }
 }
 

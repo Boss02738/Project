@@ -65,22 +65,22 @@ class TextBoxData {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'text': text,
-        'x': x,
-        'y': y,
-        'fontSize': fontSize,
-        'color': color,
-      };
+    'id': id,
+    'text': text,
+    'x': x,
+    'y': y,
+    'fontSize': fontSize,
+    'color': color,
+  };
 
   factory TextBoxData.fromJson(Map<String, dynamic> m) => TextBoxData(
-        id: m['id'] as String,
-        text: (m['text'] as String?) ?? '',
-        x: (m['x'] as num?)?.toDouble() ?? 0,
-        y: (m['y'] as num?)?.toDouble() ?? 0,
-        fontSize: (m['fontSize'] as num?)?.toDouble() ?? 18,
-        color: (m['color'] as int?) ?? Colors.black.value,
-      );
+    id: m['id'] as String,
+    text: (m['text'] as String?) ?? '',
+    x: (m['x'] as num?)?.toDouble() ?? 0,
+    y: (m['y'] as num?)?.toDouble() ?? 0,
+    fontSize: (m['fontSize'] as num?)?.toDouble() ?? 18,
+    color: (m['color'] as int?) ?? Colors.black.value,
+  );
 }
 
 /* =================== IMAGE LAYER MODEL =================== */
@@ -88,9 +88,9 @@ class TextBoxData {
 class ImageLayerData {
   final String id;
   final String bytesB64; // raw image base64 (png/jpg)
-  final double x;        // center x (px)
-  final double y;        // center y (px)
-  final double scale;    // 0.2..6
+  final double x; // center x (px)
+  final double y; // center y (px)
+  final double scale; // 0.2..6
   final double rotation; // radians
 
   const ImageLayerData({
@@ -120,22 +120,22 @@ class ImageLayerData {
   }
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'bytesB64': bytesB64,
-        'x': x,
-        'y': y,
-        'scale': scale,
-        'rotation': rotation,
-      };
+    'id': id,
+    'bytesB64': bytesB64,
+    'x': x,
+    'y': y,
+    'scale': scale,
+    'rotation': rotation,
+  };
 
   factory ImageLayerData.fromJson(Map<String, dynamic> m) => ImageLayerData(
-        id: m['id'] as String,
-        bytesB64: m['bytesB64'] as String,
-        x: (m['x'] as num?)?.toDouble() ?? 140,
-        y: (m['y'] as num?)?.toDouble() ?? 160,
-        scale: (m['scale'] as num?)?.toDouble() ?? 1.0,
-        rotation: (m['rotation'] as num?)?.toDouble() ?? 0.0,
-      );
+    id: m['id'] as String,
+    bytesB64: m['bytesB64'] as String,
+    x: (m['x'] as num?)?.toDouble() ?? 140,
+    y: (m['y'] as num?)?.toDouble() ?? 160,
+    scale: (m['scale'] as num?)?.toDouble() ?? 1.0,
+    rotation: (m['rotation'] as num?)?.toDouble() ?? 0.0,
+  );
 }
 
 /* =================== PAGE =================== */
@@ -217,19 +217,24 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         : [emptySketch()];
 
     _textsPages =
-        (widget.initialTextsPerPage != null && widget.initialTextsPerPage!.isNotEmpty)
-            ? widget.initialTextsPerPage!
-                .map((l) => l.map((t) => t).toList())
-                .toList()
-            : [<TextBoxData>[]];
+        (widget.initialTextsPerPage != null &&
+            widget.initialTextsPerPage!.isNotEmpty)
+        ? widget.initialTextsPerPage!
+              .map((l) => l.map((t) => t).toList())
+              .toList()
+        : [<TextBoxData>[]];
 
     _imagePages =
-        (widget.initialImagesPerPage != null && widget.initialImagesPerPage!.isNotEmpty)
-            ? widget.initialImagesPerPage!.map((l) => l.map((e) => e).toList()).toList()
-            : List.generate(_pages.length, (_) => <ImageLayerData>[]);
+        (widget.initialImagesPerPage != null &&
+            widget.initialImagesPerPage!.isNotEmpty)
+        ? widget.initialImagesPerPage!
+              .map((l) => l.map((e) => e).toList())
+              .toList()
+        : List.generate(_pages.length, (_) => <ImageLayerData>[]);
 
     while (_textsPages.length < _pages.length) _textsPages.add(<TextBoxData>[]);
-    while (_imagePages.length < _pages.length) _imagePages.add(<ImageLayerData>[]);
+    while (_imagePages.length < _pages.length)
+      _imagePages.add(<ImageLayerData>[]);
 
     _title = widget.initialTitle ?? 'Untitled';
 
@@ -277,7 +282,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     );
   }
 
-  Future<void> _registerUsedColor(Color c, {bool reorderIfExists = true}) async {
+  Future<void> _registerUsedColor(
+    Color c, {
+    bool reorderIfExists = true,
+  }) async {
     if (_presetColorValues.contains(c.value)) {
       setState(() {});
       return;
@@ -292,7 +300,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       _savedColors.insert(0, c);
     }
     const cap = 12;
-    if (_savedColors.length > cap) _savedColors.removeRange(cap, _savedColors.length);
+    if (_savedColors.length > cap)
+      _savedColors.removeRange(cap, _savedColors.length);
     await _persistSavedColors();
     setState(() {});
   }
@@ -310,15 +319,26 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               ? Map<String, dynamic>.from(jsonDecode(snap['data']))
               : Map<String, dynamic>.from(snap['data'] as Map);
 
-          final sketchJson =
-              (jsonMap['lines'] != null) ? {'lines': jsonMap['lines']} : jsonMap;
+          final sketchJson = (jsonMap['lines'] != null)
+              ? {'lines': jsonMap['lines']}
+              : jsonMap;
           final sketch = Sketch.fromJson(sketchJson);
-          final texts = (jsonMap['texts'] as List?)
-                  ?.map((e) => TextBoxData.fromJson(Map<String, dynamic>.from(e as Map)))
+          final texts =
+              (jsonMap['texts'] as List?)
+                  ?.map(
+                    (e) => TextBoxData.fromJson(
+                      Map<String, dynamic>.from(e as Map),
+                    ),
+                  )
                   .toList() ??
               <TextBoxData>[];
-          final images = (jsonMap['images'] as List?)
-                  ?.map((e) => ImageLayerData.fromJson(Map<String, dynamic>.from(e as Map)))
+          final images =
+              (jsonMap['images'] as List?)
+                  ?.map(
+                    (e) => ImageLayerData.fromJson(
+                      Map<String, dynamic>.from(e as Map),
+                    ),
+                  )
                   .toList() ??
               <ImageLayerData>[];
 
@@ -351,15 +371,25 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             ? Map<String, dynamic>.from(jsonDecode(sketchJson))
             : Map<String, dynamic>.from(sketchJson as Map);
 
-        final linesOnly =
-            (jsonMap['lines'] != null) ? {'lines': jsonMap['lines']} : jsonMap;
+        final linesOnly = (jsonMap['lines'] != null)
+            ? {'lines': jsonMap['lines']}
+            : jsonMap;
         final incoming = Sketch.fromJson(linesOnly);
-        final texts = (jsonMap['texts'] as List?)
-                ?.map((e) => TextBoxData.fromJson(Map<String, dynamic>.from(e as Map)))
+        final texts =
+            (jsonMap['texts'] as List?)
+                ?.map(
+                  (e) =>
+                      TextBoxData.fromJson(Map<String, dynamic>.from(e as Map)),
+                )
                 .toList() ??
             <TextBoxData>[];
-        final images = (jsonMap['images'] as List?)
-                ?.map((e) => ImageLayerData.fromJson(Map<String, dynamic>.from(e as Map)))
+        final images =
+            (jsonMap['images'] as List?)
+                ?.map(
+                  (e) => ImageLayerData.fromJson(
+                    Map<String, dynamic>.from(e as Map),
+                  ),
+                )
                 .toList() ??
             <ImageLayerData>[];
 
@@ -378,8 +408,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
     socket.on('clear_board', (data) {
       try {
-        final int page =
-            (data is Map && data['page'] is int) ? data['page'] as int : _pageIndex;
+        final int page = (data is Map && data['page'] is int)
+            ? data['page'] as int
+            : _pageIndex;
         _ensurePages(page + 1);
         _pages[page] = emptySketch();
         _textsPages[page] = <TextBoxData>[];
@@ -414,8 +445,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
     socket.on('page_deleted', (data) {
       try {
-        final int d =
-            (data is Map && data['deletedPage'] is int) ? data['deletedPage'] as int : -1;
+        final int d = (data is Map && data['deletedPage'] is int)
+            ? data['deletedPage'] as int
+            : -1;
         if (d < 0) return;
         if (_pendingSelfDeleteIndex == d) {
           _pendingSelfDeleteIndex = -1;
@@ -447,7 +479,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
   void _requestInitForCurrentPage() {
     if (offline) return;
-    widget.socket!.emit('init_page', {'boardId': widget.boardId, 'page': _pageIndex});
+    widget.socket!.emit('init_page', {
+      'boardId': widget.boardId,
+      'page': _pageIndex,
+    });
   }
 
   void _scheduleSync() {
@@ -495,11 +530,16 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   }) async {
     try {
       final recorder = ui.PictureRecorder();
-      final canvas =
-          Canvas(recorder, Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()));
+      final canvas = Canvas(
+        recorder,
+        Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+      );
 
       final bg = Paint()..color = Colors.white;
-      canvas.drawRect(Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()), bg);
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble()),
+        bg,
+      );
 
       double minX = double.infinity, minY = double.infinity;
       double maxX = -double.infinity, maxY = -double.infinity;
@@ -571,8 +611,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         final double widthPx = (m['width'] is num)
             ? (m['width'] as num).toDouble()
             : (dyn.width is num
-                ? (dyn.width as num).toDouble()
-                : (dyn.strokeWidth is num ? (dyn.strokeWidth as num).toDouble() : 4.0));
+                  ? (dyn.width as num).toDouble()
+                  : (dyn.strokeWidth is num
+                        ? (dyn.strokeWidth as num).toDouble()
+                        : 4.0));
 
         final paint = Paint()
           ..style = PaintingStyle.stroke
@@ -584,7 +626,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         final path = Path();
         if (dyn.points is List && (dyn.points as List).isNotEmpty) {
           final pts = dyn.points as List;
-          path.moveTo((pts.first.x as num).toDouble(), (pts.first.y as num).toDouble());
+          path.moveTo(
+            (pts.first.x as num).toDouble(),
+            (pts.first.y as num).toDouble(),
+          );
           for (int i = 1; i < pts.length; i++) {
             final p = pts[i];
             path.lineTo((p.x as num).toDouble(), (p.y as num).toDouble());
@@ -613,7 +658,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               width: imgW,
               height: imgH,
             );
-            paintImage(canvas: canvas, rect: rect, image: uiImage, fit: BoxFit.contain);
+            paintImage(
+              canvas: canvas,
+              rect: rect,
+              image: uiImage,
+              fit: BoxFit.contain,
+            );
             canvas.restore();
           } catch (_) {}
         }
@@ -625,8 +675,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             ui.ParagraphStyle(fontSize: t.fontSize, textAlign: TextAlign.left),
           )..pushStyle(ui.TextStyle(color: Color(t.color)));
           builder.addText(t.text);
-          final paragraph =
-              builder.build()..layout(const ui.ParagraphConstraints(width: double.infinity));
+          final paragraph = builder.build()
+            ..layout(const ui.ParagraphConstraints(width: double.infinity));
           canvas.drawParagraph(paragraph, Offset(t.x, t.y));
         }
       }
@@ -656,8 +706,14 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
           decoration: const InputDecoration(labelText: 'Title'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ยกเลิก')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('ยกเลิก'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Save'),
+          ),
         ],
       ),
     );
@@ -671,7 +727,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
           'lines': _pages[i].toJson()['lines'] ?? [],
           'texts': _textsPages[i].map((t) => t.toJson()).toList(),
           'images': _imagePages[i].map((img) => img.toJson()).toList(),
-        }
+        },
       });
     }
 
@@ -684,14 +740,20 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     if (coverBase64 == null) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Warning: failed to generate cover image; saving without cover')),
+          const SnackBar(
+            content: Text(
+              'Warning: failed to generate cover image; saving without cover',
+            ),
+          ),
         );
       }
     }
 
     final payload = {
       if (widget.documentId != null) 'id': widget.documentId,
-      'title': titleCtrl.text.trim().isEmpty ? 'Untitled' : titleCtrl.text.trim(),
+      'title': titleCtrl.text.trim().isEmpty
+          ? 'Untitled'
+          : titleCtrl.text.trim(),
       'boardId': widget.boardId,
       'board_id': widget.boardId,
       'pages': pages,
@@ -710,117 +772,155 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       if (!mounted) return;
       if (r.statusCode == 200) {
         setState(() => _title = payload['title'] as String);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('บันทึกเรียบร้อย')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('บันทึกเรียบร้อย')));
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('บันทึกไม่สำเร็จ (${r.statusCode})')));
+          SnackBar(content: Text('บันทึกไม่สำเร็จ (${r.statusCode})')),
+        );
       }
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('บันทึกไม่สำเร็จ')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('บันทึกไม่สำเร็จ')));
     }
   }
 
   /* ---------------- Local save/export helpers [ADDED] ---------------- */
 
+  // ---------- STORAGE PERMISSION (Android 10-12 เฉพาะ) ----------
   Future<void> _ensureStoragePermission() async {
     try {
+      // ส่วนใหญ่ Android 10+ ไม่ต้อง แต่ขอไว้เพื่อความชัวร์ (จะเงียบถ้าอนุญาตแล้ว)
       await Permission.storage.request();
     } catch (_) {}
   }
 
-  Future<void> _announceAndOpen(String label, String? savedPath) async {
-    if (!mounted) return;
-    final text = (savedPath != null && savedPath.isNotEmpty)
-        ? 'บันทึกแล้ว: $label\n$savedPath'
-        : 'บันทึกแล้ว: $label';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
-    if (savedPath != null && savedPath.isNotEmpty) {
-      await OpenFile.open(savedPath);
-    }
+  // ---------- สร้าง PNG (bytes) จากหน้า i ----------
+  Future<Uint8List> _buildPngBytesForPage(int i) async {
+    final b64 = await _sketchToPngBase64(
+      _pages[i],
+      texts: _textsPages[i],
+      images: _imagePages[i],
+      width: 1240, // ~A4 @150dpi (ปรับได้)
+      height: 1754,
+    );
+    final bytes = (b64 == null) ? Uint8List(0) : base64Decode(b64);
+    return bytes;
   }
 
-  Future<void> _saveCurrentPageAsPNG() async {
+  // ---------- ส่งออก: เฉพาะหน้าปัจจุบันเป็น PNG ----------
+  Future<void> _exportCurrentPagePng() async {
     await _ensureStoragePermission();
-    final b64 = await _sketchToPngBase64(
-      _notifier.currentSketch,
-      width: 1400,
-      height: 2000,
-      texts: _textsPages[_pageIndex],
-      images: _imagePages[_pageIndex],
-    );
-    if (b64 == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('แปลงภาพไม่สำเร็จ')),
-        );
-      }
+    _pages[_pageIndex] = _notifier.currentSketch;
+
+    final pngBytes = await _buildPngBytesForPage(_pageIndex);
+    if (pngBytes.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('ไม่พบข้อมูลในหน้านี้')));
       return;
     }
-    final bytes = base64Decode(b64);
-    final fileName = 'note_page_${_pageIndex + 1}.png';
 
-    final savedPath = await FileSaver.instance.saveFile(
+    final fileName = 'note_page_${_pageIndex + 1}.png';
+    final String? savedPath = await FileSaver.instance.saveFile(
       name: fileName,
-      bytes: bytes,
+      bytes: pngBytes,
       ext: 'png',
       mimeType: MimeType.png,
     );
 
-    await _announceAndOpen(fileName, savedPath);
+    if (!mounted) return;
+    if (savedPath != null && savedPath.isNotEmpty) {
+      // เปิดไฟล์ทันที
+      await OpenFile.open(savedPath);
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('บันทึก $fileName แล้ว')));
+    }
   }
 
-  Future<void> _exportAllPagesAsPDF() async {
+  // ---------- ส่งออก: รวมทุกหน้าเป็น PDF ----------
+  Future<void> _exportAllPagesToPdf() async {
     await _ensureStoragePermission();
-
-    final List<Uint8List> pagePngs = [];
-    for (int i = 0; i < _pages.length; i++) {
-      final b64 = await _sketchToPngBase64(
-        _pages[i],
-        width: 1400,
-        height: 2000,
-        texts: _textsPages[i],
-        images: _imagePages[i],
-      );
-      if (b64 != null) pagePngs.add(base64Decode(b64));
-    }
-    if (pagePngs.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ไม่มีหน้าสำหรับส่งออก')),
-        );
-      }
-      return;
-    }
+    _pages[_pageIndex] = _notifier.currentSketch;
 
     final doc = pw.Document();
-    for (final png in pagePngs) {
-      final img = pw.MemoryImage(png);
-      doc.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          build: (_) => pw.Center(
-            child: pw.FittedBox(
-              fit: pw.BoxFit.contain,
-              child: pw.Image(img),
-            ),
-          ),
-        ),
-      );
+    for (int i = 0; i < _pages.length; i++) {
+      final bytes = await _buildPngBytesForPage(i);
+      final page = bytes.isEmpty
+          ? pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              build: (_) => pw.Center(child: pw.Text('Page ${i + 1} (empty)')),
+            )
+          : pw.Page(
+              pageFormat: PdfPageFormat.a4,
+              build: (_) => pw.Center(
+                child: pw.FittedBox(
+                  child: pw.Image(pw.MemoryImage(bytes)),
+                  fit: pw.BoxFit.contain,
+                ),
+              ),
+            );
+      doc.addPage(page);
     }
+
     final pdfBytes = await doc.save();
     final fileName = 'notes_${DateTime.now().millisecondsSinceEpoch}.pdf';
-
-    final savedPath = await FileSaver.instance.saveFile(
+    final String? savedPath = await FileSaver.instance.saveFile(
       name: fileName,
       bytes: pdfBytes,
       ext: 'pdf',
       mimeType: MimeType.pdf,
     );
 
-    await _announceAndOpen(fileName, savedPath);
+    if (!mounted) return;
+    if (savedPath != null && savedPath.isNotEmpty) {
+      // เปิด PDF ทันที
+      await OpenFile.open(
+        savedPath,
+      ); // ← หรือ OpenFile.open(savedPath) ถ้าใช้ open_file
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('บันทึก $fileName แล้ว')));
+    }
+  }
+
+  // ---------- เมนูเลือกแบบส่งออก ----------
+  Future<void> _openExportChooser() async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.image_outlined),
+              title: const Text('บันทึกหน้าปัจจุบันเป็น PNG'),
+              onTap: () => Navigator.pop(ctx, 'png'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.picture_as_pdf_outlined),
+              title: const Text('บันทึกทุกหน้าเป็น PDF'),
+              onTap: () => Navigator.pop(ctx, 'pdf'),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+
+    if (choice == 'png') {
+      await _exportCurrentPagePng();
+    } else if (choice == 'pdf') {
+      await _exportAllPagesToPdf();
+    }
   }
 
   /* ---------------- UI ---------------- */
@@ -849,67 +949,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             ),
           // สลับโหมด วาด / แก้ไขรูป
           IconButton(
-            tooltip: _editImagesMode ? 'ไปโหมดวาด' : 'ไปโหมดแก้ไขรูป',
-            onPressed: () {
-              setState(() {
-                _editImagesMode = !_editImagesMode;
-                _selectedImageIndex = -1;
-              });
-            },
-            icon: Icon(_editImagesMode ? Icons.brush : Icons.photo),
+            tooltip: 'เมนู',
+            icon: const Icon(Icons.menu),
+            onPressed: _openToolsSheet,
           ),
-          IconButton(
-            tooltip: 'เพิ่มรูป',
-            onPressed: _addImageLayer,
-            icon: const Icon(Icons.add_photo_alternate_outlined),
-          ),
-          IconButton(
-            tooltip: 'เพิ่มข้อความ',
-            onPressed: _addTextBox,
-            icon: const Icon(Icons.text_fields),
-          ),
-          IconButton(
-            tooltip: 'Save as Document (server)',
-            onPressed: _saveDocument,
-            icon: const Icon(Icons.save),
-          ),
-          // ====== [ADDED] Export/Save local ======
-          PopupMenuButton<String>(
-            tooltip: 'Export',
-            icon: const Icon(Icons.download),
-            onSelected: (v) {
-              if (v == 'png') _saveCurrentPageAsPNG();
-              if (v == 'pdf') _exportAllPagesAsPDF();
-            },
-            itemBuilder: (ctx) => const [
-              PopupMenuItem<String>(value: 'png', child: Text('Save this page as PNG')),
-              PopupMenuItem<String>(value: 'pdf', child: Text('Export ALL pages as PDF')),
-            ],
-          ),
-          // =======================================
-          if (!offline) ...[
-            IconButton(
-              tooltip: 'Sync snapshot',
-              onPressed: _emitFullSketchWithTexts,
-              icon: const Icon(Icons.sync),
-            ),
-            IconButton(
-              tooltip: 'Clear (this page)',
-              onPressed: () {
-                _notifier.clear();
-                _pages[_pageIndex] = emptySketch();
-                _textsPages[_pageIndex] = <TextBoxData>[];
-                _imagePages[_pageIndex] = <ImageLayerData>[];
-                _selectedImageIndex = -1;
-                widget.socket!.emit('clear_board', {
-                  'boardId': widget.boardId,
-                  'page': _pageIndex,
-                });
-                setState(() {});
-              },
-              icon: const Icon(Icons.delete_sweep),
-            ),
-          ],
         ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(84),
@@ -954,7 +997,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               }
             },
             onRemoveSavedColor: (c) async {
-              setState(() => _savedColors.removeWhere((x) => x.value == c.value));
+              setState(
+                () => _savedColors.removeWhere((x) => x.value == c.value),
+              );
               await _persistSavedColors();
             },
             onChangeWidth: (v) {
@@ -1019,8 +1064,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                                 },
                                 onManipulationStart: () =>
                                     setState(() => _isManipulatingImage = true),
-                                onManipulationEnd: () =>
-                                    setState(() => _isManipulatingImage = false),
+                                onManipulationEnd: () => setState(
+                                  () => _isManipulatingImage = false,
+                                ),
                               );
                             }),
                           ),
@@ -1114,8 +1160,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                   );
                   setState(() => _pageIndex = newIndex);
                   if (!offline) {
-                    widget.socket!
-                        .emit('add_page', {'boardId': widget.boardId, 'page': _pageIndex});
+                    widget.socket!.emit('add_page', {
+                      'boardId': widget.boardId,
+                      'page': _pageIndex,
+                    });
                   }
                 },
                 icon: const Icon(Icons.add_circle),
@@ -1130,7 +1178,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           context: context,
                           builder: (ctx) => AlertDialog(
                             title: const Text('ลบหน้ากระดาษนี้?'),
-                            content: Text('ยืนยันจะลบหน้า ${_pageIndex + 1} ใช่ไหม'),
+                            content: Text(
+                              'ยืนยันจะลบหน้า ${_pageIndex + 1} ใช่ไหม',
+                            ),
                             actions: [
                               TextButton(
                                 onPressed: () => Navigator.pop(ctx, false),
@@ -1163,10 +1213,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           curve: Curves.easeOut,
                         );
                         if (!offline) {
-                          widget.socket!.emit(
-                            'delete_page',
-                            {'boardId': widget.boardId, 'page': deletedIndex},
-                          );
+                          widget.socket!.emit('delete_page', {
+                            'boardId': widget.boardId,
+                            'page': deletedIndex,
+                          });
                           _requestInitForCurrentPage();
                         }
                       }
@@ -1199,7 +1249,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   /* ---------------- Floating toolbar for image ---------------- */
 
   Widget _selectedImageFloatingToolbar() {
-    final hasSel = _selectedImageIndex >= 0 &&
+    final hasSel =
+        _selectedImageIndex >= 0 &&
         _selectedImageIndex < _imagePages[_pageIndex].length;
 
     return Align(
@@ -1237,9 +1288,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     final idx = _selectedImageIndex;
     if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
     final cur = _imagePages[_pageIndex][idx];
-    final next = cur.copyWith(
-      scale: (cur.scale * factor).clamp(0.2, 6.0),
-    );
+    final next = cur.copyWith(scale: (cur.scale * factor).clamp(0.2, 6.0));
     setState(() {
       _imagePages[_pageIndex][idx] = next;
     });
@@ -1269,8 +1318,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       _scheduleSync();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('เพิ่มรูปไม่สำเร็จ: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('เพิ่มรูปไม่สำเร็จ: $e')));
     }
   }
 
@@ -1342,7 +1392,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                       Expanded(
                         child: _fontBox(
                           value: fontPx,
-                          onChanged: (v) => setSt(() => fontPx = v.clamp(8, 96)),
+                          onChanged: (v) =>
+                              setSt(() => fontPx = v.clamp(8, 96)),
                         ),
                       ),
                     ],
@@ -1378,8 +1429,14 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ยกเลิก')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('เพิ่ม')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('ยกเลิก'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('เพิ่ม'),
+            ),
           ],
         ),
       ),
@@ -1396,7 +1453,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       fontSize: fontPx.toDouble(),
       color: c.value,
     );
-    setState(() => _textsPages[_pageIndex] = [..._textsPages[_pageIndex], newBox]);
+    setState(
+      () => _textsPages[_pageIndex] = [..._textsPages[_pageIndex], newBox],
+    );
     _scheduleSync();
   }
 
@@ -1421,21 +1480,26 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             color: Colors.white.withOpacity(0.0),
             border: Border.all(color: Colors.black12),
           ),
-          child: Builder(builder: (ctx) {
-            final screenW = MediaQuery.of(ctx).size.width;
-            final maxW = (screenW - (t.x + 24)).clamp(80.0, screenW);
-            return ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: maxW),
-              child: Padding(
-                padding: const EdgeInsets.all(2.0),
-                child: Text(
-                  t.text,
-                  style: TextStyle(fontSize: t.fontSize, color: Color(t.color)),
-                  softWrap: true,
+          child: Builder(
+            builder: (ctx) {
+              final screenW = MediaQuery.of(ctx).size.width;
+              final maxW = (screenW - (t.x + 24)).clamp(80.0, screenW);
+              return ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: maxW),
+                child: Padding(
+                  padding: const EdgeInsets.all(2.0),
+                  child: Text(
+                    t.text,
+                    style: TextStyle(
+                      fontSize: t.fontSize,
+                      color: Color(t.color),
+                    ),
+                    softWrap: true,
+                  ),
                 ),
-              ),
-            );
-          }),
+              );
+            },
+          ),
         ),
       ),
     );
@@ -1486,13 +1550,20 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ยกเลิก')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('บันทึก')),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('ยกเลิก'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('บันทึก'),
+            ),
             TextButton(
               onPressed: () {
                 setState(() {
-                  _textsPages[_pageIndex] =
-                      _textsPages[_pageIndex].where((e) => e.id != t.id).toList();
+                  _textsPages[_pageIndex] = _textsPages[_pageIndex]
+                      .where((e) => e.id != t.id)
+                      .toList();
                 });
                 _scheduleSync();
                 Navigator.pop(ctx, false);
@@ -1548,7 +1619,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(vertical: 8),
               suffixText: 'px',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
           ),
         ),
@@ -1566,21 +1639,29 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     required ValueChanged<Color> onPickPreset,
     required Future<void> Function() onOpenPalette,
   }) {
-    final presets = <Color>[Colors.black, Colors.red, Colors.yellow, Colors.green, Colors.blue];
+    final presets = <Color>[
+      Colors.black,
+      Colors.red,
+      Colors.yellow,
+      Colors.green,
+      Colors.blue,
+    ];
 
     return Wrap(
       spacing: 8,
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        ...presets.map((c) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: _ringColorDot(
-                color: c,
-                selected: current.value == c.value,
-                onTap: () => onPickPreset(c),
-              ),
-            )),
+        ...presets.map(
+          (c) => Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: _ringColorDot(
+              color: c,
+              selected: current.value == c.value,
+              onTap: () => onPickPreset(c),
+            ),
+          ),
+        ),
         FilledButton.tonalIcon(
           onPressed: onOpenPalette,
           icon: const Icon(Icons.palette),
@@ -1603,7 +1684,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
-            color: selected ? Colors.black.withOpacity(0.25) : Colors.transparent,
+            color: selected
+                ? Colors.black.withOpacity(0.25)
+                : Colors.transparent,
             width: selected ? 2 : 0,
           ),
         ),
@@ -1632,58 +1715,226 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       builder: (ctx) {
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-          child: StatefulBuilder(builder: (ctx, setSt) {
-            selected = HSVColor.fromAHSV(1, hue, 1, value).toColor();
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text('เลือกสีจากถาดรุ้ง (ลากได้ 2 แกน)',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 12),
-                _RainbowPanel2D(
-                  height: 180,
-                  initial: selected,
-                  onChanged: (h, v, c) => setSt(() {
-                    hue = h;
-                    value = v;
-                    selected = c;
-                  }),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    const Text('สีที่เลือก:'),
-                    const SizedBox(width: 8),
-                    Container(
-                      width: 44,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: selected,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.black12),
+          child: StatefulBuilder(
+            builder: (ctx, setSt) {
+              selected = HSVColor.fromAHSV(1, hue, 1, value).toColor();
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'เลือกสีจากถาดรุ้ง (ลากได้ 2 แกน)',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 12),
+                  _RainbowPanel2D(
+                    height: 180,
+                    initial: selected,
+                    onChanged: (h, v, c) => setSt(() {
+                      hue = h;
+                      value = v;
+                      selected = c;
+                    }),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      const Text('สีที่เลือก:'),
+                      const SizedBox(width: 8),
+                      Container(
+                        width: 44,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          color: selected,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.black12),
+                        ),
                       ),
-                    ),
-                    const Spacer(),
-                    Text('#${selected.value.toRadixString(16).padLeft(8, '0').toUpperCase()}'),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('ยกเลิก')),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () => Navigator.pop(ctx, selected),
-                      child: const Text('ใช้สีนี้'),
-                    ),
-                  ],
-                ),
-              ],
-            );
-          }),
+                      const Spacer(),
+                      Text(
+                        '#${selected.value.toRadixString(16).padLeft(8, '0').toUpperCase()}',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('ยกเลิก'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: () => Navigator.pop(ctx, selected),
+                        child: const Text('ใช้สีนี้'),
+                      ),
+                    ],
+                  ),
+                ],
+              );
+            },
+          ),
         );
       },
+    );
+  }
+
+  Future<void> _openToolsSheet() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.45,
+          minChildSize: 0.25,
+          maxChildSize: 0.9,
+          builder: (ctx, scroll) {
+            return SingleChildScrollView(
+              controller: scroll,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // กลุ่มปุ่มลัด (เป็นตาราง)
+                  GridView(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 4,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 12,
+                          childAspectRatio: .84,
+                        ),
+                    children: [
+                      _ActionButton(
+                        icon: Icons.photo,
+                        label: 'เพิ่มรูป',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _addImageLayer();
+                        },
+                      ),
+                      _ActionButton(
+                        icon: Icons.text_fields,
+                        label: 'เพิ่มข้อความ',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _addTextBox();
+                        },
+                      ),
+                      _ActionButton(
+                        icon: Icons.save,
+                        label: 'บันทึก',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _saveDocument();
+                        },
+                      ),
+                      if (!offline)
+                        _ActionButton(
+                          icon: Icons.sync,
+                          label: 'ซิงก์',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _emitFullSketchWithTexts();
+                          },
+                        ),
+                      if (!offline)
+                        _ActionButton(
+                          icon: Icons.cleaning_services,
+                          label: 'เคลียร์หน้านี้',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _notifier.clear();
+                            _pages[_pageIndex] = emptySketch();
+                            _textsPages[_pageIndex] = <TextBoxData>[];
+                            _imagePages[_pageIndex] = <ImageLayerData>[];
+                            _selectedImageIndex = -1;
+                            widget.socket!.emit('clear_board', {
+                              'boardId': widget.boardId,
+                              'page': _pageIndex,
+                            });
+                            setState(() {});
+                          },
+                        ),
+                      _ActionButton(
+                        icon: _editImagesMode ? Icons.brush : Icons.photo,
+                        label: _editImagesMode ? 'ไปโหมดวาด' : 'แก้ไขรูป',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          setState(() {
+                            _editImagesMode = !_editImagesMode;
+                            _selectedImageIndex = -1;
+                          });
+                        },
+                      ),
+                      _ActionButton(
+                        icon: Icons.file_download,
+                        label: 'ส่งออก',
+                        onTap: () {
+                          Navigator.pop(context);
+                          _openExportChooser(); // ← เรียกเมนูเลือก PNG/PDF
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    // ใช้ surfaceVariant แทน surfaceContainerHighest เพื่อรองรับ Flutter เวอร์ชันเก่า
+    final bg = cs.surfaceVariant;
+    final border = cs.outlineVariant;
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Ink(
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: border),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 24, color: cs.onSurface),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1720,7 +1971,13 @@ class _TopToolbar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final presets = <Color>[Colors.black, Colors.red, Colors.yellow, Colors.green, Colors.blue];
+    final presets = <Color>[
+      Colors.black,
+      Colors.red,
+      Colors.yellow,
+      Colors.green,
+      Colors.blue,
+    ];
 
     return Container(
       alignment: Alignment.centerLeft,
@@ -1729,68 +1986,88 @@ class _TopToolbar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _toolButton(context, icon: Icons.edit, selected: !isEraser, tooltip: 'Pen', onTap: onPen),
+            _toolButton(
+              context,
+              icon: Icons.edit,
+              selected: !isEraser,
+              tooltip: 'Pen',
+              onTap: onPen,
+            ),
             const SizedBox(width: 4),
-            _toolButton(context,
-                icon: Icons.cleaning_services, selected: isEraser, tooltip: 'Eraser', onTap: onEraser),
+            _toolButton(
+              context,
+              icon: Icons.cleaning_services,
+              selected: isEraser,
+              tooltip: 'Eraser',
+              onTap: onEraser,
+            ),
             const SizedBox(width: 8),
             Row(
               children: [
                 const Icon(Icons.line_weight, size: 20),
                 SizedBox(
                   width: 140,
-                  child: Slider(min: 1, max: 20, value: strokeWidth, onChanged: onChangeWidth),
+                  child: Slider(
+                    min: 1,
+                    max: 20,
+                    value: strokeWidth,
+                    onChanged: onChangeWidth,
+                  ),
                 ),
               ],
             ),
             const VerticalDivider(width: 16),
             Row(
               children: presets
-                  .map((c) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 6.0),
-                        child: _ringColorDot(
-                          color: c,
-                          selected: c.value == color.value && !isEraser,
-                          onTap: () => onPickPresetColor(c),
-                        ),
-                      ))
+                  .map(
+                    (c) => Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                      child: _ringColorDot(
+                        color: c,
+                        selected: c.value == color.value && !isEraser,
+                        onTap: () => onPickPresetColor(c),
+                      ),
+                    ),
+                  )
                   .toList(),
             ),
             if (savedColors.isNotEmpty) ...[
               const SizedBox(width: 8),
               Row(
                 children: savedColors
-                    .map((c) => Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              _ringColorDot(
-                                color: c,
-                                selected: c.value == color.value && !isEraser,
-                                onTap: () => onPickSavedColor(c),
-                              ),
-                              Positioned(
-                                right: -2,
-                                top: -2,
-                                child: InkWell(
-                                  onTap: () => onRemoveSavedColor(c),
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: Container(
-                                    width: 16,
-                                    height: 16,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.black26),
-                                    ),
-                                    child: const Icon(Icons.close, size: 12),
+                    .map(
+                      (c) => Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            _ringColorDot(
+                              color: c,
+                              selected: c.value == color.value && !isEraser,
+                              onTap: () => onPickSavedColor(c),
+                            ),
+                            Positioned(
+                              right: -2,
+                              top: -2,
+                              child: InkWell(
+                                onTap: () => onRemoveSavedColor(c),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  width: 16,
+                                  height: 16,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.black26),
                                   ),
+                                  child: const Icon(Icons.close, size: 12),
                                 ),
                               ),
-                            ],
-                          ),
-                        ))
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
                     .toList(),
               ),
             ],
@@ -1806,20 +2083,30 @@ class _TopToolbar extends StatelessWidget {
     );
   }
 
-  Widget _toolButton(BuildContext context,
-      {required IconData icon, required bool selected, required VoidCallback onTap, String? tooltip}) {
+  Widget _toolButton(
+    BuildContext context, {
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+    String? tooltip,
+  }) {
     final cs = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 2),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: selected ? cs.primary : Colors.transparent, width: selected ? 2 : 0),
+        border: Border.all(
+          color: selected ? cs.primary : Colors.transparent,
+          width: selected ? 2 : 0,
+        ),
       ),
       child: IconButton.filledTonal(
         onPressed: onTap,
         icon: Icon(icon, color: selected ? cs.onSecondaryContainer : null),
         tooltip: tooltip,
-        style: IconButton.styleFrom(backgroundColor: selected ? cs.secondaryContainer : null),
+        style: IconButton.styleFrom(
+          backgroundColor: selected ? cs.secondaryContainer : null,
+        ),
       ),
     );
   }
@@ -1837,7 +2124,9 @@ class _TopToolbar extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
-            color: selected ? Colors.black.withOpacity(0.25) : Colors.transparent,
+            color: selected
+                ? Colors.black.withOpacity(0.25)
+                : Colors.transparent,
             width: selected ? 2 : 0,
           ),
         ),
@@ -1873,7 +2162,7 @@ class _RainbowPanel2D extends StatefulWidget {
 }
 
 class _RainbowPanel2DState extends State<_RainbowPanel2D> {
-  late double _hue;   // 0..360
+  late double _hue; // 0..360
   late double _value; // 0..1
 
   @override
@@ -1886,82 +2175,87 @@ class _RainbowPanel2DState extends State<_RainbowPanel2D> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(builder: (ctx, cons) {
-      final w = cons.maxWidth;
-      final h = widget.height;
+    return LayoutBuilder(
+      builder: (ctx, cons) {
+        final w = cons.maxWidth;
+        final h = widget.height;
 
-      void handleAt(Offset p) {
-        final dx = p.dx.clamp(0, math.max(1.0, w));
-        final dy = p.dy.clamp(0, math.max(1.0, h));
-        final hue = (dx / w) * 360.0;
-        final value = 1.0 - (dy / h);
-        setState(() {
-          _hue = hue;
-          _value = value;
-        });
-        final color = HSVColor.fromAHSV(1, hue, 1, value).toColor();
-        widget.onChanged(hue, value, color);
-      }
+        void handleAt(Offset p) {
+          final dx = p.dx.clamp(0, math.max(1.0, w));
+          final dy = p.dy.clamp(0, math.max(1.0, h));
+          final hue = (dx / w) * 360.0;
+          final value = 1.0 - (dy / h);
+          setState(() {
+            _hue = hue;
+            _value = value;
+          });
+          final color = HSVColor.fromAHSV(1, hue, 1, value).toColor();
+          widget.onChanged(hue, value, color);
+        }
 
-      final indicatorX = (_hue / 360) * (w - 12);
-      final indicatorY = (1 - _value) * (h - 12);
+        final indicatorX = (_hue / 360) * (w - 12);
+        final indicatorY = (1 - _value) * (h - 12);
 
-      return GestureDetector(
-        onPanDown: (d) => handleAt(d.localPosition),
-        onPanUpdate: (d) => handleAt(d.localPosition),
-        child: Container(
-          height: h,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.black12),
-          ),
-          child: Stack(
-            children: [
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  gradient: const LinearGradient(
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                    colors: [
-                      Color(0xFFFF0000),
-                      Color(0xFFFFFF00),
-                      Color(0xFF00FF00),
-                      Color(0xFF00FFFF),
-                      Color(0xFF0000FF),
-                      Color(0xFFFF00FF),
-                      Color(0xFFFF0000),
-                    ],
-                  ),
-                ),
-              ),
-              Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Colors.black.withOpacity(0.95)],
-                  ),
-                ),
-              ),
-              Positioned(
-                left: indicatorX,
-                top: indicatorY,
-                child: Container(
-                  width: 12,
-                  height: 12,
+        return GestureDetector(
+          onPanDown: (d) => handleAt(d.localPosition),
+          onPanUpdate: (d) => handleAt(d.localPosition),
+          child: Container(
+            height: h,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.black12),
+            ),
+            child: Stack(
+              children: [
+                Container(
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                    gradient: const LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        Color(0xFFFF0000),
+                        Color(0xFFFFFF00),
+                        Color(0xFF00FF00),
+                        Color(0xFF00FFFF),
+                        Color(0xFF0000FF),
+                        Color(0xFFFF00FF),
+                        Color(0xFFFF0000),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+                Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withOpacity(0.95),
+                      ],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: indicatorX,
+                  top: indicatorY,
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      );
-    });
+        );
+      },
+    );
   }
 }
 
@@ -2079,10 +2373,14 @@ class _CenteredAt extends SingleChildLayoutDelegate {
   _CenteredAt(this.center);
 
   @override
-  bool shouldRelayout(covariant _CenteredAt oldDelegate) => oldDelegate.center != center;
+  bool shouldRelayout(covariant _CenteredAt oldDelegate) =>
+      oldDelegate.center != center;
 
   @override
   Offset getPositionForChild(Size size, Size childSize) {
-    return Offset(center.dx - childSize.width / 2, center.dy - childSize.height / 2);
+    return Offset(
+      center.dx - childSize.width / 2,
+      center.dy - childSize.height / 2,
+    );
   }
 }

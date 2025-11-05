@@ -4,24 +4,20 @@ import 'dart:convert';
 import 'package:image_picker/image_picker.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:my_note_app/api/api_service.dart';
-import 'package:my_note_app/screens/home_screen.dart';
 import 'package:my_note_app/screens/drawing_screen.dart' as rt;
-import 'package:my_note_app/screens/documents_screen.dart';
-import 'package:my_note_app/screens/profile_screen.dart';
-import 'package:my_note_app/screens/search_screen.dart';
 import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-// ✅ ใช้ navbar แบบรีใช้ซ้ำ
-import 'package:my_note_app/widgets/app_bottom_nav_bar.dart';
 
 class NewPostScreen extends StatefulWidget {
-  final int userId; // id_user จริงจาก login
+  final int userId;           // id_user จริงจาก login
   final String username;
+  final VoidCallback? onPosted; // ✅ callback เรียกเมื่อโพสต์เสร็จ (สำหรับโหมดแท็บ)
 
   const NewPostScreen({
     super.key,
     required this.userId,
     required this.username,
+    this.onPosted,
   });
 
   @override
@@ -33,7 +29,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
   // ---- ราคา/ประเภทโพสต์ ----
   String _priceType = 'free'; // 'free' | 'paid'
-  final TextEditingController _priceCtrl = TextEditingController(); // ราคาหน่วย "บาท" (ผู้ใช้พิมพ์)
+  final TextEditingController _priceCtrl = TextEditingController(); // ราคาหน่วย "บาท"
 
   // header user
   String _username = '';
@@ -118,7 +114,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() {});
+      setState(() {}); // เฉย ๆ ไว้ก่อน
     }
   }
 
@@ -150,6 +146,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
     if (merged.length > _maxImages) {
       _toast('เลือกรูปได้สูงสุด $_maxImages รูป');
     }
+    if (!mounted) return;
     setState(() => _images = merged.take(_maxImages).toList());
   }
 
@@ -158,6 +155,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
       type: FileType.custom,
       allowedExtensions: ['pdf', 'doc', 'docx', 'zip', 'ppt', 'xls', 'xlsx'],
     );
+    if (!mounted) return;
     if (result != null && result.files.isNotEmpty) {
       setState(() {
         _file = File(result.files.single.path!);
@@ -175,18 +173,17 @@ class _NewPostScreenState extends State<NewPostScreen> {
       return;
     }
 
-    int? priceSatang;
     if (_priceType == 'paid') {
-      final input = _priceCtrl.text;
-      final satang = _parseBahtToSatang(input);
+      final satang = _parseBahtToSatang(_priceCtrl.text);
       if (satang <= 0) {
         _toast('กรุณาใส่ราคามากกว่า 0 บาท');
         return;
       }
-      priceSatang = satang;
     }
 
     setState(() => _submitting = true);
+
+    // แสดงโหลด
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -207,8 +204,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 ? null
                 : double.tryParse(_priceCtrl.text.replaceAll(',', '')))
             : null,
-        // ถ้าฝั่ง API รองรับเพิ่มฟิลด์ satang:
-        // extraFields: priceSatang != null ? {'price_amount_satang': '$priceSatang'} : {},
+        // ถ้าฝั่ง API รองรับ satang:
+        // extraFields: {'price_amount_satang': _parseBahtToSatang(_priceCtrl.text)}
       );
 
       if (!mounted) return;
@@ -216,6 +213,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
       if (res.statusCode == 201 || res.statusCode == 200) {
         _toast('โพสต์สำเร็จ');
+
+        // เคลียร์ฟอร์มในกรณีเป็นแท็บ (ผู้ใช้ยังอยู่หน้าเดิม)
         setState(() {
           _detailController.clear();
           _priceType = 'free';
@@ -226,15 +225,23 @@ class _NewPostScreenState extends State<NewPostScreen> {
           selectedYear = 'ปี 1';
           selectedSubject = subjects.isNotEmpty ? subjects.first : null;
         });
+
+        // ✅ แจ้งกลับ
+        if (widget.onPosted != null) {
+          widget.onPosted!.call();       // โหมดแท็บ: ให้ home ไปรีโหลด/เปลี่ยนแท็บ
+        } else {
+          Navigator.pop(context, true);  // โหมด push: pop พร้อมค่า
+        }
       } else {
         _toast('โพสต์ไม่สำเร็จ (${res.statusCode})');
       }
     } catch (e) {
       if (!mounted) return;
-      Navigator.pop(context);
+      Navigator.pop(context); // ปิด loading
       _toast('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
     } finally {
-      if (mounted) setState(() => _submitting = false);
+      if (!mounted) return;
+      setState(() => _submitting = false);
     }
   }
 
@@ -281,7 +288,10 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
       final socket = IO.io(
         ApiService.host,
-        IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
+        IO.OptionBuilder()
+            .setTransports(['websocket'])
+            .disableAutoConnect()
+            .build(),
       );
       socket.connect();
       socket.onConnect((_) => socket.emit('join', {'boardId': createdRoomId}));
@@ -353,13 +363,19 @@ class _NewPostScreenState extends State<NewPostScreen> {
     final subjectItems = subjects
         .map((e) => DropdownMenuItem<String>(value: e, child: Text(e)))
         .toList();
-
     final isPaid = _priceType == 'paid';
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('New Post'),
-        automaticallyImplyLeading: false,
+        title: const Text('สร้างโพสต์'),
+        // ✅ โชว์ปุ่มปิดเฉพาะเมื่อถูก push (มีสแต็กให้ pop)
+        leading: Navigator.canPop(context)
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                tooltip: 'ปิด',
+                onPressed: () => Navigator.pop(context),
+              )
+            : null,
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
@@ -373,7 +389,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ====== แถวหัวฟอร์ม (แก้ overflow อย่างเดียว) ======
+              // ====== แถวหัวฟอร์ม (กัน overflow) ======
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
@@ -391,7 +407,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   ),
                   const SizedBox(width: 8),
 
-                  // ปี (จำกัดความกว้างคงที่ป้องกันดันออก)
+                  // ปี
                   SizedBox(
                     width: 96,
                     child: Container(
@@ -431,7 +447,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   ),
                   const SizedBox(width: 8),
 
-                  // วิชา (ให้กินพื้นที่ที่เหลือ)
+                  // วิชา
                   Expanded(
                     flex: 2,
                     child: Container(
@@ -444,9 +460,11 @@ class _NewPostScreenState extends State<NewPostScreen> {
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           isExpanded: true,
-                          value:
-                              subjects.contains(selectedSubject) ? selectedSubject : null,
-                          hint: Text('รายวิชา', style: TextStyle(color: cs.onSurfaceVariant)),
+                          value: subjects.contains(selectedSubject)
+                              ? selectedSubject
+                              : null,
+                          hint: Text('รายวิชา',
+                              style: TextStyle(color: cs.onSurfaceVariant)),
                           items: subjectItems,
                           selectedItemBuilder: (context) => subjects.map((e) {
                             return Text(
@@ -465,7 +483,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
                   ),
                   const SizedBox(width: 8),
 
-                  // ปุ่มโพสต์ (ความสูงคงที่ให้ไม่ล้น)
+                  // ปุ่มโพสต์
                   SizedBox(
                     height: 40,
                     child: ElevatedButton(
@@ -506,14 +524,14 @@ class _NewPostScreenState extends State<NewPostScreen> {
                     onSelected: (_) => setState(() => _priceType = 'paid'),
                   ),
                   const SizedBox(width: 12),
-                  if (isPaid)
+                  if (_priceType == 'paid')
                     Text(
-                      '→ ${_priceCtrl.text.trim().isEmpty ? '' : _parseBahtToSatang(_priceCtrl.text).toString()} สต.',
+                      '→ ${_priceCtrl.text.trim().isEmpty ? '' : _parseBahtToSatang(_priceCtrl.text)} สต.',
                       style: TextStyle(color: Colors.grey.shade700),
                     ),
                 ],
               ),
-              if (isPaid) ...[
+              if (_priceType == 'paid') ...[
                 const SizedBox(height: 8),
                 TextField(
                   controller: _priceCtrl,
@@ -598,42 +616,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
           ),
         ),
       ),
-
-      // ✅ ใช้ navbar ที่รีใช้ซ้ำ
-      bottomNavigationBar: AppBottomNavBar(
-        currentIndex: 3, // Add tab
-        onTapAsync: (index) async {
-          if (index == 0) {
-            if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const homescreen()),
-            );
-          } else if (index == 1) {
-            if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const SearchScreen()),
-            );
-          } else if (index == 2) {
-            if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const DocumentsScreen()),
-            );
-          } else if (index == 3) {
-            // อยู่หน้า Add แล้ว
-          } else if (index == 4) {
-            if (!mounted) return;
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(
-                builder: (_) => ProfileScreen(userId: widget.userId),
-              ),
-            );
-          }
-        },
-      ),
+      // ❌ ไม่มี bottomNavigationBar ที่นี่ — navbar อยู่ใน home_screen
     );
   }
 }
