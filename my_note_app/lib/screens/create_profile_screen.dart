@@ -201,27 +201,27 @@ class _CreateProfileScreenState extends State<CreateProfileScreen> {
                         const SizedBox(height: 12),
 
                         // Phone (PromptPay) — ใหม่
-                        TextFormField(
-                          controller: _phoneCtrl,
-                          keyboardType: TextInputType.phone,
-                          maxLength: 10, // ไทยนิยม 10 หลัก
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                          decoration: const InputDecoration(
-                            labelText: 'Phone (PromptPay)',
-                            hintText: 'เช่น 0812345678',
-                            counterText: '',
-                            prefixIcon: Icon(Icons.phone_android),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
-                            filled: true,
-                          ),
-                          validator: (v) {
-                            final s = (v ?? '').trim();
-                            if (s.isEmpty) return null;                // ไม่บังคับกรอก
-                            if (s.length < 9 || s.length > 10) return 'กรุณากรอกเบอร์ 9–10 หลัก';
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 12),
+                        // TextFormField(
+                        //   controller: _phoneCtrl,
+                        //   keyboardType: TextInputType.phone,
+                        //   maxLength: 10, // ไทยนิยม 10 หลัก
+                        //   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        //   decoration: const InputDecoration(
+                        //     labelText: 'Phone (PromptPay)',
+                        //     hintText: 'เช่น 0812345678',
+                        //     counterText: '',
+                        //     prefixIcon: Icon(Icons.phone_android),
+                        //     border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+                        //     filled: true,
+                        //   ),
+                        //   validator: (v) {
+                        //     final s = (v ?? '').trim();
+                        //     if (s.isEmpty) return null;                // ไม่บังคับกรอก
+                        //     if (s.length < 9 || s.length > 10) return 'กรุณากรอกเบอร์ 9–10 หลัก';
+                        //     return null;
+                        //   },
+                        // ),
+                        // const SizedBox(height: 12),
 
                         // Gender
                         DropdownButtonFormField<String>(

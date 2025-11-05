@@ -9,9 +9,9 @@ import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class NewPostScreen extends StatefulWidget {
-  final int userId;           // id_user จริงจาก login
+  final int userId;           
   final String username;
-  final VoidCallback? onPosted; // ✅ callback เรียกเมื่อโพสต์เสร็จ (สำหรับโหมดแท็บ)
+  final VoidCallback? onPosted; // ถ้ามี => โหมดแท็บ (ไม่ต้องมี AppBar ของตัวเอง)
 
   const NewPostScreen({
     super.key,
@@ -27,28 +27,23 @@ class NewPostScreen extends StatefulWidget {
 class _NewPostScreenState extends State<NewPostScreen> {
   final TextEditingController _detailController = TextEditingController();
 
-  // ---- ราคา/ประเภทโพสต์ ----
   String _priceType = 'free'; // 'free' | 'paid'
-  final TextEditingController _priceCtrl = TextEditingController(); // ราคาหน่วย "บาท"
+  final TextEditingController _priceCtrl = TextEditingController();
 
-  // header user
   String _username = '';
   String? _avatarUrl;
 
-  // form state
   String selectedYear = 'ปี 1';
   String? selectedSubject;
 
-  // รูปหลายรูป (สูงสุด 10)
   final ImagePicker _picker = ImagePicker();
   final int _maxImages = 10;
-  List<XFile> _images = []; // preview
+  List<XFile> _images = [];
 
-  // แนบไฟล์อื่น 1 ชิ้น
   File? _file;
   String? _fileName;
 
-  bool _submitting = false; // กันการกดซ้ำตอนกำลังโพสต์
+  bool _submitting = false;
 
   final List<String> years = ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4', 'วิชาเฉพาะเลือก'];
 
@@ -82,7 +77,15 @@ class _NewPostScreenState extends State<NewPostScreen> {
     '01418490 สหกิจศึกษา',
     '01418499 โครงงานวิทยาการคอมพิวเตอร์',
   ];
-  final List<String> subjects5 = ['01418490 เว็บ', '01418499 ธนาคาร'];
+  final List<String> subjects5 = [
+    '01418499 ธนาคาร',
+    '01418212 การโปรแกรมภาษาซี',
+    '01418213 การโปรแกรมภาษาโคบอล',
+    '01418222 ระบบสารสนเทศวิสาหกิจ',
+    '01418324 ระบบสนับสนุนการตัดสินใจและอัจฉริยะทางธุรกิจ',
+    '01418362 การเรียนรู้ของเครื่องเบื้องต้น',
+    '01418441 เว็บเทคโนโลยีและเว็บบริการ'
+  ];
 
   late final Map<String, List<String>> subjectsByYear = {
     'ปี 1': subjects1,
@@ -94,10 +97,28 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
   List<String> get subjects => subjectsByYear[selectedYear] ?? const [];
 
+  // ===== loading dialog on root navigator =====
+  bool _loadingVisible = false;
+  Future<void> _showLoading() async {
+    _loadingVisible = true;
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: true, // << สำคัญ
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+  }
+  void _safePopDialog() {
+    if (_loadingVisible) {
+      _loadingVisible = false;
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
+
   @override
   void initState() {
     super.initState();
-    _username = widget.username; // ค่าเริ่มต้นระหว่างรอโหลด
+    _username = widget.username;
     selectedSubject = subjects.isNotEmpty ? subjects.first : null;
     _loadUserHeader();
   }
@@ -114,7 +135,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
       });
     } catch (_) {
       if (!mounted) return;
-      setState(() {}); // เฉย ๆ ไว้ก่อน
+      setState(() {});
     }
   }
 
@@ -125,7 +146,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
     super.dispose();
   }
 
-  // --------- Utils ----------
   int _parseBahtToSatang(String input) {
     final normalized = input.trim().replaceAll(',', '');
     if (normalized.isEmpty) return 0;
@@ -138,7 +158,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  // --------- Pickers ----------
   Future<void> _pickImages() async {
     final files = await _picker.pickMultiImage(imageQuality: 85);
     if (files.isEmpty) return;
@@ -164,7 +183,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
     }
   }
 
-  // --------- Post handler ----------
   Future<void> _handlePost() async {
     if (_submitting) return;
 
@@ -182,13 +200,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
     }
 
     setState(() => _submitting = true);
-
-    // แสดงโหลด
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
+    _showLoading();
 
     try {
       final res = await ApiService.createPost(
@@ -204,17 +216,13 @@ class _NewPostScreenState extends State<NewPostScreen> {
                 ? null
                 : double.tryParse(_priceCtrl.text.replaceAll(',', '')))
             : null,
-        // ถ้าฝั่ง API รองรับ satang:
-        // extraFields: {'price_amount_satang': _parseBahtToSatang(_priceCtrl.text)}
       );
 
       if (!mounted) return;
-      Navigator.pop(context); // ปิด loading
+      _safePopDialog();
 
       if (res.statusCode == 201 || res.statusCode == 200) {
         _toast('โพสต์สำเร็จ');
-
-        // เคลียร์ฟอร์มในกรณีเป็นแท็บ (ผู้ใช้ยังอยู่หน้าเดิม)
         setState(() {
           _detailController.clear();
           _priceType = 'free';
@@ -226,18 +234,19 @@ class _NewPostScreenState extends State<NewPostScreen> {
           selectedSubject = subjects.isNotEmpty ? subjects.first : null;
         });
 
-        // ✅ แจ้งกลับ
+        // โหมดแท็บ => มี onPosted
         if (widget.onPosted != null) {
-          widget.onPosted!.call();       // โหมดแท็บ: ให้ home ไปรีโหลด/เปลี่ยนแท็บ
+          widget.onPosted!.call();
         } else {
-          Navigator.pop(context, true);  // โหมด push: pop พร้อมค่า
+          // โหมด push => ปิดหน้านี้
+          if (Navigator.canPop(context)) Navigator.pop(context, true);
         }
       } else {
         _toast('โพสต์ไม่สำเร็จ (${res.statusCode})');
       }
-    } catch (e) {
+    } catch (_) {
       if (!mounted) return;
-      Navigator.pop(context); // ปิด loading
+      _safePopDialog();
       _toast('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
     } finally {
       if (!mounted) return;
@@ -252,7 +261,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
     return const AssetImage('assets/default_avatar.png');
   }
 
-  // --------- เปิดหน้าเขียนโน้ต realtime ----------
   String _slugify(String s) {
     final t = s
         .toLowerCase()
@@ -288,10 +296,7 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
       final socket = IO.io(
         ApiService.host,
-        IO.OptionBuilder()
-            .setTransports(['websocket'])
-            .disableAutoConnect()
-            .build(),
+        IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
       );
       socket.connect();
       socket.onConnect((_) => socket.emit('join', {'boardId': createdRoomId}));
@@ -314,7 +319,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
     }
   }
 
-  // preview รูปแบบ Grid
   Widget _imagesPreview() {
     if (_images.isEmpty) return const SizedBox.shrink();
     return GridView.builder(
@@ -363,51 +367,37 @@ class _NewPostScreenState extends State<NewPostScreen> {
     final subjectItems = subjects
         .map((e) => DropdownMenuItem<String>(value: e, child: Text(e)))
         .toList();
-    final isPaid = _priceType == 'paid';
+
+    // โหมดแสดง AppBar ของตัวเอง = ถูก push (ไม่มี onPosted)
+    final bool showOwnAppBar = (widget.onPosted == null);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('สร้างโพสต์'),
-        // ✅ โชว์ปุ่มปิดเฉพาะเมื่อถูก push (มีสแต็กให้ pop)
-        leading: Navigator.canPop(context)
-            ? IconButton(
+      appBar: showOwnAppBar
+          ? AppBar(
+              title: const Text('สร้างโพสต์'),
+              leading: IconButton(
                 icon: const Icon(Icons.close),
                 tooltip: 'ปิด',
                 onPressed: () => Navigator.pop(context),
-              )
-            : null,
-        actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16.0),
-            child: CircleAvatar(radius: 18, backgroundImage: _avatarProvider()),
-          ),
-        ],
-      ),
+              ),
+              actions: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 16.0),
+                  child: CircleAvatar(radius: 18, backgroundImage: _avatarProvider()),
+                ),
+              ],
+            )
+          : null,
+
       body: Padding(
         padding: const EdgeInsets.all(15.0),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ====== แถวหัวฟอร์ม (กัน overflow) ======
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // ชื่อผู้ใช้
-                  Expanded(
-                    child: Text(
-                      _username,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-
-                  // ปี
                   SizedBox(
                     width: 96,
                     child: Container(
@@ -446,8 +436,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-
-                  // วิชา
                   Expanded(
                     flex: 2,
                     child: Container(
@@ -482,8 +470,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
                     ),
                   ),
                   const SizedBox(width: 8),
-
-                  // ปุ่มโพสต์
                   SizedBox(
                     height: 40,
                     child: ElevatedButton(
@@ -507,7 +493,6 @@ class _NewPostScreenState extends State<NewPostScreen> {
 
               const SizedBox(height: 16),
 
-              // ---- ส่วนกำหนดราคา ----
               Row(
                 children: [
                   const Text('ราคา:'),
@@ -595,8 +580,11 @@ class _NewPostScreenState extends State<NewPostScreen> {
                       const Icon(Icons.insert_drive_file, size: 20),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(_fileName!,
-                            maxLines: 1, overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          _fileName!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                       const SizedBox(width: 8),
                       const Icon(Icons.check_circle, color: Colors.green),
@@ -616,7 +604,8 @@ class _NewPostScreenState extends State<NewPostScreen> {
           ),
         ),
       ),
-      // ❌ ไม่มี bottomNavigationBar ที่นี่ — navbar อยู่ใน home_screen
+
+      // ไม่ใส่ bottomNavigationBar ตรงนี้ — ให้ homescreen ถือ navbar เสมอ
     );
   }
 }
