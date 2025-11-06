@@ -1,122 +1,96 @@
-<!-- views/admin_purchases.ejs -->
-<h3>Purchases (<%= status %>)</h3>
+<!-- views/admin_payouts.ejs -->
+<h3>Payouts (<%= status %>)</h3>
 
 <style>
-  table.purchases { width:100%; border-collapse:collapse; table-layout:fixed; }
-  table.purchases th, table.purchases td {
+  table.payouts { width:100%; border-collapse:collapse; table-layout:fixed; }
+  table.payouts th, table.payouts td {
     border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left; vertical-align:middle;
   }
-  table.purchases thead th { white-space:nowrap; }
+  table.payouts thead th { white-space:nowrap; }
 
-  .col-id      { width:6%;  }
-  .col-buyer   { width:14%; }
-  .col-seller  { width:14%; }
-  .col-post    { width:34%; }
-  .col-amount  { width:9%;  }
-  .col-slip    { width:9%;  }
-  .col-created { width:14%; }
-  .col-actions { width:10%; }
+  /* คอลัมน์: ID, User, QR, Gross, Net, Requested, Action */
+  .col-id        { width:7%;  }
+  .col-user      { width:18%; }
+  .col-qr        { width:16%; }
+  .col-gross     { width:11%; }
+  .col-net       { width:11%; }
+  .col-requested { width:19%; }
+  .col-action    { width:18%; }
 
-  .price { font-weight:600; }
+  .qr-btn { border:0; padding:0; background:transparent; line-height:0; cursor:zoom-in; }
+  .qr-thumb { height:56px; border-radius:8px; border:1px solid #334155; display:block; }
 
-  /* โพสต์ที่ซื้อ (ถ้ามีรูปปก) */
-  td.post-cell { overflow:hidden; }
-  .post-wrap { display:flex; gap:12px; align-items:flex-start; max-width:100%; }
-  .post-meta { display:flex; flex-direction:column; gap:4px; min-width:220px; max-width:100%; }
-  .post-title {
-    font-weight:700; line-height:1.25;
-    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
-  }
-  .post-text {
-    opacity:.9; line-height:1.3;
-    display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
-  }
-
-  /* ปุ่ม/รูป */
-  .img-btn { border:0; padding:0; background:transparent; line-height:0; cursor:zoom-in; }
-  .thumb   { height:56px; border-radius:8px; border:1px solid #334155; display:block; }
-  .post-thumb { width:84px; height:84px; object-fit:cover; }
-
-  /* Lightbox (เหมือน payouts) */
+  /* Lightbox modal */
   .img-modal { position:fixed; inset:0; background:rgba(0,0,0,.8); display:none;
                align-items:center; justify-content:center; z-index:9999; }
   .img-modal.open { display:flex; }
   .img-modal .wrap { max-width:92vw; max-height:92vh; position:relative; }
   .img-modal img  { max-width:92vw; max-height:92vh; border-radius:12px; display:block; background:#0b0b0b; }
   .img-modal .close{
-    position:absolute; top:8px; right:8px; width:36px; height:36px; border-radius:999px;
-    border:1px solid #334155; background:rgba(17,24,39,.95); color:#fff; cursor:pointer;
-    display:flex; align-items:center; justify-content:center; font-size:18px; line-height:1;
+    position:absolute; top:8px; right:8px;
+    width:36px; height:36px; border-radius:999px;
+    border:1px solid #334155; background:rgba(17,24,39,.95);
+    color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    font-size:18px; line-height:1;
   }
 
   @media (max-width: 640px){
-    .post-thumb{ width:72px; height:72px; }
-    .col-post{ width:auto; }
+    .col-qr { width:22%; }
+    .qr-thumb { height:48px; }
   }
 </style>
 
-<table class="purchases" role="grid">
+<table class="payouts" role="grid">
   <colgroup>
     <col class="col-id" />
-    <col class="col-buyer" />
-    <col class="col-seller" />
-    <col class="col-post" />
-    <col class="col-amount" />
-    <col class="col-slip" />
-    <col class="col-created" />
-    <col class="col-actions" />
+    <col class="col-user" />
+    <col class="col-qr" />
+    <col class="col-gross" />
+    <col class="col-net" />
+    <col class="col-requested" />
+    <col class="col-action" />
   </colgroup>
 
   <thead>
     <tr>
-      <th>ID</th><th>Buyer</th><th>Seller</th><th>Post</th>
-      <th>Amount</th><th>Slip</th><th>Created</th><th>Actions</th>
+      <th>ID</th>
+      <th>User</th>
+      <th>QR / PromptPay</th>
+      <th>Gross</th>
+      <th>Net</th>
+      <th>Requested</th>
+      <th>Action</th>
     </tr>
   </thead>
 
   <tbody>
-    <% if (!(rows||[]).length) { %>
-      <tr><td colspan="8" style="text-align:center;opacity:.7">No items</td></tr>
+    <% if ((rows || []).length === 0) { %>
+      <tr><td colspan="7" style="text-align:center;opacity:.7">No items</td></tr>
     <% } %>
 
     <% rows.forEach(r => { %>
       <tr>
         <td>#<%= r.id %></td>
-        <td><%= r.buyer_name %> (#<%= r.buyer_id %>)</td>
-        <td><%= r.seller_name %> (#<%= r.seller_id %>)</td>
 
-        <!-- Post (มีรูปปกก็คลิกดูได้) -->
-        <td class="post-cell">
-          <div class="post-wrap">
-            <% if (r.post_cover) { %>
-              <button type="button" class="img-btn" data-src="<%= r.post_cover %>" aria-label="Open post image">
-                <img src="<%= r.post_cover %>" alt="post cover" class="thumb post-thumb" />
-              </button>
-            <% } %>
-            <div class="post-meta">
-              <% if (r.post_subject || r.post_year_label) { %>
-                <div class="post-title">
-                  <%= r.post_subject || '-' %>
-                  <% if (r.post_year_label) { %><span style="opacity:.7"> · <%= r.post_year_label %></span><% } %>
-                </div>
-              <% } %>
-              <div class="post-text">
-                <%= ((r.post_text || r.post_excerpt || r.post || '—') + '').slice(0, 200) %>
-              </div>
-            </div>
-          </div>
-        </td>
+        <!-- ควร SELECT u.username AS username, w.user_id AS user_id -->
+        <td><%= r.username %> (#<%= r.user_id %>)</td>
 
-        <td class="price">฿<%= ((r.amount_satang||0)/100).toFixed(2) %></td>
-
-        <!-- Slip (ใช้ปุ่ม ไม่ใช้ <a>) -->
+        <!-- แสดงไฟล์ QR ที่แนบ -->
         <td>
-          <% if (r.slip_path) { %>
-            <button type="button" class="img-btn" data-src="<%= r.slip_path %>" aria-label="Open slip">
-              <img class="thumb" src="<%= r.slip_path %>" alt="slip">
+          <% if (r.bank_qr_file) { %>
+            <button type="button" class="qr-btn" data-src="<%= r.bank_qr_file %>" aria-label="Open QR">
+              <img src="<%= r.bank_qr_file %>" alt="QR" class="qr-thumb" />
             </button>
-          <% } else { %><em>no slip</em><% } %>
+          <% } else { %>
+            -
+          <% } %>
         </td>
+
+        <!-- amount_satang เป็นจำนวนสตางค์ -->
+        <td>฿<%= ((r.amount_satang || 0) / 100).toFixed(2) %></td>
+
+        <!-- ถ้าไม่มีระบบค่าธรรมเนียม Net = Gross -->
+        <td>฿<%= ((r.amount_satang || 0) / 100).toFixed(2) %></td>
 
         <td>
           <% const d = r.created_at ? new Date(r.created_at) : null; %>
@@ -127,11 +101,8 @@
         </td>
 
         <td>
-          <form method="post" action="/admin/purchases/<%= r.id %>/approve" style="display:inline">
-            <button type="submit">Approve</button>
-          </form>
-          <form method="post" action="/admin/purchases/<%= r.id %>/reject" style="display:inline">
-            <button type="submit" class="secondary">Reject</button>
+          <form method="post" action="/admin/payouts/<%= r.id %>/mark-paid" style="display:inline">
+            <button type="submit">Mark paid</button>
           </form>
         </td>
       </tr>
@@ -139,7 +110,7 @@
   </tbody>
 </table>
 
-<!-- Lightbox Modal -->
+<!-- Image Modal -->
 <div id="imgModal" class="img-modal" aria-hidden="true">
   <div class="wrap">
     <button class="close" type="button" aria-label="Close">×</button>
@@ -153,29 +124,30 @@
     const imgEl  = document.getElementById('imgModalImg');
     const closeBtn = modal.querySelector('.close');
 
-    function openModal(src){
-      if(!src) return;
-      imgEl.src = src;                            // โหลดรูปเข้า <img> (ไม่เปลี่ยนหน้า/ไม่ดาวน์โหลด)
+    const open = (src) => {
+      if (!src) return;
+      imgEl.src = src;
       modal.classList.add('open');
-      modal.setAttribute('aria-hidden','false');
-    }
-    function closeModal(){
+      modal.setAttribute('aria-hidden', 'false');
+    };
+    const close = () => {
       modal.classList.remove('open');
-      modal.setAttribute('aria-hidden','true');
+      modal.setAttribute('aria-hidden', 'true');
       imgEl.src = '';
-    }
+    };
 
-    // จับปุ่มรูปที่มี data-src (ทั้ง slip และ post cover)
+    // เปิด modal จากปุ่มรูป QR
     document.addEventListener('click', (e) => {
-      const t = e.target.closest('[data-src]');
-      if (!t) return;
+      const btn = e.target.closest('.qr-btn');
+      if (!btn) return;
       e.preventDefault();
       e.stopPropagation();
-      openModal(t.dataset.src);
+      open(btn.dataset.src);
     });
 
-    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
-    closeBtn.addEventListener('click', closeModal);
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+    // ปิด modal
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    closeBtn.addEventListener('click', close);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
   });
 </script>

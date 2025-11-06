@@ -509,11 +509,11 @@ class _NewPostScreenState extends State<NewPostScreen> {
                     onSelected: (_) => setState(() => _priceType = 'paid'),
                   ),
                   const SizedBox(width: 12),
-                  if (_priceType == 'paid')
-                    Text(
-                      '→ ${_priceCtrl.text.trim().isEmpty ? '' : _parseBahtToSatang(_priceCtrl.text)} สต.',
-                      style: TextStyle(color: Colors.grey.shade700),
-                    ),
+                  // if (_priceType == 'paid')
+                  //   Text(
+                  //     '→ ${_priceCtrl.text.trim().isEmpty ? '' : _parseBahtToSatang(_priceCtrl.text)} สต.',
+                  //     style: TextStyle(color: Colors.grey.shade700),
+                  //   ),
                 ],
               ),
               if (_priceType == 'paid') ...[

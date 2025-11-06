@@ -254,13 +254,6 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                             label: Text(_submitting ? 'กำลังส่ง...' : 'ยืนยันถอน'),
                           ),
                         ),
-
-                        const SizedBox(height: 8),
-                        TextButton.icon(
-                          onPressed: _submitting ? null : _openHistory,
-                          icon: const Icon(Icons.history),
-                          label: const Text('ดูประวัติถอนของฉัน'),
-                        ),
                       ],
                     ),
                   ),

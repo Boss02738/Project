@@ -1,36 +1,174 @@
+<!-- views/admin_purchases.ejs -->
 <h3>Purchases (<%= status %>)</h3>
-<table role="grid">
+
+<style>
+  table.purchases { width:100%; border-collapse:collapse; table-layout:fixed; }
+  table.purchases th, table.purchases td {
+    border-bottom:1px solid #1f2937; padding:10px 8px; text-align:left; vertical-align:middle;
+  }
+  table.purchases thead th { white-space:nowrap; }
+
+  /* คอลัมน์: ID, Buyer, Seller, Post, Amount, Slip, Created, Actions */
+  .col-id      { width:6%;  }
+  .col-buyer   { width:16%; }
+  .col-seller  { width:16%; }
+  .col-post    { width:24%; }
+  .col-amount  { width:10%; }
+  .col-slip    { width:12%; }
+  .col-created { width:16%; }
+  .col-actions { width:16%; }
+
+  .qr-btn { border:0; padding:0; background:transparent; line-height:0; cursor:zoom-in; }
+  .qr-thumb { height:56px; border-radius:8px; border:1px solid #334155; display:block; }
+
+  /* Lightbox modal */
+  .img-modal { position:fixed; inset:0; background:rgba(0,0,0,.8); display:none;
+               align-items:center; justify-content:center; z-index:9999; }
+  .img-modal.open { display:flex; }
+  .img-modal .wrap { max-width:92vw; max-height:92vh; position:relative; }
+  .img-modal img  { max-width:92vw; max-height:92vh; border-radius:12px; display:block; background:#0b0b0b; }
+  .img-modal .close{
+    position:absolute; top:8px; right:8px;
+    width:36px; height:36px; border-radius:999px;
+    border:1px solid #334155; background:rgba(17,24,39,.95);
+    color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center;
+    font-size:18px; line-height:1;
+  }
+
+  @media (max-width: 640px){
+    .col-slip { width:18%; }
+    .qr-thumb { height:48px; }
+  }
+</style>
+
+<table class="purchases" role="grid">
+  <colgroup>
+    <col class="col-id" />
+    <col class="col-buyer" />
+    <col class="col-seller" />
+    <col class="col-post" />
+    <col class="col-amount" />
+    <col class="col-slip" />
+    <col class="col-created" />
+    <col class="col-actions" />
+  </colgroup>
+
   <thead>
     <tr>
-      <th>ID</th><th>Buyer</th><th>Seller</th><th>Post</th>
-      <th>Amount</th><th>Slip</th><th>Created</th><th>Actions</th>
+      <th>ID</th>
+      <th>Buyer</th>
+      <th>Seller</th>
+      <th>Post</th>
+      <th>Amount</th>
+      <th>Slip</th>
+      <th>Created</th>
+      <th>Actions</th>
     </tr>
   </thead>
+
   <tbody>
-    <% rows.forEach(r => { %>
-      <tr>
-        <td><%= r.id %></td>
-        <td><%= r.buyer_name %> (#<%= r.buyer_id %>)</td>
-        <td><%= r.seller_name %> (#<%= r.seller_id %>)</td>
-        <td style="max-width:320px"><%= (r.post_text||'').slice(0,120) %></td>
-        <td class="price">฿<%= (r.amount_satang/100).toFixed(2) %></td>
-        <td>
-          <% if (r.slip_path) { %>
-            <a href="<%= r.slip_path %>" target="_blank">
-              <img class="slip" src="<%= r.slip_path %>" />
-            </a>
-          <% } else { %><em>no slip</em><% } %>
-        </td>
-        <td><%= new Date(r.created_at).toLocaleString() %></td>
-        <td>
-          <form method="post" action="/admin/purchases/<%= r.id %>/approve" style="display:inline">
-            <button type="submit">Approve</button>
-          </form>
-          <form method="post" action="/admin/purchases/<%= r.id %>/reject" style="display:inline">
-            <button type="submit" class="secondary">Reject</button>
-          </form>
-        </td>
-      </tr>
-    <% }) %>
+  <% if ((rows || []).length === 0) { %>
+    <tr><td colspan="8" style="text-align:center;opacity:.7">No items</td></tr>
+  <% } %>
+
+  <% rows.forEach(r => { %>
+    <tr>
+      <td>#<%= r.id %></td>
+
+      <!-- แสดง buyer/seller ชื่อ + id (ควร SELECT buyer/seller ชื่อไว้แล้ว) -->
+      <td><%= r.buyer_name %> (#<%= r.buyer_id %>)</td>
+      <td><%= r.seller_name %> (#<%= r.seller_id %>)</td>
+
+      <!-- โพสต์ ตัดความยาวเพื่อไม่ให้ตารางล้น -->
+      <td style="max-width: 360px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        <%= (r.post_text || '').slice(0, 120) %>
+      </td>
+
+      <!-- amount_satang → บาท -->
+      <td class="price">฿<%= ((r.amount_satang || 0) / 100).toFixed(2) %></td>
+
+      <!-- สลิปรูป: กดเพื่อเปิด modal -->
+      <td>
+        <% if (r.slip_path) {
+             // normalize path → '/uploads/...'
+             let raw = (r.slip_path || '').toString().trim()
+               .replace(/\\/g,'/')          // windows backslash → /
+               .replace(/^public\//,'');     // ตัด public/ ทิ้ง
+             if (!raw.startsWith('/')) raw = '/' + raw;
+             if (!/^\/uploads\//.test(raw)) {
+               raw = '/uploads/' + raw.replace(/^\/?uploads\//,'').replace(/^\//,'');
+             }
+             const slipUrl = raw;
+        %>
+          <button type="button" class="qr-btn" data-src="<%= slipUrl %>" aria-label="Open slip">
+            <img src="<%= slipUrl %>" alt="Slip" class="qr-thumb" />
+          </button>
+        <% } else { %>
+          <em>no slip</em>
+        <% } %>
+      </td>
+
+      <!-- วันที่สร้าง -->
+      <td>
+        <% const d = r.created_at ? new Date(r.created_at) : null; %>
+        <% if (d) { %>
+          <div><%= d.toLocaleDateString('th-TH') %></div>
+          <div style="opacity:.85"><%= d.toLocaleTimeString('th-TH', { hour:'2-digit', minute:'2-digit' }) %></div>
+        <% } else { %>-<% } %>
+      </td>
+
+      <!-- ปุ่มอนุมัติ/ปฏิเสธ -->
+      <td>
+        <form method="post" action="/admin/purchases/<%= r.id %>/approve" style="display:inline">
+          <button type="submit">Approve</button>
+        </form>
+        <form method="post" action="/admin/purchases/<%= r.id %>/reject" style="display:inline">
+          <button type="submit" class="secondary">Reject</button>
+        </form>
+      </td>
+    </tr>
+  <% }) %>
   </tbody>
 </table>
+
+<!-- Image Modal -->
+<div id="imgModal" class="img-modal" aria-hidden="true">
+  <div class="wrap">
+    <button class="close" type="button" aria-label="Close">×</button>
+    <img id="imgModalImg" alt="preview">
+  </div>
+</div>
+
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const modal   = document.getElementById('imgModal');
+    const imgEl   = document.getElementById('imgModalImg');
+    const closeEl = modal.querySelector('.close');
+
+    const open = (src) => {
+      if (!src) return;
+      imgEl.src = src;
+      modal.classList.add('open');
+      modal.setAttribute('aria-hidden', 'false');
+    };
+    const close = () => {
+      modal.classList.remove('open');
+      modal.setAttribute('aria-hidden', 'true');
+      imgEl.src = '';
+    };
+
+    // เปิด modal เมื่อกดปุ่มภาพ (อ่าน data-src เสมอ)
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('.qr-btn');
+      if (!btn) return;
+      e.preventDefault();
+      e.stopPropagation();
+      open(btn.dataset.src);
+    });
+
+    // ปิด modal
+    modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
+    closeEl.addEventListener('click', close);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  });
+</script>

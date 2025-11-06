@@ -203,7 +203,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   int _selectedImageIndex = -1;
   bool _isManipulatingImage = false;
 
-  // โหมด: วาด (false) / แก้ไขรูป (true)
   bool _editImagesMode = false;
 
   @override
@@ -788,23 +787,18 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     }
   }
 
-  /* ---------------- Local save/export helpers [ADDED] ---------------- */
-
-  // ---------- STORAGE PERMISSION (Android 10-12 เฉพาะ) ----------
   Future<void> _ensureStoragePermission() async {
     try {
-      // ส่วนใหญ่ Android 10+ ไม่ต้อง แต่ขอไว้เพื่อความชัวร์ (จะเงียบถ้าอนุญาตแล้ว)
       await Permission.storage.request();
     } catch (_) {}
   }
 
-  // ---------- สร้าง PNG (bytes) จากหน้า i ----------
   Future<Uint8List> _buildPngBytesForPage(int i) async {
     final b64 = await _sketchToPngBase64(
       _pages[i],
       texts: _textsPages[i],
       images: _imagePages[i],
-      width: 1240, // ~A4 @150dpi (ปรับได้)
+      width: 1240, 
       height: 1754,
     );
     final bytes = (b64 == null) ? Uint8List(0) : base64Decode(b64);
@@ -1336,31 +1330,31 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     _scheduleSync();
   }
 
-  void _bringImageToFront() {
-    final idx = _selectedImageIndex;
-    if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
-    setState(() {
-      final list = [..._imagePages[_pageIndex]];
-      final l = list.removeAt(idx);
-      list.add(l);
-      _imagePages[_pageIndex] = list;
-      _selectedImageIndex = list.length - 1;
-    });
-    _scheduleSync();
-  }
+  // void _bringImageToFront() {
+  //   final idx = _selectedImageIndex;
+  //   if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
+  //   setState(() {
+  //     final list = [..._imagePages[_pageIndex]];
+  //     final l = list.removeAt(idx);
+  //     list.add(l);
+  //     _imagePages[_pageIndex] = list;
+  //     _selectedImageIndex = list.length - 1;
+  //   });
+  //   _scheduleSync();
+  // }
 
-  void _sendImageToBack() {
-    final idx = _selectedImageIndex;
-    if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
-    setState(() {
-      final list = [..._imagePages[_pageIndex]];
-      final l = list.removeAt(idx);
-      list.insert(0, l);
-      _imagePages[_pageIndex] = list;
-      _selectedImageIndex = 0;
-    });
-    _scheduleSync();
-  }
+  // void _sendImageToBack() {
+  //   final idx = _selectedImageIndex;
+  //   if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
+  //   setState(() {
+  //     final list = [..._imagePages[_pageIndex]];
+  //     final l = list.removeAt(idx);
+  //     list.insert(0, l);
+  //     _imagePages[_pageIndex] = list;
+  //     _selectedImageIndex = 0;
+  //   });
+  //   _scheduleSync();
+  // }
 
   /* ---------------- Text box controls ---------------- */
 
@@ -1515,39 +1509,54 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
           title: const Text('Edit Text'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: textCtrl),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  const Text('Font size'),
-                  const SizedBox(width: 12),
-                  _fontBox(
-                    value: fontPx,
-                    onChanged: (v) => setSt(() => fontPx = v.clamp(8, 96)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  const Text('Color'),
-                  const SizedBox(width: 12),
-                  _colorSwatchesInline(
+          // ✅ ทำให้เนื้อหาเลื่อนแนวตั้งได้ (กัน overflow)
+          scrollable: true,
+          // ✅ ลดขอบซ้ายขวาให้พอดีมือถือ
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
+          content: ConstrainedBox(
+            // ✅ จำกัดความกว้างสูงสุดของ dialog (แท็บเล็ต/จอใหญ่)
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: textCtrl),
+                const SizedBox(height: 16),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    const Text('Font size'),
+                    const SizedBox(width: 12),
+                    // ✅ กันล้นแถว (ให้กล่องตัวเลขยืด/หดได้)
+                    Expanded(
+                      child: _fontBox(
+                        value: fontPx,
+                        onChanged: (v) => setSt(() => fontPx = v.clamp(8, 96)),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Color'),
+                ),
+                const SizedBox(height: 8),
+                // ✅ ให้พื้นที่เลือกสี “ยืด/หด” ได้ (ถ้ากว้างมากจะตัดบรรทัดเอง)
+                Flexible(
+                  child: _colorSwatchesInline(
                     current: current,
-                    onPickPreset: (c) {
-                      setSt(() => current = c);
-                    },
+                    onPickPreset: (c) => setSt(() => current = c),
                     onOpenPalette: () async {
                       final chosen = await _openRainbowPicker(context, current);
                       if (chosen != null) setSt(() => current = chosen);
                     },
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(
@@ -1940,7 +1949,6 @@ class _ActionButton extends StatelessWidget {
 }
 
 /* ---------------- TOP TOOLBAR ---------------- */
-
 class _TopToolbar extends StatelessWidget {
   const _TopToolbar({
     required this.isEraser,

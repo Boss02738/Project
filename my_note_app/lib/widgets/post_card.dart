@@ -129,7 +129,11 @@ class PostCard extends StatefulWidget {
   State<PostCard> createState() => _PostCardState();
 }
 
-class _PostCardState extends State<PostCard> {
+class _PostCardState extends State<PostCard>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   bool isExpanded = false;
   int? _userId;
   int _likeCount = 0;
@@ -167,21 +171,57 @@ class _PostCardState extends State<PostCard> {
         _likeCount = (m['like_count'] as int?) ?? 0;
         _commentCount = (m['comment_count'] as int?) ?? 0;
       });
+      // sync กลับลงแมพ (กันย้อนค่า)
+      widget.post['like_count'] = _likeCount;
+      widget.post['comment_count'] = _commentCount;
     } catch (_) {}
   }
 
   Future<void> _toggleLike() async {
     final postId = widget.post['id'] as int?;
     if (postId == null || _userId == null) return;
+
+    // --- optimistic update ---
+    final oldLiked = _likedByMe;
+    final oldCount = _likeCount;
+    final optimisticLiked = !oldLiked;
+    final optimisticCount =
+        (oldCount + (optimisticLiked ? 1 : -1)).clamp(0, 1 << 31);
+
+    setState(() {
+      _likedByMe = optimisticLiked;
+      _likeCount = optimisticCount;
+    });
+    // เขียนกลับลงแมพที่ parent ถือ reference
+    widget.post['liked_by_me'] = optimisticLiked;
+    widget.post['like_count'] = optimisticCount;
+
     try {
-      final liked = await ApiService.toggleLike(postId: postId, userId: _userId!);
+      final liked =
+          await ApiService.toggleLike(postId: postId, userId: _userId!);
+
+      if (!mounted) return;
+      if (liked != optimisticLiked) {
+        // server ตอบต่างจากที่เดา → sync ให้ถูก
+        final fixedCount =
+            (optimisticCount + (liked ? 1 : -1)).clamp(0, 1 << 31);
+        setState(() {
+          _likedByMe = liked;
+          _likeCount = fixedCount;
+        });
+        widget.post['liked_by_me'] = liked;
+        widget.post['like_count'] = fixedCount;
+      }
+    } catch (_) {
+      // rollback เมื่อพลาด
       if (!mounted) return;
       setState(() {
-        _likedByMe = liked;
-        _likeCount += liked ? 1 : -1;
-        if (_likeCount < 0) _likeCount = 0;
+        _likedByMe = oldLiked;
+        _likeCount = oldCount;
       });
-    } catch (_) {}
+      widget.post['liked_by_me'] = oldLiked;
+      widget.post['like_count'] = oldCount;
+    }
   }
 
   Future<void> _initSaved() async {
@@ -210,6 +250,7 @@ class _PostCardState extends State<PostCard> {
         postId: postId,
         onCommentAdded: () {
           setState(() => _commentCount++);
+          widget.post['comment_count'] = _commentCount;
         },
       ),
     );
@@ -229,6 +270,7 @@ class _PostCardState extends State<PostCard> {
       final saved = await ApiService.toggleSave(postId: postId, userId: uid);
       if (!mounted) return;
       setState(() => _savedByMe = saved);
+      // (ถ้าต้องการ) widget.post['saved_by_me'] = saved;
     } catch (_) {}
   }
 
@@ -477,6 +519,8 @@ class _PostCardState extends State<PostCard> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // สำคัญเมื่อใช้ KeepAlive mixin
+
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
     final cs = theme.colorScheme;
@@ -710,13 +754,13 @@ class _PostCardState extends State<PostCard> {
                   icon: Icon(_likedByMe ? Icons.favorite : Icons.favorite_border),
                   onPressed: _toggleLike,
                 ),
-                Text('${_likeCount}', style: textTheme.bodyMedium),
+                Text('$_likeCount', style: textTheme.bodyMedium),
                 const SizedBox(width: 12),
                 IconButton(
                   icon: const Icon(Icons.mode_comment_outlined),
                   onPressed: _openComments,
                 ),
-                Text('${_commentCount}', style: textTheme.bodyMedium),
+                Text('$_commentCount', style: textTheme.bodyMedium),
                 const Spacer(),
                 if (showPurchasedChip) const _PurchasedChip(),
                 if (showPurchasedChip) const SizedBox(width: 6),
