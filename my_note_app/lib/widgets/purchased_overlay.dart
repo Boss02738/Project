@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-/// ครอบ child ใด ๆ ให้มีป้าย "ซื้อแล้ว" มุมบนซ้าย
 class PurchasedOverlay extends StatelessWidget {
   final Widget child;
   final String label;

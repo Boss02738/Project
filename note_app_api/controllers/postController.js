@@ -1,21 +1,17 @@
-// controllers/postController.js
 const fs = require("fs");
 const path = require("path");
 const pool = require("../models/db");
 const { createAndEmit } = require('./notificationController');
 
-/* ----------------------- helpers ----------------------- */
 const normalizeImagePaths = (files = []) =>
   (files || []).map((f) => `/uploads/post_images/${f.filename}`);
 
-/* ===================== CREATE POST ===================== */
 async function createPost(req, res) {
   const client = await pool.connect();
   try {
     const { user_id, text, year_label, subject } = req.body || {};
     if (!user_id) return res.status(400).json({ message: "ต้องมี user_id" });
 
-    // รูป/ไฟล์แนบ (multer.fields([{name:'images'},{name:'file'}]))
     const images = normalizeImagePaths(req.files?.images);
     let fileUrl = null;
     if (req.files?.file?.[0]) {
@@ -23,7 +19,6 @@ async function createPost(req, res) {
     }
     const firstImage = images.length ? images[0] : null;
 
-    // ราคา
     let priceType =
       String(req.body.price_type || "").trim().toLowerCase() === "paid"
         ? "paid"
@@ -73,7 +68,6 @@ async function createPost(req, res) {
 
     await client.query("COMMIT");
 
-    // ส่งกลับโพสต์พร้อม images[]
     const r = await pool.query(
       `SELECT p.*,
               COALESCE(json_agg(pi.image_url ORDER BY pi.id)
@@ -86,7 +80,6 @@ async function createPost(req, res) {
     );
     return res.status(201).json(r.rows[0]);
   } catch (e) {
-    // 🔧 FIX: rollback ให้ถูก transaction
     try { await client.query("ROLLBACK"); } catch {}
     console.error("createPost error:", e);
     return res.status(500).json({ message: "internal error" });
@@ -95,8 +88,6 @@ async function createPost(req, res) {
   }
 }
 
-/* ========================= FEED ======================== */
-// กรองโพสต์ที่ถูกแบน + ส่ง is_banned กลับไป
 async function getFeed(req, res) {
   try {
     const viewerId = Number(req.query.user_id || 0);
@@ -159,7 +150,6 @@ async function getFeed(req, res) {
   }
 }
 
-/* ===================== BY SUBJECT ===================== */
 async function getPostsBySubject(req, res) {
   const { subject } = req.query;
   const viewerId = Number(req.query.user_id) || 0;
@@ -201,7 +191,6 @@ async function getPostsBySubject(req, res) {
   }
 }
 
-/* ===================== LIKE/UNLIKE ===================== */
 async function toggleLike(req, res) {
   const userId = Number(req.body.user_id);
   const postId = Number(req.params.id || req.body.post_id);
@@ -211,7 +200,6 @@ async function toggleLike(req, res) {
   try {
     await client.query("BEGIN");
 
-    // หาเจ้าของโพสต์ไว้ส่ง noti
     const { rows: postRows } = await client.query(
       `SELECT id, user_id FROM public.posts WHERE id=$1`,
       [postId]
@@ -222,7 +210,6 @@ async function toggleLike(req, res) {
     }
     const ownerId = Number(postRows[0].user_id);
 
-    // เช็คว่าไลค์อยู่แล้วไหม
     const { rows: likeRows } = await client.query(
       `SELECT id FROM public.likes WHERE user_id=$1 AND post_id=$2`,
       [userId, postId]
@@ -230,23 +217,20 @@ async function toggleLike(req, res) {
 
     let likedNow;
     if (likeRows.length) {
-      // ถ้ามีอยู่แล้ว → unlike
       await client.query(`DELETE FROM public.likes WHERE id=$1`, [likeRows[0].id]);
       likedNow = false;
     } else {
-      // ถ้ายัง → like
       await client.query(
         `INSERT INTO public.likes (user_id, post_id, created_at) VALUES ($1,$2,now())`,
         [userId, postId]
       );
       likedNow = true;
 
-      // ส่งแจ้งเตือนให้เจ้าของโพสต์ (ห้ามส่งถ้าเจ้าของกดไลค์โพสต์ตัวเอง)
       if (ownerId && ownerId !== userId) {
         await createAndEmit(req.app, {
-          targetUserId: ownerId,     // ผู้รับ
-          actorId: userId,           // คนกดไลค์
-          action: "like",            // คีย์ที่ NotificationScreen ใช้ได้
+          targetUserId: ownerId,  
+          actorId: userId,        
+          action: "like",          
           message: "ถูกใจโพสต์ของคุณ",
           postId: postId,
         });
@@ -255,7 +239,6 @@ async function toggleLike(req, res) {
 
     await client.query("COMMIT");
 
-    // นับ like ใหม่
     const { rows: cnt } = await pool.query(
       `SELECT COUNT(*)::int AS n FROM public.likes WHERE post_id=$1`,
       [postId]
@@ -270,7 +253,7 @@ async function toggleLike(req, res) {
     client.release();
   }
 }
-/* ========================= COUNTS ====================== */
+
 async function getPostCounts(req, res) {
   const postId = Number(req.params.id);
   if (!postId) return res.status(400).json({ message: "missing post_id" });
@@ -290,7 +273,6 @@ async function getPostCounts(req, res) {
   }
 }
 
-/* ========================= COMMENTS ==================== */
 async function getComments(req, res) {
   const postId = Number(req.params.id);
   if (!postId) return res.status(400).json({ message: "missing post id" });
@@ -311,23 +293,6 @@ async function getComments(req, res) {
   }
 }
 
-// async function addComment(req, res) {
-//   const postId = Number(req.params.id);
-//   const { user_id, text } = req.body || {};
-//   const userId = Number(user_id);
-//   if (!postId || !userId || !text || !text.trim())
-//     return res.status(400).json({ message: "missing fields" });
-//   try {
-//     await pool.query(
-//       "INSERT INTO public.comments(post_id,user_id,text) VALUES ($1,$2,$3)",
-//       [postId, userId, text.trim()]
-//     );
-//     res.json({ message: "ok" });
-//   } catch (e) {
-//     console.error("addComment error:", e);
-//     res.status(500).json({ message: "internal error" });
-//   }
-// }
 async function addComment(req, res) {
   const userId = Number(req.body.user_id);
   const postId = Number(req.params.id || req.body.post_id);
@@ -340,7 +305,6 @@ async function addComment(req, res) {
   try {
     await client.query("BEGIN");
 
-    // หาเจ้าของโพสต์ไว้ส่ง noti
     const { rows: postRows } = await client.query(
       `SELECT id, user_id FROM public.posts WHERE id=$1`,
       [postId]
@@ -351,7 +315,6 @@ async function addComment(req, res) {
     }
     const ownerId = Number(postRows[0].user_id);
 
-    // เพิ่มคอมเมนต์
     const { rows: ins } = await client.query(
       `INSERT INTO public.comments (user_id, post_id, text, created_at)
        VALUES ($1,$2,$3,now())
@@ -359,12 +322,11 @@ async function addComment(req, res) {
       [userId, postId, text]
     );
 
-    // ส่ง noti ให้เจ้าของโพสต์ (ถ้าไม่ใช่คอมเมนต์ตัวเอง)
     if (ownerId && ownerId !== userId) {
       await createAndEmit(req.app, {
-        targetUserId: ownerId,       // ผู้รับ
-        actorId: userId,             // คนคอมเมนต์
-        action: "comment",           // ให้ตรงกับฝั่งแอป
+        targetUserId: ownerId,      
+        actorId: userId,            
+        action: "comment",          
         message: "แสดงความคิดเห็นในโพสต์ของคุณ",
         postId: postId,
       });
@@ -372,7 +334,6 @@ async function addComment(req, res) {
 
     await client.query("COMMIT");
 
-    // นับคอมเมนต์ใหม่
     const { rows: cnt } = await pool.query(
       `SELECT COUNT(*)::int AS n FROM public.comments WHERE post_id=$1`,
       [postId]
@@ -387,7 +348,7 @@ async function addComment(req, res) {
     client.release();
   }
 }
-/* ======================== SAVE ========================= */
+
 async function toggleSave(req, res) {
   const postId = Number(req.params.id);
   const userId = Number(req.body.user_id);
@@ -453,27 +414,60 @@ async function getSavedPosts(req, res) {
 
   try {
     const q = `
-      SELECT p.*,
-             u.id_user AS user_id,
-             u.username,
-             COALESCE(u.avatar_url,'') AS avatar_url,
-             COALESCE(p.is_banned,false) AS is_banned,
-             COALESCE(json_agg(pi.image_url ORDER BY pi.id)
-                      FILTER (WHERE pi.id IS NOT NULL), '[]') AS images,
-             (SELECT COUNT(*)::int FROM public.likes    WHERE post_id=p.id) AS like_count,
-             (SELECT COUNT(*)::int FROM public.comments WHERE post_id=p.id) AS comment_count,
-             TRUE AS saved_by_me,
-             EXISTS(SELECT 1 FROM public.likes l WHERE l.post_id=p.id AND l.user_id=$1) AS liked_by_me,
-             s.created_at AS saved_at
-        FROM public.saves s
-        JOIN public.posts p ON p.id = s.post_id
-        JOIN public.users u ON u.id_user = p.user_id
-        LEFT JOIN public.post_images pi ON pi.post_id = p.id
-       WHERE s.user_id=$1
-         AND COALESCE(p.is_archived,false)=false
-         AND COALESCE(p.is_banned,false)=false
-       GROUP BY p.id, u.id_user, u.username, u.avatar_url, s.created_at
-       ORDER BY s.created_at DESC`;
+      SELECT 
+        p.id,
+        p.user_id,
+        u.username,
+        COALESCE(u.avatar_url,'') AS avatar_url,
+        p.text, p.subject, p.year_label,
+        LOWER(TRIM(p.price_type)) AS price_type,
+        p.price_amount_satang,
+        p.file_url,
+        p.created_at,
+        COALESCE(p.is_banned,false)   AS is_banned,
+        COALESCE(p.is_archived,false) AS is_archived,
+
+        COALESCE(
+          json_agg(pi.image_url ORDER BY pi.id)
+            FILTER (WHERE pi.id IS NOT NULL),
+          '[]'
+        ) AS images,
+
+        (SELECT COUNT(*)::int FROM public.likes    WHERE post_id=p.id) AS like_count,
+        (SELECT COUNT(*)::int FROM public.comments WHERE post_id=p.id) AS comment_count,
+
+        EXISTS (
+          SELECT 1 FROM public.likes l 
+          WHERE l.post_id = p.id AND l.user_id = $1
+        ) AS liked_by_me,
+
+        EXISTS (
+          SELECT 1 FROM public.purchased_posts pp
+          WHERE pp.post_id = p.id AND pp.user_id = $1
+        ) AS is_purchased,
+
+        CASE
+          WHEN LOWER(TRIM(p.price_type)) <> 'paid' THEN true
+          WHEN $1 = p.user_id THEN true
+          WHEN EXISTS (
+            SELECT 1 FROM public.purchased_posts pp
+            WHERE pp.post_id = p.id AND pp.user_id = $1
+          ) THEN true
+          ELSE false
+        END AS has_access,
+        s.created_at AS saved_at,
+        TRUE AS saved_by_me
+
+      FROM public.saves s
+      JOIN public.posts p ON p.id = s.post_id
+      JOIN public.users u ON u.id_user = p.user_id
+      LEFT JOIN public.post_images pi ON pi.post_id = p.id
+      WHERE s.user_id=$1
+        AND COALESCE(p.is_archived,false)=false
+        AND COALESCE(p.is_banned,false)=false
+      GROUP BY p.id, u.id_user, u.username, u.avatar_url, s.created_at
+      ORDER BY s.created_at DESC;
+    `;
     const r = await pool.query(q, [userId]);
     res.json(r.rows);
   } catch (e) {
@@ -482,7 +476,6 @@ async function getSavedPosts(req, res) {
   }
 }
 
-/* ===================== POSTS BY USER ==================== */
 async function getPostsByUser(req, res) {
   try {
     const uid = Number(req.params.id);
@@ -516,7 +509,6 @@ async function getPostsByUser(req, res) {
   }
 }
 
-/* ===================== DETAIL + ACCESS ================== */
 async function getPostDetail(req, res) {
   try {
     const postId  = Number(req.params.id);
@@ -541,32 +533,27 @@ async function getPostDetail(req, res) {
         COALESCE(p.is_archived,false) AS is_archived,
         COALESCE(p.is_banned,false)   AS is_banned,
 
-        /* รูปเหมือนหน้า Home */
         COALESCE(
           json_agg(pi.image_url ORDER BY pi.id)
             FILTER (WHERE pi.id IS NOT NULL),
           '[]'
         ) AS images,
 
-        /* นับยอด */
         (SELECT COUNT(*)::int FROM public.likes    WHERE post_id = p.id) AS like_count,
         (SELECT COUNT(*)::int FROM public.comments WHERE post_id = p.id) AS comment_count,
 
-        /* คนดูคนนี้กดไลก์มั้ย */
         CASE
           WHEN $2 = 0 THEN false
           WHEN EXISTS (SELECT 1 FROM public.likes l WHERE l.post_id = p.id AND l.user_id = $2) THEN true
           ELSE false
         END AS liked_by_me,
 
-        /* ซื้อแล้วหรือยัง (เอาไว้โชว์ badge) */
         CASE
           WHEN $2 = 0 THEN false
           WHEN EXISTS (SELECT 1 FROM public.purchased_posts pp WHERE pp.post_id = p.id AND pp.user_id = $2) THEN true
           ELSE false
         END AS is_purchased,
 
-        /* สิทธิ์เข้าถึงไฟล์/รูปทั้งหมด */
         CASE
           WHEN LOWER(TRIM(p.price_type)) <> 'paid' THEN true
           WHEN $2 <> 0 AND ($2 = p.user_id
@@ -588,15 +575,12 @@ async function getPostDetail(req, res) {
     const row = rows[0];
     if (!row) return res.status(404).json({ error: "not_found" });
 
-    // ถ้าโพสต์ถูก archive และคนดูไม่ใช่เจ้าของ → ซ่อน
     if (row.is_archived && Number(row.user_id) !== viewerId) {
       return res.status(404).json({ error: "not_found" });
     }
 
-    // ส่งกลับ “โครงสร้างเดียวกับ feed” + access flags
     return res.json({
       ...row,
-      // เผื่อ client เดิมคาดหวังชื่อ field นี้
       hasAccess: row.has_access,
     });
   } catch (e) {
@@ -605,7 +589,6 @@ async function getPostDetail(req, res) {
   }
 }
 
-/* ================= ARCHIVE / UNARCHIVE / DELETE ================ */
 async function archivePost(req, res) {
   try {
     const postId = Number(req.params.id);
@@ -652,7 +635,6 @@ async function hardDeletePost(req, res) {
   try {
     await client.query("BEGIN");
 
-    // ล็อกแถว + ตรวจสิทธิ์เจ้าของโพสต์
     const { rows } = await client.query(
       `SELECT id, user_id, image_url, file_url
          FROM public.posts
@@ -670,7 +652,6 @@ async function hardDeletePost(req, res) {
       return res.status(403).json({ message: "no_permission" });
     }
 
-    // ❗ กันลบถ้าถูกซื้อแล้ว (เช็คทั้ง purchased_posts และ purchases ที่ approved)
     const bought1 = await client.query(
       `SELECT 1 FROM public.purchased_posts WHERE post_id=$1 LIMIT 1`,
       [postId]
@@ -691,13 +672,10 @@ async function hardDeletePost(req, res) {
       return res.status(403).json({ message: "cannot_delete_purchased_post" });
     }
 
-    // ลบข้อมูล + ไฟล์ประกอบ
     await client.query(`DELETE FROM public.post_images WHERE post_id=$1`, [postId]);
     await client.query(`DELETE FROM public.posts WHERE id=$1`, [postId]);
 
     await client.query("COMMIT");
-
-    // ลบไฟล์ในดิสก์ (ถ้ามี)
     [post.image_url, post.file_url].filter(Boolean).forEach((p) => {
       const fp = path.join(process.cwd(), p.replace(/^\//, ""));
       fs.unlink(fp, () => {});
@@ -712,46 +690,7 @@ async function hardDeletePost(req, res) {
     client.release();
   }
 }
-// async function hardDeletePost(req, res) {
-//   const postId = Number(req.params.id);
-//   if (!postId) return res.status(400).json({ message: "missing post_id" });
 
-//   const client = await pool.connect();
-//   try {
-//     await client.query("BEGIN");
-
-//     const { rows } = await client.query(
-//       `SELECT image_url, file_url FROM public.posts WHERE id=$1`,
-//       [postId]
-//     );
-//     if (!rows.length) {
-//       await client.query("ROLLBACK");
-//       return res.status(404).json({ message: "post not found" });
-//     }
-//     const { image_url, file_url } = rows[0];
-
-//     await client.query(`DELETE FROM public.posts WHERE id=$1`, [postId]);
-//     await client.query(`DELETE FROM public.post_images WHERE post_id=$1`, [postId]);
-
-//     await client.query("COMMIT");
-
-//     // ลบไฟล์บนดิสก์ (ถ้ามี)
-//     [image_url, file_url].filter(Boolean).forEach((p) => {
-//       const fp = path.join(process.cwd(), p);
-//       fs.unlink(fp, () => {});
-//     });
-
-//     res.json({ ok: true, message: "deleted" });
-//   } catch (e) {
-//     try { await client.query("ROLLBACK"); } catch {}
-//     console.error("hardDeletePost error:", e);
-//     res.status(500).json({ message: "internal error" });
-//   } finally {
-//     client.release();
-//   }
-// }
-
-/* ===================== ARCHIVED LIST =================== */
 async function getArchivedPosts(req, res) {
   try {
     const userId = Number(req.query.user_id);
@@ -778,7 +717,6 @@ async function getArchivedPosts(req, res) {
   }
 }
 
-/* =================== PURCHASED FEED/LIST ================== */
 const getPurchasedFeed = async (req, res) => {
   const userId = Number(req.query.user_id);
   if (!userId) return res.status(400).json({ message: 'ต้องมี user_id' });
@@ -851,7 +789,6 @@ const getPurchasedPosts = async (req, res) => {
   }
 };
 
-/* ============ SECURE DOWNLOAD & IMAGE ACCESS ============ */
 async function downloadFileProtected(req, res) {
   try {
     const postId = Number(req.params.id);
@@ -896,7 +833,6 @@ async function downloadFileProtected(req, res) {
   }
 }
 
-// รูปภาพตามสิทธิ์ (ถ้ายังไม่ซื้อให้ส่งเฉพาะรูปแรก)
 async function getImagesRespectAccess(req, res) {
   try {
     const postId = Number(req.params.id);
@@ -940,7 +876,6 @@ async function getImagesRespectAccess(req, res) {
   }
 }
 
-/* ======================= EXPORTS ======================= */
 module.exports = {
   createPost,
   getFeed,

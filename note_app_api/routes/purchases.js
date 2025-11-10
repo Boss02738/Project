@@ -1,4 +1,3 @@
-// routes/purchases.js
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -10,7 +9,7 @@ const pool = require('../models/db');
 const { generatePromptPayPayload } = require('../utils/promptpay');
 const purchaseCtrl = require('../controllers/purchaseController');
 
-// === storage สำหรับ slip (เก็บเป็นไฟล์) ===
+
 const uploadsDir = path.join(process.cwd(), 'uploads', 'slips');
 fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -20,8 +19,6 @@ const upload = multer({
 });
 
 router.get('/:userId/posts', purchaseCtrl.listPurchasedPosts);
-
-/* ---------------------------- helpers ---------------------------- */
 
 async function getCoinRate(client) {
   const r = await client.query(
@@ -45,7 +42,6 @@ function buildPromptPayPayload(promptpayMobile, amountBahtNum) {
   }
 }
 
-/* -------------------- POST /api/purchases (เริ่มออเดอร์) -------------------- */
 router.post('/api/purchases', async (req, res) => {
   const { postId, buyerId, post_id, buyer_id } = req.body || {};
   const _postId = Number(postId ?? post_id);
@@ -59,7 +55,6 @@ router.post('/api/purchases', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // 1) โหลดโพสต์
     const postQ = await client.query(
       `SELECT id, user_id AS seller_id, price_type, price_amount_satang
        FROM posts WHERE id = $1 FOR UPDATE`,
@@ -80,7 +75,6 @@ router.post('/api/purchases', async (req, res) => {
       return res.status(400).json({ error: 'buyer_is_seller' });
     }
 
-    // 2) เบอร์พร้อมเพย์แอดมิน
     const setQ = await client.query(
       `SELECT promptpay_mobile FROM admin_settings WHERE id = 1`
     );
@@ -90,12 +84,10 @@ router.post('/api/purchases', async (req, res) => {
       return res.status(500).json({ error: 'admin_promptpay_missing' });
     }
 
-    // 3) gen EMVCo payload
     const amountSatang = Number(post.price_amount_satang);
     const amountBahtNum = amountSatang / 100;
     const qrPayload = buildPromptPayPayload(promptpayMobile, amountBahtNum);
 
-    // 4) สร้างออเดอร์ (ระบุ status='pending' ให้ชัด)
     const ins = await client.query(
       `INSERT INTO purchases (post_id, buyer_id, seller_id, amount_satang, status, expires_at)
        VALUES ($1, $2, $3, $4, 'pending', now() + interval '10 minutes')
@@ -122,7 +114,6 @@ router.post('/api/purchases', async (req, res) => {
   }
 });
 
-/* -------------------- GET /api/purchases/:id -------------------- */
 router.get('/api/purchases/:id', async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'invalid_id' });
@@ -141,7 +132,6 @@ router.get('/api/purchases/:id', async (req, res) => {
   }
 });
 
-/* ----------------- POST /api/purchases/:id/slip ---------------- */
 router.post('/api/purchases/:id/slip', upload.single('slip'), async (req, res) => {
   const id = Number(req.params.id);
   if (!id) return res.status(400).json({ error: 'invalid_id' });
@@ -160,7 +150,6 @@ router.post('/api/purchases/:id/slip', upload.single('slip'), async (req, res) =
   }
 });
 
-/* --------------- POST /api/purchases/:id/approve (ADMIN) --------------- */
 router.post('/api/purchases/:id/approve', async (req, res) => {
   const id = Number(req.params.id);
   const adminId = Number(req.body?.admin_id || 0);
@@ -185,11 +174,10 @@ router.post('/api/purchases/:id/approve', async (req, res) => {
     const amountSatang = Number(pur.amount_satang);
     const coins = Math.floor(amountSatang / rate);
 
-    // debug logs (ช่วยไล่ถ้าติด)
     console.log('[approve]', { id, adminId, amountSatang, rate, coins });
 
     if (!Number.isFinite(coins) || coins <= 0) {
-      throw new Error('calculated_coins_is_zero'); // กันเคสราคา < rate
+      throw new Error('calculated_coins_is_zero');
     }
 
     await client.query(
@@ -246,7 +234,6 @@ router.post('/api/purchases/:id/approve', async (req, res) => {
   }
 });
 
-/* --------------- POST /api/purchases/:id/reject (ADMIN) --------------- */
 router.post('/api/purchases/:id/reject', async (req, res) => {
   const id = Number(req.params.id);
   const adminId = Number(req.body?.admin_id || 0);

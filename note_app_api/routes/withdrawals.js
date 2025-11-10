@@ -1,4 +1,3 @@
-// routes/withdrawals.js
 const express = require('express');
 const path   = require('path');
 const fs     = require('fs');
@@ -7,15 +6,12 @@ const pool   = require('../models/db');
 
 const router = express.Router();
 
-/* ---------------- storage: uploads/withdraw_qr ---------------- */
 const dir = path.join(process.cwd(), 'uploads', 'withdraw_qr');
 fs.mkdirSync(dir, { recursive: true });
 
 const upload = multer({ dest: path.join(process.cwd(), 'uploads', 'slips') });
 
-/* ---------------- helpers ---------------- */
 async function getCoinRate(client) {
-  // ถ้าไม่มีค่าในตาราง admin_settings ให้ใช้ 100 สตางค์/เหรียญ
   const r = await client.query(
     `SELECT COALESCE(coin_rate_satang_per_coin, 100) AS rate
      FROM admin_settings WHERE id = 1`
@@ -23,13 +19,6 @@ async function getCoinRate(client) {
   return Number(r.rows[0]?.rate || 100);
 }
 
-/* ==============================================================
- * POST /api/withdrawals
- * form-data: user_id, coins, qr (file)
- * สร้างคำขอถอนสถานะ pending + หักเหรียญทันที
- *  - amount_satang และ coins ใน wallet_transactions เก็บเป็น "ค่าบวกเสมอ"
- *    แล้วใช้ type = 'debit_withdrawal' บอกทิศทางการเงิน
- * ==============================================================*/
 router.post('/api/withdrawals', upload.single('qr'), async (req, res) => {
   const userId = Number(req.body?.user_id || 0);
   const coins  = Number(req.body?.coins   || 0);
@@ -45,7 +34,6 @@ router.post('/api/withdrawals', upload.single('qr'), async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // lock แถวกระเป๋า และเช็คยอด
     const uw = await client.query(
       `SELECT coins FROM user_wallets WHERE user_id = $1 FOR UPDATE`,
       [userId]
@@ -56,10 +44,9 @@ router.post('/api/withdrawals', upload.single('qr'), async (req, res) => {
     }
 
     const rate         = await getCoinRate(client);
-    const amountSatang = coins * rate; // เก็บเป็นค่าบวกเสมอ
+    const amountSatang = coins * rate;
     const rel          = '/' + path.relative(process.cwd(), req.file.path).replace(/\\/g, '/');
 
-    // หักเหรียญทันที (อัปเดต wallet)
     await client.query(
       `UPDATE user_wallets
          SET coins = coins - $2, updated_at = now()
@@ -67,7 +54,6 @@ router.post('/api/withdrawals', upload.single('qr'), async (req, res) => {
       [userId, coins]
     );
 
-    // บันทึกธุรกรรม (ค่าบวกเสมอ + ระบุทิศทางด้วย type)
     await client.query(
       `INSERT INTO wallet_transactions
         (user_id, type, amount_satang, coins, rate_satang_per_coin, note, created_at)
@@ -75,7 +61,6 @@ router.post('/api/withdrawals', upload.single('qr'), async (req, res) => {
       [userId, amountSatang, coins, rate]
     );
 
-    // บันทึกคำขอถอน
     const ins = await client.query(
       `INSERT INTO withdrawals
         (user_id, coins, rate_satang_per_coin, amount_satang, bank_qr_file, status, created_at)
@@ -98,9 +83,6 @@ router.post('/api/withdrawals', upload.single('qr'), async (req, res) => {
   }
 });
 
-/* ==============================================================
- * GET /api/withdrawals/my?user_id=...
- * ==============================================================*/
 router.get('/api/withdrawals/my', async (req, res) => {
   const userId = Number(req.query.user_id || 0);
   if (!userId) return res.status(400).json({ error: 'invalid_user' });
@@ -121,9 +103,6 @@ router.get('/api/withdrawals/my', async (req, res) => {
   }
 });
 
-/* ==============================================================
- * GET /api/admin/withdrawals/pending  (สำหรับหน้าแอดมิน)
- * ==============================================================*/
 router.get('/api/admin/withdrawals/pending', async (_req, res) => {
   try {
     const r = await pool.query(
@@ -140,10 +119,6 @@ router.get('/api/admin/withdrawals/pending', async (_req, res) => {
   }
 });
 
-/* ==============================================================
- * POST /api/admin/withdrawals/:id/approve
- * อนุมัติ: ไม่หักเหรียญซ้ำ (หักไปแล้วตอนยื่นคำขอ) แค่ปิดงานเป็น paid
- * ==============================================================*/
 router.post('/api/admin/withdrawals/:id/approve', async (req, res) => {
   const id = Number(req.params.id || 0);
   const adminId = Number(req.body?.admin_id || 0);
@@ -163,7 +138,6 @@ router.post('/api/admin/withdrawals/:id/approve', async (req, res) => {
     const w = wq.rows[0];
     if (w.status !== 'pending') throw new Error('invalid_status');
 
-    // เปลี่ยนสถานะเป็น paid (ไม่ปรับ wallet แล้ว)
     await client.query(
       `UPDATE withdrawals
          SET status='paid', admin_id=$2, admin_note=$3, paid_at=now()
@@ -185,10 +159,6 @@ router.post('/api/admin/withdrawals/:id/approve', async (req, res) => {
   }
 });
 
-/* ==============================================================
- * POST /api/admin/withdrawals/:id/reject
- * ปฏิเสธ: คืนเหรียญให้ผู้ใช้ + บันทึกธุรกรรม refund_withdrawal
- * ==============================================================*/
 router.post('/api/admin/withdrawals/:id/reject', async (req, res) => {
   const id = Number(req.params.id || 0);
   const adminId = Number(req.body?.admin_id || 0);
@@ -209,7 +179,6 @@ router.post('/api/admin/withdrawals/:id/reject', async (req, res) => {
     const w = wq.rows[0];
     if (w.status !== 'pending') throw new Error('invalid_status');
 
-    // คืนเหรียญ
     await client.query(
       `UPDATE user_wallets
          SET coins = coins + $2, updated_at = now()
@@ -217,7 +186,6 @@ router.post('/api/admin/withdrawals/:id/reject', async (req, res) => {
       [w.user_id, w.coins]
     );
 
-    // บันทึกธุรกรรม refund (amount_satang/coins เป็นค่าบวกเสมอ)
     await client.query(
       `INSERT INTO wallet_transactions
         (user_id, type, amount_satang, coins, rate_satang_per_coin, note, created_at)
@@ -275,8 +243,6 @@ router.post('/create', upload.single('slip'), async (req, res, next) => {
 
     const slipPath = req.file ? `/uploads/slips/${req.file.filename}` : null;
 
-    // TODO: เช็คยอดคงเหลือจาก DB และบันทึกรายการถอนจริง
-    // const result = await createWithdrawal(...)
 
     res.status(201).json({
       withdrawal: {

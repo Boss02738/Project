@@ -36,7 +36,6 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
         return;
       }
 
-      // ✅ ใช้เมธอดที่มีอยู่แล้วใน ApiService
       final posts = await ApiService.getSavedFeed(_userId!);
 
       if (!mounted) return;

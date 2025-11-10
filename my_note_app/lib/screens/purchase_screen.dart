@@ -8,7 +8,7 @@ import 'package:http/http.dart' as http;
 import '../api/api_service.dart';
 
 class PurchaseScreen extends StatefulWidget {
-  final int purchaseId;            // purchases.id (BIGINT)
+  final int purchaseId;            
   final int amountSatang;
   final String qrPayload;
   final DateTime expiresAt;
@@ -66,7 +66,7 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisSize: MainAxisSize.min, // center vertically
+            mainAxisSize: MainAxisSize.min, 
             children: [
               Card(
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -122,7 +122,6 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         final data = jsonDecode(res.body);
         if (data['ok'] == true) {
           if (!mounted) return;
-          // show confirmation dialog then navigate to app home (pop to first route)
           await showDialog(
             context: context,
             builder: (_) => AlertDialog(
@@ -131,14 +130,14 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
               actions: [
                 TextButton(
                   onPressed: () {
-                    Navigator.of(context).pop(); // close dialog
+                    Navigator.of(context).pop(); 
                   },
                   child: const Text('ตกลง'),
                 ),
               ],
             ),
           );
-          // after dialog closed, navigate to home (root)
+
           if (!mounted) return;
           Navigator.of(context).popUntil((route) => route.isFirst);
           return;

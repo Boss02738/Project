@@ -1,16 +1,15 @@
-// routes/admin.js
 const express = require("express");
 const router = express.Router();
 const pool = require("../models/db");
 const dayjs = require("dayjs");
 
-/* ------------ guard ------------- */
+
 function requireAdmin(req, res, next) {
   if (req.session?.isAdmin) return next();
   return res.redirect("/admin/login");
 }
 
-/* ------------ auth pages ------------- */
+
 router.get("/admin/login", (req, res) => {
   res.render("admin_login", { error: null });
 });
@@ -28,12 +27,12 @@ router.post("/admin/logout", (req, res) => {
   req.session.destroy(() => res.redirect("/admin/login"));
 });
 
-/* ------------ dashboard ------------- */
+
 router.get("/admin", requireAdmin, async (_req, res) => {
   const [{ rows: p1 }, { rows: p2 }, { rows: p3 }] = await Promise.all([
     pool.query(`SELECT count(*) FROM purchases WHERE status='pending'`),
     pool.query(`SELECT count(*) FROM withdrawals WHERE status='pending'`),
-    pool.query(`SELECT count(*) FROM post_reports WHERE status='pending'`), // ✅ ใช้ withdrawals
+    pool.query(`SELECT count(*) FROM post_reports WHERE status='pending'`),
   ]);
   res.render("admin_home", {
     pendingPurchases: Number(p1[0].count || 0),
@@ -42,7 +41,7 @@ router.get("/admin", requireAdmin, async (_req, res) => {
   });
 });
 
-/* ============ PURCHASES ============ */
+
 router.get("/admin/purchases", requireAdmin, async (req, res) => {
   const status = req.query.status || "pending";
   const q = await pool.query(
@@ -54,8 +53,8 @@ router.get("/admin/purchases", requireAdmin, async (req, res) => {
             ps.file_path AS slip_path
      FROM purchases pu
      JOIN posts p    ON p.id = pu.post_id
-     JOIN users ub   ON ub.id_user = pu.buyer_id   -- ✅ ตรง schema
-     JOIN users us   ON us.id_user = pu.seller_id  -- ✅ ตรง schema
+     JOIN users ub   ON ub.id_user = pu.buyer_id   
+     JOIN users us   ON us.id_user = pu.seller_id  
      LEFT JOIN LATERAL (
        SELECT file_path FROM payment_slips s
        WHERE s.purchase_id = pu.id
@@ -68,7 +67,6 @@ router.get("/admin/purchases", requireAdmin, async (req, res) => {
   res.render("admin_purchases", { rows: q.rows, status, dayjs });
 });
 
-/* อนุมัติการซื้อ */
 router.post("/admin/purchases/:id/approve", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const client = await pool.connect();
@@ -84,7 +82,6 @@ router.post("/admin/purchases/:id/approve", requireAdmin, async (req, res) => {
     const o = cur.rows[0];
     if (o.status !== "pending") throw new Error("invalid_status");
 
-    // ให้สิทธิ์ผู้ซื้อ
     await client.query(
       `INSERT INTO purchased_posts (post_id, user_id, purchase_id)
        VALUES ($1, $2, $3)
@@ -92,7 +89,6 @@ router.post("/admin/purchases/:id/approve", requireAdmin, async (req, res) => {
       [o.post_id, o.buyer_id, o.id]
     );
 
-    // เครดิตเหรียญแก่ผู้ขาย (บันทึกเป็นธุรกรรม พร้อม coins/rate)
     const rateRow = await client.query(
       `SELECT COALESCE(coin_rate_satang_per_coin,100) AS rate
        FROM admin_settings WHERE id=1`
@@ -131,7 +127,7 @@ router.post("/admin/purchases/:id/approve", requireAdmin, async (req, res) => {
   }
 });
 
-/* ปฏิเสธการซื้อ */
+
 router.post("/admin/purchases/:id/reject", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   try {
@@ -146,9 +142,7 @@ router.post("/admin/purchases/:id/reject", requireAdmin, async (req, res) => {
   }
 });
 
-/* ============ PAYOUTS (WITHDRAWALS) ============ */
 
-/** รายการถอนตามสถานะ (ค่าเริ่มต้น: pending) */
 router.get("/admin/payouts", requireAdmin, async (req, res) => {
   const status = req.query.status || "pending";
 
@@ -163,7 +157,6 @@ router.get("/admin/payouts", requireAdmin, async (req, res) => {
     [status]
   );
 
-  // enrich สำหรับแสดงผล
   const rows = q.rows.map((r) => ({
     ...r,
     gross_baht: Number(r.amount_satang || 0) / 100,
@@ -174,7 +167,6 @@ router.get("/admin/payouts", requireAdmin, async (req, res) => {
   res.render("admin_payouts", { rows, status, dayjs });
 });
 
-/** กด Mark paid -> ตัดเหรียญจริง, ปิดสถานะเป็น paid */
 router.post("/admin/payouts/:id/mark-paid", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const adminId = Number(req.session?.admin_user_id || 0) || null;
@@ -182,8 +174,6 @@ router.post("/admin/payouts/:id/mark-paid", requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-
-    // ดึงคำขอถอนมาล็อคแถว
     const cur = await client.query(
       `SELECT id, user_id, coins, amount_satang, status
        FROM withdrawals
@@ -194,10 +184,6 @@ router.post("/admin/payouts/:id/mark-paid", requireAdmin, async (req, res) => {
     const w = cur.rows[0];
     if (w.status !== "pending") throw new Error("invalid_status");
 
-    // ✅ ไม่หักเหรียญซ้ำ: หักไปแล้วตอนสร้างคำขอถอน
-    // ถ้าต้องการบันทึกธุรกรรม "ยืนยันการจ่าย" เพื่อ audit:
-    // - เก็บ amount_satang เป็น "บวก"
-    // - coins แนะนำให้เป็น NULL (หรือ 0 ถ้า schema ไม่อนุญาต NULL)
     await client.query(
       `INSERT INTO wallet_transactions
         (user_id, type, amount_satang, coins, note, created_at)
@@ -205,7 +191,6 @@ router.post("/admin/payouts/:id/mark-paid", requireAdmin, async (req, res) => {
       [Number(w.user_id), Number(w.amount_satang)]
     );
 
-    // อัปเดตสถานะเป็น paid
     await client.query(
       `UPDATE withdrawals
          SET status='paid', paid_at=now(), admin_id=$2
@@ -224,8 +209,6 @@ router.post("/admin/payouts/:id/mark-paid", requireAdmin, async (req, res) => {
   }
 });
 
-/* ============ REPORTS ============ */
-/* ============ REPORTS (users.id_user) ============ */
 router.get("/admin/reports", requireAdmin, async (req, res) => {
   const status = String(req.query.status || "pending").toLowerCase();
 
@@ -270,7 +253,6 @@ router.get("/admin/reports", requireAdmin, async (req, res) => {
   }
 });
 
-// อนุมัติรายงาน -> ตั้งสถานะ approved และแบนโพสต์
 router.post("/admin/reports/:id/approve", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   const client = await pool.connect();
@@ -306,7 +288,6 @@ router.post("/admin/reports/:id/approve", requireAdmin, async (req, res) => {
   }
 });
 
-// ปฏิเสธรายงาน -> ตั้งสถานะ rejected
 router.post("/admin/reports/:id/reject", requireAdmin, async (req, res) => {
   const id = Number(req.params.id);
   try {

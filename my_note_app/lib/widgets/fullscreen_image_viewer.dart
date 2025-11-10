@@ -17,7 +17,6 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
   final TransformationController _controller = TransformationController();
   TapDownDetails? _doubleTapDetails;
 
-  // ค่าซูม
   static const double _minScale = 1.0;
   static const double _maxScale = 5.0;
   static const double _doubleTapZoom = 2.5;
@@ -27,7 +26,6 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
     final isZoomed = matrix.getMaxScaleOnAxis() > 1.02;
 
     if (!isZoomed) {
-      // ซูมเข้าไปที่จุดแตะ
       final tapPos = _doubleTapDetails!.localPosition;
       final zoom = Matrix4.identity()
         ..translate(-tapPos.dx * (_doubleTapZoom - 1),
@@ -35,7 +33,6 @@ class _FullscreenImageViewerState extends State<FullscreenImageViewer> {
         ..scale(_doubleTapZoom);
       _controller.value = zoom;
     } else {
-      // รีเซ็ตกลับ 1x
       _controller.value = Matrix4.identity();
     }
   }

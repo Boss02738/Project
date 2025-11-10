@@ -1,7 +1,5 @@
-// Project/note_app_api/controllers/reportController.js
 const pool = require('../models/db');
 
-/* ---------- helper: run in transaction ---------- */
 async function withTx(fn) {
   const client = await pool.connect();
   try {
@@ -17,12 +15,6 @@ async function withTx(fn) {
   }
 }
 
-/* =========================================================
- * POST /api/reports
- * body: { post_id, reporter_id, reason, details? }
- * - อนุญาตให้ผู้ใช้รายงาน 1 ครั้งต่อโพสต์ (อัปเดตรายละเอียดได้)
- * - ถ้าโพสต์ถูกแบนอยู่แล้ว จะไม่สร้างรายงานซ้ำ
- * =======================================================*/
 exports.createReport = async (req, res) => {
   try {
     let { post_id, reporter_id, reason, details } = req.body || {};
@@ -35,7 +27,6 @@ exports.createReport = async (req, res) => {
       return res.status(400).json({ message: 'post_id, reporter_id, reason are required' });
     }
 
-    // เอา owner มาเช็กด้วย
     const chk = await pool.query(
       'SELECT user_id AS owner_id, is_banned FROM posts WHERE id=$1',
       [post_id]
@@ -44,7 +35,6 @@ exports.createReport = async (req, res) => {
 
     const { owner_id, is_banned } = chk.rows[0];
 
-    // กันรายงานโพสต์ตัวเอง
     if (Number(owner_id) === reporter_id) {
       return res.status(400).json({ message: 'You cannot report your own post' });
     }
@@ -84,10 +74,6 @@ exports.createReport = async (req, res) => {
   }
 };
 
-/* =========================================================
- * GET /api/reports?status=pending|approved|rejected (default: pending)
- * - สำหรับแอดมินดึงคิวรายงาน
- * =======================================================*/
 exports.listReports = async (req, res) => {
   try {
     const status = String(req.query.status || 'pending').toLowerCase();
@@ -114,12 +100,6 @@ exports.listReports = async (req, res) => {
   }
 };
 
-/* =========================================================
- * POST /api/reports/:id/resolve
- * body: { action: 'approve'|'reject', admin_id }
- * - approve: แบนโพสต์ + เปลี่ยนสถานะรายงาน
- * - reject : เปลี่ยนสถานะรายงานเป็น rejected
- * =======================================================*/
 exports.resolveReport = async (req, res) => {
   const reportId = Number(req.params.id);
   let { action, admin_id } = req.body || {};
@@ -170,7 +150,5 @@ exports.resolveReport = async (req, res) => {
   }
 };
 
-/* ---------- Backward-compatible aliases (optional) ---------- */
-// สำหรับ routes เก่า: GET /api/reports/pending , POST /api/reports/:id/decision
 exports.listPending   = (req, res) => { req.query.status = 'pending'; return exports.listReports(req, res); };
 exports.decideReport  = (req, res) => exports.resolveReport(req, res);

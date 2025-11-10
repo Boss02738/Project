@@ -1,4 +1,3 @@
-// lib/screens/profile_screen.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -114,7 +113,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       child: Center(child: Text('ยังไม่มีโพสต์')),
                     )
                   else
-                    // Flutter ไม่มี SliverList.separated -> แทรก Divider เอง
                     SliverList(
                       delegate: SliverChildBuilderDelegate(
                         (context, index) {
@@ -156,14 +154,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ชื่อผู้ใช้
           Text(
             username.isNotEmpty ? username : 'user#${_profileUserId ?? ''}',
             style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
-
-          // ✅ เอา container การ์ดออก เหลือแค่แถวโปร่ง ๆ
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -212,7 +207,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           const SizedBox(height: 12),
 
-          // ปุ่มหลัก
           SizedBox(
             width: double.infinity,
             child: _isMe
@@ -245,7 +239,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         otherId: _profileUserId!,
                       )),
           ),
-
           const SizedBox(height: 12),
           Divider(height: 1, color: theme.dividerColor),
           const SizedBox(height: 8),

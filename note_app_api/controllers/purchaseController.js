@@ -1,29 +1,20 @@
-// controllers/purchaseController.js
 const pool = require('../models/db');
 const QRCode = require('qrcode');
 
-/** ====== CONFIG ====== */
 const TEN_MINUTES_MS = 10 * 60 * 1000;
-// เบอร์ PromptPay ของแอดมิน (รับเงินเข้ากลาง แล้วค่อยเคลียร์ให้ผู้ขายภายหลัง)
 const ADMIN_MOBILE = (process.env.ADMIN_MOBILE || '').replace(/\D/g, '');
 
-/** ====== Helper: สร้าง PromptPay EMV payload แบบเดโม่ (พอทดสอบได้) ======
- *  ถ้าต้องการความถูกต้อง 100% ตาม EMVCo + CRC16-CCITT แนะนำใช้ไลบรารีเฉพาะ
- *  หรือแพ็กเกจ promptpay-qr ใน production
- */
 function generatePromptPayPayload({ mobile, amountBaht }) {
   const m = String(mobile || '').replace(/\D/g, '');
   if (!m) throw new Error('missing admin mobile');
   const amt = Number(amountBaht || 0).toFixed(2);
 
-  // Payload นี้เป็นแบบลดรูป เพื่อการทดสอบพื้นฐานกับแอปธนาคารส่วนใหญ่
-  // หมายเหตุ: ไม่ใส่ CRC จริง (ใส่ FFFF ไว้แทน)
   const len = m.length.toString().padStart(2, '0');
   const payload =
     `000201010211` +
     `2937` + `0016A0000006770101110213` + len + m +
-    `5303764` +                // THB
-    `540${amt.length}${amt}` + // Amount
+    `5303764` +                
+    `540${amt.length}${amt}` +
     `5802TH` +
     `5913NoteCoLab Post` +
     `6009Bangkok` +
@@ -31,14 +22,12 @@ function generatePromptPayPayload({ mobile, amountBaht }) {
   return payload;
 }
 
-/** ====== สร้างคำสั่งซื้อ: POST /api/purchases {postId, buyerId} ====== */
 exports.createPurchase = async (req, res) => {
   try {
     const { postId, buyerId } = req.body || {};
     if (!postId || !buyerId) return res.status(400).json({ error: 'missing postId/buyerId' });
     if (!ADMIN_MOBILE) return res.status(500).json({ error: 'missing_admin_mobile' });
 
-    // ดึงข้อมูลโพสต์และราคา
     const { rows: [post] } = await pool.query(
       `SELECT id, user_id AS seller_id, price_type, price_amount_satang
          FROM public.posts
@@ -49,7 +38,6 @@ exports.createPurchase = async (req, res) => {
       return res.status(400).json({ error: 'post_is_free' });
     }
 
-    // ถ้าเคยได้สิทธิ์แล้ว ไม่ต้องซื้อซ้ำ
     const owned = await pool.query(
       `SELECT 1 FROM public.purchased_posts WHERE buyer_id=$1 AND post_id=$2 LIMIT 1`,
       [buyerId, postId]
@@ -58,11 +46,9 @@ exports.createPurchase = async (req, res) => {
       return res.json({ ok: true, already_owned: true });
     }
 
-    // สร้าง QR ให้จ่ายเข้า "เบอร์แอดมิน" (รับเงินกลาง)
     const amountBaht = post.price_amount_satang / 100.0;
     const payload = generatePromptPayPayload({ mobile: ADMIN_MOBILE, amountBaht });
 
-    // ทำเป็น SVG (คมชัดและเบากว่า PNG DataURL)
     const qrSvg = await QRCode.toString(payload, { type: 'svg', errorCorrectionLevel: 'M' });
 
     const expiresAt = new Date(Date.now() + TEN_MINUTES_MS);
@@ -95,14 +81,12 @@ exports.createPurchase = async (req, res) => {
   }
 };
 
-/** ====== ดูคำสั่งซื้อ: GET /api/purchases/:id ====== */
 exports.getPurchase = async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { rows: [p] } = await pool.query(`SELECT * FROM public.purchases WHERE id=$1`, [id]);
     if (!p) return res.status(404).json({ error: 'not_found' });
 
-    // ถ้ายังไม่ approved และหมดอายุแล้ว → mark expired
     const now = Date.now();
     const exp = new Date(p.expires_at).getTime();
     if (p.status !== 'approved' && p.status !== 'rejected' && now > exp) {
@@ -123,17 +107,14 @@ exports.getPurchase = async (req, res) => {
   }
 };
 
-/** ====== อัปโหลดสลิป: POST /api/purchases/:id/slip (field: slip) ====== */
 exports.uploadSlip = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!req.file) return res.status(400).json({ error: 'no_file' });
 
-    // ตรวจว่ามี purchase จริง
     const { rows: [p0] } = await pool.query(`SELECT * FROM public.purchases WHERE id=$1`, [id]);
     if (!p0) return res.status(404).json({ error: 'not_found' });
 
-    // บันทึกไฟล์
     const filePath = `/uploads/slips/${req.file.filename}`;
     await pool.query(
       `INSERT INTO public.payment_slips (purchase_id, file_path, uploaded_at)
@@ -141,7 +122,6 @@ exports.uploadSlip = async (req, res) => {
       [id, filePath]
     );
 
-    // อัปเดตสถานะเป็น slip_uploaded
     const { rows: [p] } = await pool.query(
       `UPDATE public.purchases
           SET status='slip_uploaded', updated_at=NOW()
@@ -157,7 +137,6 @@ exports.uploadSlip = async (req, res) => {
   }
 };
 
-/** ====== (ADMIN) ดึงรายการรอตรวจสลิป: GET /api/purchases/admin/pending ====== */
 exports.listPendingSlips = async (_req, res) => {
   try {
     const { rows } = await pool.query(
@@ -182,7 +161,6 @@ exports.listPendingSlips = async (_req, res) => {
   }
 };
 
-/** ====== (ADMIN) อนุมัติ: POST /api/purchases/:id/approve ====== */
 exports.approvePurchase = async (req, res) => {
   const client = await pool.connect();
   try {
@@ -194,7 +172,6 @@ exports.approvePurchase = async (req, res) => {
     );
     if (!p) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'not_found' }); }
 
-    // ให้สิทธิ์ผู้ซื้อ
     await client.query(
       `INSERT INTO public.purchased_posts (buyer_id, post_id)
        VALUES ($1,$2) ON CONFLICT (buyer_id, post_id) DO NOTHING`,
@@ -220,7 +197,6 @@ exports.approvePurchase = async (req, res) => {
   }
 };
 
-/** ====== (ADMIN) ปฏิเสธ: POST /api/purchases/:id/reject ====== */
 exports.rejectPurchase = async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -247,7 +223,7 @@ exports.listPurchasedPosts = async (req, res) => {
     const sql = `
       SELECT
         p.id,
-        p.user_id,                              -- เจ้าของโพสต์
+        p.user_id,                            
         p.text,
         p.subject,
         p.year_label,
@@ -256,14 +232,11 @@ exports.listPurchasedPosts = async (req, res) => {
         p.price_type,
         p.price_amount_satang,
 
-        -- ข้อมูลผู้โพสต์ (JOIN users)
         u.username,
         COALESCE(u.avatar_url, '') AS avatar_url,
 
-        -- รวมรูปหลายใบถ้ามีตาราง post_images
         ARRAY_REMOVE(ARRAY_AGG(pi.image_path ORDER BY pi.id), NULL) AS images,
 
-        -- เวลาที่ได้รับสิทธิ์
         pp.created_at,
         pp.granted_at
       FROM public.purchased_posts pp

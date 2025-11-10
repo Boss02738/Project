@@ -1,9 +1,8 @@
-// lib/theme_controller.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class ThemeController extends ValueNotifier<ThemeMode> {
-  static const _kKey = 'app_theme_mode'; // 'light' | 'dark' | 'system'
+  static const _kKey = 'app_theme_mode'; 
   ThemeController._internal(ThemeMode mode) : super(mode);
 
   static final ThemeController instance = ThemeController._internal(ThemeMode.system);

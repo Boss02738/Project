@@ -10,9 +10,6 @@ const transporter = nodemailer.createTransport({
   },
 });
 
-// =============================
-// ฟังก์ชันส่ง OTP สำหรับ "สมัครสมาชิก"
-// =============================
 async function sendOTP(to, otp, minutes = 5) {
   return transporter.sendMail({
     from: process.env.MAIL_FROM,
@@ -30,9 +27,6 @@ async function sendOTP(to, otp, minutes = 5) {
   });
 }
 
-// =============================
-// ฟังก์ชันส่ง OTP สำหรับ "รีเซ็ตรหัสผ่าน"
-// =============================
 async function sendOTP_ResetPassword(to, otp, minutes = 5) {
   return transporter.sendMail({
     from: process.env.MAIL_FROM,

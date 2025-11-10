@@ -1,10 +1,8 @@
-// lib/main.dart
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/login_screen.dart';
 import 'screens/register_screen.dart';
 
-/// ตัวควบคุมธีม (บันทึกค่าไว้ใน SharedPreferences)
 class ThemeController extends ValueNotifier<ThemeMode> {
   ThemeController._(ThemeMode m) : super(m);
   static final instance = ThemeController._(ThemeMode.system);
@@ -25,7 +23,6 @@ class ThemeController extends ValueNotifier<ThemeMode> {
     await p.setString(_k, m == ThemeMode.light ? 'light' : m == ThemeMode.dark ? 'dark' : 'system');
   }
 
-  // ✅ รองรับโค้ดเก่าที่เรียก setMode(...)
   Future<void> setMode(ThemeMode m) => set(m);
 }
 
@@ -38,7 +35,6 @@ Future<void> main() async {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
-  // ใช้ฟ้าเป็นสีหลัก
   static const _seedBlue = Color(0xFF3B82F6);
 
   ThemeData _light() => ThemeData(

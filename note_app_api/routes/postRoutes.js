@@ -6,7 +6,6 @@ const ctrl = require('../controllers/postController');
 
 const router = express.Router();
 
-/* ---- multer สำหรับสร้างโพสต์ (images multiple + file single) ---- */
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const isImage = file.fieldname === 'images';
@@ -20,8 +19,6 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-/* ---------- ROUTES (ห้ามใส่วงเล็บเรียก ctrl.fn()) ---------- */
-// Create post
 router.post(
   '/',
   upload.fields([
@@ -30,46 +27,23 @@ router.post(
   ]),
   ctrl.createPost
 );
-
-// Feed
 router.get('/feed', ctrl.getFeed);
-
 router.get('/purchased', ctrl.getPurchasedFeed);
-
-// By subject
 router.get('/by-subject', ctrl.getPostsBySubject);
-
-// Like / Unlike
 router.post('/posts/:id/like', ctrl.toggleLike);
-
-// Comments
 router.get('/posts/:id/comments', ctrl.getComments);
 router.post('/posts/:id/comments', ctrl.addComment);
-
-// Counts
 router.get('/posts/:id/counts', ctrl.getPostCounts);
-
-// Save / Unsave + status
 router.post('/posts/:id/save', ctrl.toggleSave);
 router.get('/posts/:id/save/status', ctrl.getSavedStatus);
-
-// Saved list
 router.get('/saved', ctrl.getSavedPosts);
-
 router.get('/archived', ctrl.getArchivedPosts);
-
-// Posts by user
 router.get('/user/:id', ctrl.getPostsByUser);
-
-// Detail
 router.get('/:id', ctrl.getPostDetail);
-
-// Archive / Unarchive / Hard delete
 router.post('/:id/archive', ctrl.archivePost);
 router.post('/:id/unarchive', ctrl.unarchivePost);
 router.delete('/:id', ctrl.hardDeletePost);
-
-router.get('/:id/file/download', ctrl.downloadFileProtected);      // NEW
+router.get('/:id/file/download', ctrl.downloadFileProtected);
 router.get('/:id/images', ctrl.getImagesRespectAccess);   
 
 

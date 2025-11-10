@@ -1,4 +1,3 @@
-// lib/screens/reset_password_screen.dart
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -14,20 +13,17 @@ class ResetPasswordScreen extends StatefulWidget {
 }
 
 class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
-  // Controllers
   final _email = TextEditingController();
   final _otp = TextEditingController();
   final _pass1 = TextEditingController();
   final _pass2 = TextEditingController();
 
-  // Form keys
   final _formKeyEmail = GlobalKey<FormState>();
   final _formKeyReset = GlobalKey<FormState>();
 
-  // State
-  int _step = 0; // 0 = request OTP, 1 = verify + reset
+  int _step = 0;
   bool _loading = false;
-  int _resendCooldown = 0; // วินาที
+  int _resendCooldown = 0;
   Timer? _cooldownTimer;
 
   bool _obscure1 = true;
@@ -43,9 +39,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     super.dispose();
   }
 
-  // =========================
-  // API Calls
-  // =========================
   Future<void> _requestOtp() async {
     if (!_formKeyEmail.currentState!.validate()) return;
 
@@ -129,9 +122,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     }
   }
 
-  // =========================
-  // Helpers
-  // =========================
   void _startCooldown() {
     _cooldownTimer?.cancel();
     _cooldownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -180,7 +170,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
   }
 
   double _passwordStrength(String p) {
-    // แบบง่าย: ความยาว + มีตัวเลข + ตัวพิมพ์ใหญ่/เล็ก + อักขระพิเศษ
     int score = 0;
     if (p.length >= 8) score++;
     if (RegExp(r'[0-9]').hasMatch(p)) score++;
@@ -221,7 +210,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     final theme = Theme.of(context);
 
     return Scaffold(
-      // พื้นหลังไล่เฉดนุ่ม ๆ
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -239,7 +227,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // AppBar แบบ custom
                     Row(
                       children: [
                         IconButton(
@@ -258,7 +245,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                     _stepHeader(),
                     const SizedBox(height: 16),
 
-                    // การ์ดกลางหน้า
                     Expanded(
                       child: Card(
                         elevation: 3,
@@ -270,8 +256,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
                       ),
                     ),
                     const SizedBox(height: 12),
-
-                    // Tips เล็ก ๆ ด้านล่าง
                     Text(
                       _step == 0
                           ? 'กรอกอีเมล @ku.th ที่ใช้สมัคร ระบบจะส่ง OTP ไปยังกล่องจดหมายของคุณ'
@@ -289,9 +273,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     );
   }
 
-  // =========================
-  // UI: Step 0
-  // =========================
   Widget _buildStepRequest() {
     return Padding(
       key: const ValueKey('step0'),
@@ -337,9 +318,7 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
     );
   }
 
-  // =========================
-  // UI: Step 1
-  // =========================
+
   Widget _buildStepVerifyReset() {
     final strength = _passwordStrength(_pass1.text);
     return Padding(
@@ -400,7 +379,6 @@ class _ResetPasswordScreenState extends State<ResetPasswordScreen> {
               ),
             ),
             const SizedBox(height: 8),
-            // Password strength
             ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: LinearProgressIndicator(

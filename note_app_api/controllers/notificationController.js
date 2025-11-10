@@ -1,18 +1,11 @@
-// controllers/notificationController.js
 const pool = require("../models/db");
 
-/**
- * สร้างแถวใน notifications แล้ว emit แบบ realtime ไปยังผู้รับ
- * payload: { targetUserId, actorId, action, message, postId? }
- * action: like | comment | friend_request | friend_accept | ...
- */
 async function createAndEmit(app, payload) {
   const { targetUserId, actorId, action, message, postId = null } = payload || {};
   if (!targetUserId || !actorId || !action) {
     throw new Error("missing fields for notification");
   }
 
-  // ✅ ใส่ค่า verb ด้วย (ให้เท่ากับ action) เพื่อกัน NOT NULL
   const ins = await pool.query(
     `INSERT INTO public.notifications
        (user_id, actor_id, verb, action, message, post_id, is_read)
@@ -22,7 +15,6 @@ async function createAndEmit(app, payload) {
   );
   const row = ins.rows[0];
 
-  // enrich ด้วยชื่อ/รูปคนกระทำ + รูปแรกของโพสต์ (ถ้ามี)
   const q = await pool.query(
     `
     SELECT n.id, n.user_id, n.actor_id, n.verb, n.action, n.message, n.post_id, n.is_read, n.created_at,
@@ -41,7 +33,6 @@ async function createAndEmit(app, payload) {
   );
   const item = q.rows[0] || row;
 
-  // realtime emit
   try {
     const io = app.get("io");
     if (io) io.to(`user:${targetUserId}`).emit("notification:new", item);
@@ -52,7 +43,6 @@ async function createAndEmit(app, payload) {
   return item;
 }
 
-/** GET /api/notifications?user_id=&limit= */
 async function listNotifications(req, res) {
   try {
     const userId = Number(req.query.user_id);

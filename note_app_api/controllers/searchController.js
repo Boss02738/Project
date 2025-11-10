@@ -1,6 +1,5 @@
 const pool = require('../models/db');
 
-// GET /api/search/users?q=bos
 exports.searchUsers = async (req, res) => {
   try {
     const q = (req.query.q || '').trim();
@@ -23,14 +22,12 @@ exports.searchUsers = async (req, res) => {
 
 exports.searchSubjects = async (req, res) => {
   try {
-    const q = (req.query.q || '').trim();           // คำค้น (อาจว่าง)
-    const yearLabel = (req.query.year_label || '').trim(); // ปี (อาจว่าง)
+    const q = (req.query.q || '').trim(); 
+    const yearLabel = (req.query.year_label || '').trim();
 
-    // สร้าง where + params แบบ dynamic
     const where = [];
     const params = [];
 
-    // กรองเฉพาะโพสต์ที่ subject ไม่เป็น null/ว่าง
     where.push(`subject IS NOT NULL AND subject <> ''`);
 
     if (q) {

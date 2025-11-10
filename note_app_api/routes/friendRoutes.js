@@ -1,10 +1,6 @@
-// routes/friendRoutes.js
 const express = require("express");
 const router = express.Router();
 const ctrl = require("../controllers/friendController");
-
-// ถ้าอยากเช็คว่าโหลดได้จริง ลองเปิดบรรทัดนี้ชั่วคราว:
-// console.log("friendController keys:", Object.keys(ctrl));
 
 router.post("/request", ctrl.sendRequest);
 router.post("/respond", ctrl.respondRequest);

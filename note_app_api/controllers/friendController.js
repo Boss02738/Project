@@ -1,4 +1,3 @@
-// controllers/friendController.js
 const pool = require("../models/db");
 const { createAndEmit } = require("./notificationController");
 
@@ -28,7 +27,6 @@ function edgeStatusForViewer(edge, viewerId, otherId) {
   return "none";
 }
 
-/* ---------------- GET /api/friends/status ---------------- */
 async function getStatus(req, res) {
   try {
     const userId = Number(req.query.user_id);
@@ -44,7 +42,6 @@ async function getStatus(req, res) {
   }
 }
 
-/* ---------------- POST /api/friends/request ---------------- */
 async function sendRequest(req, res) {
   const { from_user_id, to_user_id } = req.body || {};
   const fromId = Number(from_user_id),
@@ -73,7 +70,6 @@ async function sendRequest(req, res) {
       );
     }
 
-    // 🔔 สร้าง noti + realtime emit ไปยังผู้รับคำขอ
     await createAndEmit(req.app, {
       targetUserId: toId,
       actorId: fromId,
@@ -89,7 +85,6 @@ async function sendRequest(req, res) {
   }
 }
 
-/* ---------------- POST /api/friends/respond ---------------- */
 async function respondRequest(req, res) {
   const { user_id, other_user_id, action } = req.body || {};
   const me = Number(user_id),
@@ -116,7 +111,6 @@ async function respondRequest(req, res) {
         [ua, ub, now]
       );
 
-      // 🔔 แจ้งผู้ส่งคำขอว่า “ถูกยอมรับแล้ว” + realtime
       await createAndEmit(req.app, {
         targetUserId: other,
         actorId: me,
@@ -141,7 +135,6 @@ async function respondRequest(req, res) {
   }
 }
 
-/* ---------------- POST /api/friends/cancel ---------------- */
 async function cancelRequest(req, res) {
   const { user_id, other_user_id } = req.body || {};
   const me = Number(user_id),
@@ -167,7 +160,6 @@ async function cancelRequest(req, res) {
   }
 }
 
-/* ---------------- DELETE /api/friends/unfriend/:other_user_id ---------------- */
 async function unfriend(req, res) {
   const me = Number(req.query.user_id);
   const other = Number(req.params.other_user_id);

@@ -1,8 +1,8 @@
 const pool = require('../models/db');
 
 exports.decidePurchase = async (req, res) => {
-  const id = Number(req.params.id);                 // purchases.id = BIGINT
-  const { decision, admin_note } = req.body;        // 'approved' | 'rejected'
+  const id = Number(req.params.id);                 
+  const { decision, admin_note } = req.body;      
   if (!['approved','rejected'].includes(decision)) {
     return res.status(400).json({ error: 'invalid decision' });
   }

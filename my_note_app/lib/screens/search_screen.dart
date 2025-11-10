@@ -50,14 +50,13 @@ class _SearchScreenState extends State<SearchScreen> {
 
   @override
   void deactivate() {
-    // กันคีย์บอร์ดค้างเมื่อสลับแท็บ
     FocusScope.of(context).unfocus();
     super.deactivate();
   }
 
   @override
   void dispose() {
-    _debouncer.dispose(); // ยกเลิก timer ให้เรียบร้อย
+    _debouncer.dispose(); 
     _controller.dispose();
     super.dispose();
   }
@@ -154,7 +153,6 @@ class _SearchScreenState extends State<SearchScreen> {
             await _saveRecent(subject);
             if (!mounted) return;
             Navigator.pop(ctx);
-            // เปิดฟีดวิชาแบบ push (สแต็กของแท็บ Search)
             Navigator.push(
               context,
               MaterialPageRoute(
@@ -173,7 +171,7 @@ class _SearchScreenState extends State<SearchScreen> {
         Expanded(
           child: TextField(
             controller: _controller,
-            autofocus: false, // กันเด้งคีย์บอร์ดอัตโนมัติ
+            autofocus: false, 
             onChanged: _onQueryChanged,
             onSubmitted: _onSubmit,
             decoration: InputDecoration(
@@ -368,7 +366,6 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ไม่มี bottomNavigationBar ตรงนี้แล้ว (ให้ home_screen จัดการ)
       body: SafeArea(
         bottom: false,
         child: Padding(
@@ -401,7 +398,6 @@ class _Debouncer {
   }
 }
 
-// ---------------- Subject Picker Sheet ----------------
 class _SubjectPickerSheet extends StatefulWidget {
   final List<String> years;
   final String initialYear;

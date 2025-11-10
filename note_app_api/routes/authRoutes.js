@@ -1,4 +1,3 @@
-// routes/authRoutes.js
 const express = require('express');
 const router = express.Router();
 
@@ -21,12 +20,11 @@ const {
   changePassword,
 } = require('../controllers/authController');
 
-// ---------- เตรียมโฟลเดอร์อัปโหลดเฉพาะอวาตาร์ ----------
+
 const ensureDir = (p) => { if (!fs.existsSync(p)) fs.mkdirSync(p, { recursive: true }); };
 const avatarsDir = path.join(__dirname, '..', 'uploads', 'avatars');
 ensureDir(avatarsDir);
 
-// ---------- Multer: Avatar ----------
 const avatarStorage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, avatarsDir),
   filename: (req, file, cb) => {
@@ -48,28 +46,21 @@ const uploadAvatarMulter = multer({
   },
 });
 
-// ---------- Auth / OTP ----------
+
 router.post('/register/request-otp', startRegister);
 router.post('/register/verify', verifyRegister);
 router.post('/register/resend-otp', resendOtp);
-
-// ---------- Login ----------
 router.post('/login', login);
-// reset password
 router.post('/password/request-otp', startResetPassword);
 router.post('/password/reset', resetPassword);
 router.post('/change-password', changePassword);
-
-
-// ---------- Profile ----------
 router.post('/profile/update', updateProfile);
 router.post('/profile/avatar', uploadAvatarMulter.single('avatar'), uploadAvatar);
-router.post('/profile/update-by-id', updateProfileById); // << เพิ่ม
+router.post('/profile/update-by-id', updateProfileById);
 router.post('/profile/avatar-by-id',
   uploadAvatarMulter.single('avatar'),
   uploadAvatarById
-); // <<
-// ---------- ข้อมูลผู้ใช้แบบย่อ ----------
+);
 router.get('/user/:id', getUserBrief);
 
 module.exports = router;

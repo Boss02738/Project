@@ -14,28 +14,22 @@ class RegisterScreen extends StatefulWidget {
 }
 
 class _RegisterScreenState extends State<RegisterScreen> {
-  // Controllers
   final _username = TextEditingController();
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _confirmPassword = TextEditingController();
   final _otp = TextEditingController();
-
-  // Form keys
   final _formStep1Key = GlobalKey<FormState>();
   final _formStep2Key = GlobalKey<FormState>();
-
-  // UI states
   bool otpSent = false;
   bool loading = false;
 
-  // Timer / countdown
-  DateTime? _expiresAtServer; // เวลาหมดอายุจาก server (เก็บไว้เผื่อใช้ต่อ)
-  DateTime? _serverNow; // เวลา server ตอนออก OTP (เก็บไว้เผื่อใช้ต่อ)
+  DateTime? _expiresAtServer; 
+  DateTime? _serverNow; 
   Timer? _countdownTimer;
   Timer? _resendTimer;
-  int _remainingSec = 0; // นับถอยหลัง OTP
-  int _resendRemain = 0; // นับถอยหลังปุ่มส่งใหม่
+  int _remainingSec = 0; 
+  int _resendRemain = 0; 
 
   @override
   void dispose() {
@@ -49,7 +43,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     super.dispose();
   }
 
-  // แปลงวินาทีเป็น mm:ss
   String _mmss(int s) {
     final m = (s ~/ 60).toString().padLeft(2, '0');
     final ss = (s % 60).toString().padLeft(2, '0');
@@ -61,7 +54,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
     required DateTime expiresAt,
     required int resendAfterSec,
   }) {
-    // sync เวลาด้วยส่วนต่าง serverNow กับเวลาปัจจุบัน
     final drift = DateTime.now().difference(serverNow);
     final localExpires = expiresAt.subtract(drift);
 
@@ -95,7 +87,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   Future<void> _requestOtp() async {
-    // เช็คฟอร์ม + confirm password ต้องตรง
     if (!_formStep1Key.currentState!.validate()) return;
     if (_password.text != _confirmPassword.text) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -124,7 +115,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (res.statusCode == 200) {
         setState(() => otpSent = true);
 
-        // เริ่มจับเวลา
         _startTimers(
           serverNow: DateTime.parse(data['now']),
           expiresAt: DateTime.parse(data['expiresAt']),
@@ -179,7 +169,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('สมัครสำเร็จ')),
           );
-          Navigator.of(context).pop(); // หรือไปหน้า Login
+          Navigator.of(context).pop();
         }
       } else {
         if (mounted) {
@@ -261,7 +251,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // ให้เว้นซ้าย/ขวาแบบเดียวกับหน้า Login (เช่น 24)
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 24.0),
         child: Center(
@@ -270,9 +259,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: SingleChildScrollView(
               padding: const EdgeInsets.symmetric(vertical: 16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start, // ให้หัวเรื่องชิดซ้าย
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ขยับหัวเรื่องให้เว้นซ้ายพอดีกับ Login
                   const Padding(
                     padding: EdgeInsets.only(left: 0),
                     child: Text(
@@ -284,8 +272,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     ),
                   ),
                   const SizedBox(height: 16),
-
-                  // STEP 1
                   Card(
                     elevation: 0,
                     color: Theme.of(context).colorScheme.surface,
@@ -364,8 +350,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                   ),
                   const SizedBox(height: 8),
-
-                  // STEP 2
                   if (otpSent)
                     Card(
                       elevation: 0,

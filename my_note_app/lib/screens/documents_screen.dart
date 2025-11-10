@@ -54,14 +54,22 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             ),
             TextField(
               controller: pwdCtrl,
-              decoration: const InputDecoration(labelText: 'Password (if required)'),
+              decoration: const InputDecoration(
+                labelText: 'Password (if required)',
+              ),
               obscureText: true,
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Join')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Join'),
+          ),
         ],
       ),
     );
@@ -70,7 +78,10 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     final roomId = roomIdCtrl.text.trim();
     final socket = IO.io(
       baseServerUrl,
-      IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
+      IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .disableAutoConnect()
+          .build(),
     );
 
     if (!mounted) return;
@@ -87,7 +98,7 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       socket.onConnect((_) {
         socket.emit('join', {
           'boardId': roomId,
-          if (pwdCtrl.text.isNotEmpty) 'password': pwdCtrl.text
+          if (pwdCtrl.text.isNotEmpty) 'password': pwdCtrl.text,
         });
       });
       socket.on('join_ok', (_) => joinResult = true);
@@ -149,22 +160,41 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Room name (optional)')),
-            TextField(controller: pwdCtrl, decoration: const InputDecoration(labelText: 'Password (optional)')),
+            TextField(
+              controller: nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Room name (optional)',
+              ),
+            ),
+            TextField(
+              controller: pwdCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Password (optional)',
+              ),
+            ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Create')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Create'),
+          ),
         ],
       ),
     );
     if (ok != true) return;
 
     try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = prefs.getInt('user_id');
       final body = {
         if (nameCtrl.text.trim().isNotEmpty) 'name': nameCtrl.text.trim(),
         if (pwdCtrl.text.trim().isNotEmpty) 'password': pwdCtrl.text.trim(),
+        if (uid != null) 'user_id': uid,
       };
       final r = await http.post(
         Uri.parse('$baseServerUrl/rooms'),
@@ -184,11 +214,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
         final socket = IO.io(
           baseServerUrl,
-          IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
+          IO.OptionBuilder()
+              .setTransports(['websocket'])
+              .disableAutoConnect()
+              .build(),
         );
         socket.connect();
-        socket.onConnect((_) =>
-            socket.emit('join', {'boardId': roomId, 'password': pwdCtrl.text.trim()}));
+        socket.onConnect(
+          (_) => socket.emit('join', {
+            'boardId': roomId,
+            'password': pwdCtrl.text.trim(),
+          }),
+        );
 
         if (!mounted) return;
         Navigator.push(
@@ -198,7 +235,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               boardId: roomId,
               socket: socket,
               documentId: null,
-              initialTitle: nameCtrl.text.trim().isEmpty ? 'Untitled' : nameCtrl.text.trim(),
+              initialTitle: nameCtrl.text.trim().isEmpty
+                  ? 'Untitled'
+                  : nameCtrl.text.trim(),
               initialPages: const <sc.Sketch>[],
               initialTextsPerPage: const <List<TextBoxData>>[],
               initialImagesPerPage: const <List<ImageLayerData>>[],
@@ -213,9 +252,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       }
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('สร้างห้องไม่สำเร็จ')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('สร้างห้องไม่สำเร็จ')));
     }
   }
 
@@ -226,14 +265,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final prefs = await SharedPreferences.getInstance();
       final uid = prefs.getInt('user_id');
       final uri = (uid != null)
-          ? Uri.parse('$baseServerUrl/documents').replace(queryParameters: {'user_id': '$uid'})
+          ? Uri.parse(
+              '$baseServerUrl/documents',
+            ).replace(queryParameters: {'user_id': '$uid'})
           : Uri.parse('$baseServerUrl/documents');
 
       final r = await http.get(uri);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       final list = (jsonDecode(r.body) as List).cast<Map>();
       setState(() {
-        _docs = list.map((e) => _DocItem.fromJson(Map<String, dynamic>.from(e))).toList();
+        _docs = list
+            .map((e) => _DocItem.fromJson(Map<String, dynamic>.from(e)))
+            .toList();
         _loading = false;
       });
     } catch (_) {
@@ -250,16 +293,18 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final prefs = await SharedPreferences.getInstance();
       final uid = prefs.getInt('user_id');
       final uri = (uid != null)
-          ? Uri.parse('$baseServerUrl/documents/${d.id}').replace(queryParameters: {'user_id': '$uid'})
+          ? Uri.parse(
+              '$baseServerUrl/documents/${d.id}',
+            ).replace(queryParameters: {'user_id': '$uid'})
           : Uri.parse('$baseServerUrl/documents/${d.id}');
       final r = await http.delete(uri);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       setState(() => _docs.removeWhere((x) => x.id == d.id));
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ลบเอกสารไม่สำเร็จ')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('ลบเอกสารไม่สำเร็จ')));
     }
   }
 
@@ -290,7 +335,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         final mm = Map<String, dynamic>.from(m);
         final arr = (mm['texts'] as List?) ?? const [];
         return arr
-            .map((e) => TextBoxData.fromJson(Map<String, dynamic>.from(e as Map)))
+            .map(
+              (e) => TextBoxData.fromJson(Map<String, dynamic>.from(e as Map)),
+            )
             .toList();
       }).toList();
 
@@ -307,12 +354,17 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       }).toList();
 
       final hasRealBoard =
-          boardId != null && boardId.isNotEmpty && boardId.toLowerCase() != 'offline';
+          boardId != null &&
+          boardId.isNotEmpty &&
+          boardId.toLowerCase() != 'offline';
 
       if (hasRealBoard) {
         final socket = IO.io(
           baseServerUrl,
-          IO.OptionBuilder().setTransports(['websocket']).disableAutoConnect().build(),
+          IO.OptionBuilder()
+              .setTransports(['websocket'])
+              .disableAutoConnect()
+              .build(),
         );
 
         if (!mounted) return;
@@ -324,7 +376,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
 
         void closeSpinnerSafe() {
           if (!mounted) return;
-          try { Navigator.of(context, rootNavigator: true).pop(); } catch (_) {}
+          try {
+            Navigator.of(context, rootNavigator: true).pop();
+          } catch (_) {}
         }
 
         void openLive() {
@@ -365,8 +419,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           );
           socket.dispose();
           if (reason != null) {
-            ScaffoldMessenger.of(context)
-                .showSnackBar(SnackBar(content: Text('เปิดแบบออฟไลน์: $reason')));
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text('เปิดแบบออฟไลน์: $reason')));
           }
         }
 
@@ -378,7 +433,8 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
               ? data['message'] as String
               : 'เข้าห้องไม่สำเร็จ';
 
-          final needsPassword = msg.toLowerCase().contains('password') ||
+          final needsPassword =
+              msg.toLowerCase().contains('password') ||
               msg.toLowerCase().contains('require');
 
           if (needsPassword) {
@@ -402,14 +458,23 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                   ],
                 ),
                 actions: [
-                  TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('ยกเลิก')),
-                  FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ส่ง')),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text('ยกเลิก'),
+                  ),
+                  FilledButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text('ส่ง'),
+                  ),
                 ],
               ),
             );
 
             if (retry == true && pwdCtrl.text.trim().isNotEmpty) {
-              socket.emit('join', {'boardId': boardId, 'password': pwdCtrl.text.trim()});
+              socket.emit('join', {
+                'boardId': boardId,
+                'password': pwdCtrl.text.trim(),
+              });
               return; // รอ join_ok/join_error รอบถัดไป
             }
           }
@@ -441,9 +506,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       );
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('เปิดเอกสารไม่สำเร็จ')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('เปิดเอกสารไม่สำเร็จ')));
     }
   }
 
@@ -487,12 +552,13 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                     padding: const EdgeInsets.all(12),
                     child: GridView.builder(
                       itemCount: _docs.length,
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        childAspectRatio: 0.9,
-                        crossAxisSpacing: 12,
-                        mainAxisSpacing: 12,
-                      ),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            childAspectRatio: 0.9,
+                            crossAxisSpacing: 12,
+                            mainAxisSpacing: 12,
+                          ),
                       itemBuilder: (_, i) {
                         final d = _docs[i];
                         return _DocCard(
@@ -518,19 +584,31 @@ class _DocItem {
   final String? coverPng;
   final DateTime? updatedAt;
 
-  _DocItem({required this.id, this.title, this.boardId, this.coverPng, this.updatedAt});
+  _DocItem({
+    required this.id,
+    this.title,
+    this.boardId,
+    this.coverPng,
+    this.updatedAt,
+  });
 
   factory _DocItem.fromJson(Map<String, dynamic> j) => _DocItem(
-        id: j['id'] as String,
-        title: j['title'] as String?,
-        boardId: (j['board_id'] ?? j['boardId']) as String?,
-        coverPng: (j['cover_png'] ?? j['coverPng']) as String?,
-        updatedAt: j['updated_at'] != null ? DateTime.tryParse(j['updated_at'].toString()) : null,
-      );
+    id: j['id'] as String,
+    title: j['title'] as String?,
+    boardId: (j['board_id'] ?? j['boardId']) as String?,
+    coverPng: (j['cover_png'] ?? j['coverPng']) as String?,
+    updatedAt: j['updated_at'] != null
+        ? DateTime.tryParse(j['updated_at'].toString())
+        : null,
+  );
 }
 
 class _DocCard extends StatelessWidget {
-  const _DocCard({required this.item, required this.onTap, required this.onDelete});
+  const _DocCard({
+    required this.item,
+    required this.onTap,
+    required this.onDelete,
+  });
 
   final _DocItem item;
   final VoidCallback onTap;
@@ -562,7 +640,9 @@ class _DocCard extends StatelessWidget {
             AspectRatio(
               aspectRatio: 4 / 3,
               child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(14),
+                ),
                 child: cover,
               ),
             ),
@@ -578,11 +658,16 @@ class _DocCard extends StatelessWidget {
                           item.title ?? 'Untitled',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          item.updatedAt != null ? 'อัปเดตล่าสุด: ${item.updatedAt!.toLocal()}' : '—',
+                          item.updatedAt != null
+                              ? 'อัปเดตล่าสุด: ${item.updatedAt!.toLocal()}'
+                              : '—',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall,

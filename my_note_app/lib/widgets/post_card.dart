@@ -1,5 +1,3 @@
-// lib/widgets/post_card.dart
-
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,10 +10,8 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:open_file/open_file.dart';
 
-// ถ้ามี dialog เลือกเหตุผลรายงาน
 import 'package:my_note_app/widgets/report_post_dialog.dart';
 
-/// ======================= helpers =======================
 String _abs(String? url) {
   final u = (url ?? '').trim();
   if (u.isEmpty) return '';
@@ -30,7 +26,6 @@ ImageProvider _avatarProvider(String? avatar) {
   return NetworkImage(_abs(a));
 }
 
-/// ======================= Fullscreen Gallery =======================
 class GalleryViewer extends StatefulWidget {
   final List<String> urls;
   final int initialIndex;
@@ -119,10 +114,9 @@ class _GalleryViewerState extends State<GalleryViewer> {
   }
 }
 
-/// ============================ Post Card ============================
 class PostCard extends StatefulWidget {
   final Map<String, dynamic> post;
-  final VoidCallback? onDeleted; // callback เมื่อ archive สำเร็จ
+  final VoidCallback? onDeleted; 
   const PostCard({super.key, required this.post, this.onDeleted});
 
   @override
@@ -171,7 +165,6 @@ class _PostCardState extends State<PostCard>
         _likeCount = (m['like_count'] as int?) ?? 0;
         _commentCount = (m['comment_count'] as int?) ?? 0;
       });
-      // sync กลับลงแมพ (กันย้อนค่า)
       widget.post['like_count'] = _likeCount;
       widget.post['comment_count'] = _commentCount;
     } catch (_) {}
@@ -181,7 +174,6 @@ class _PostCardState extends State<PostCard>
     final postId = widget.post['id'] as int?;
     if (postId == null || _userId == null) return;
 
-    // --- optimistic update ---
     final oldLiked = _likedByMe;
     final oldCount = _likeCount;
     final optimisticLiked = !oldLiked;
@@ -192,7 +184,6 @@ class _PostCardState extends State<PostCard>
       _likedByMe = optimisticLiked;
       _likeCount = optimisticCount;
     });
-    // เขียนกลับลงแมพที่ parent ถือ reference
     widget.post['liked_by_me'] = optimisticLiked;
     widget.post['like_count'] = optimisticCount;
 
@@ -202,7 +193,6 @@ class _PostCardState extends State<PostCard>
 
       if (!mounted) return;
       if (liked != optimisticLiked) {
-        // server ตอบต่างจากที่เดา → sync ให้ถูก
         final fixedCount =
             (optimisticCount + (liked ? 1 : -1)).clamp(0, 1 << 31);
         setState(() {
@@ -213,7 +203,6 @@ class _PostCardState extends State<PostCard>
         widget.post['like_count'] = fixedCount;
       }
     } catch (_) {
-      // rollback เมื่อพลาด
       if (!mounted) return;
       setState(() {
         _likedByMe = oldLiked;
@@ -270,7 +259,6 @@ class _PostCardState extends State<PostCard>
       final saved = await ApiService.toggleSave(postId: postId, userId: uid);
       if (!mounted) return;
       setState(() => _savedByMe = saved);
-      // (ถ้าต้องการ) widget.post['saved_by_me'] = saved;
     } catch (_) {}
   }
 
@@ -440,7 +428,6 @@ class _PostCardState extends State<PostCard>
     );
   }
 
-  /// ====== Action Sheet (เมนู) ======
   Future<void> _openActionsSheet(bool canDelete) async {
     FocusScope.of(context).unfocus();
     final theme = Theme.of(context);
@@ -450,7 +437,7 @@ class _PostCardState extends State<PostCard>
       context: context,
       useRootNavigator: true,
       isScrollControlled: false,
-      backgroundColor: cs.surface, // ให้เข้ากับธีม
+      backgroundColor: cs.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
@@ -519,7 +506,7 @@ class _PostCardState extends State<PostCard>
 
   @override
   Widget build(BuildContext context) {
-    super.build(context); // สำคัญเมื่อใช้ KeepAlive mixin
+    super.build(context);
 
     final theme = Theme.of(context);
     final textTheme = theme.textTheme;
@@ -588,7 +575,6 @@ class _PostCardState extends State<PostCard>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // -------- Header --------
           ListTile(
             leading: CircleAvatar(
               radius: 22,
@@ -630,7 +616,6 @@ class _PostCardState extends State<PostCard>
             ),
           ),
 
-          // -------- Images + Lock --------
           if (imagesToShow.isNotEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -651,7 +636,6 @@ class _PostCardState extends State<PostCard>
               ),
             ),
 
-          // -------- File download (secure) --------
           if (file.isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
@@ -745,7 +729,6 @@ class _PostCardState extends State<PostCard>
               ),
             ),
 
-          // -------- Actions --------
           Padding(
             padding: const EdgeInsets.only(left: 6, right: 6, top: 6),
             child: Row(
@@ -772,14 +755,12 @@ class _PostCardState extends State<PostCard>
             ),
           ),
 
-          // -------- Text --------
           if (text.trim().isNotEmpty)
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ใช้สีจากธีม ไม่ hardcode ดำ/เทา
                   Text.rich(
                     TextSpan(
                       children: [
@@ -809,7 +790,6 @@ class _PostCardState extends State<PostCard>
               ),
             ),
 
-          // -------- Time --------
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
             child: Text(
@@ -823,7 +803,6 @@ class _PostCardState extends State<PostCard>
   }
 }
 
-/// ======================= Smart Grid Layout =======================
 class _SmartImageGrid extends StatelessWidget {
   final int postId;
   final List<String> images;
@@ -958,7 +937,6 @@ class _Thumb extends StatelessWidget {
       );
 }
 
-/// ------------------------- Lock Pill -------------------------
 class _LockPill extends StatelessWidget {
   final String label;
   const _LockPill({required this.label});
@@ -983,7 +961,6 @@ class _LockPill extends StatelessWidget {
   }
 }
 
-/// ====================== BottomSheet: Comments ======================
 class _CommentsSheet extends StatefulWidget {
   final int postId;
   final VoidCallback onCommentAdded;
@@ -1140,7 +1117,6 @@ class _CommentsSheetState extends State<_CommentsSheet> {
   }
 }
 
-/// ========= ชิ้นส่วน UI ของแผ่นล่าง =========
 class _ActionItem extends StatelessWidget {
   final IconData icon;
   final String label;
@@ -1216,7 +1192,6 @@ class _ActionItem extends StatelessWidget {
   }
 }
 
-/// -------- ป้าย "ซื้อแล้ว" --------
 class _PurchasedChip extends StatelessWidget {
   const _PurchasedChip();
 

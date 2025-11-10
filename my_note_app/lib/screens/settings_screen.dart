@@ -1,4 +1,3 @@
-// lib/screens/settings_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -12,8 +11,6 @@ import 'package:my_note_app/screens/purchased_posts_screen.dart';
 import 'package:my_note_app/screens/withdraw_screen.dart';
 import 'package:my_note_app/screens/login_screen.dart';
 import 'package:my_note_app/screens/change_password_screen.dart';
-
-// ✅ นำเข้า ThemeController ที่เราสร้างไว้ใน main.dart
 import 'package:my_note_app/main.dart' show ThemeController;
 
 class SettingsScreen extends StatefulWidget {
@@ -44,7 +41,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
   }
 
-  // ---------- UI helpers ----------
   String _themeLabel(ThemeMode mode) {
     switch (mode) {
       case ThemeMode.light:
@@ -141,14 +137,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const Divider(height: 1),
 
-                    // ✅ Theme (interactive)
                     ValueListenableBuilder<ThemeMode>(
                       valueListenable: ThemeController.instance,
                       builder: (_, mode, __) {
                         return _SettingsItem(
                           icon: Icons.brightness_6_outlined,
                           title: 'Theme',
-                          // โชว์สถานะธีมปัจจุบัน
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [

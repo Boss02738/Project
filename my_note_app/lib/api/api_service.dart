@@ -22,7 +22,7 @@ class ApiService {
       return 'http://localhost:3000';
     }
     if (Platform.isAndroid) return 'http://10.0.2.2:3000'; // Android emulator
-    return 'http://192.168.1.38:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
+    return 'http://10.35.147.27:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
   }
 
   // -------- Base paths --------

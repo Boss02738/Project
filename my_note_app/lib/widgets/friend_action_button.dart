@@ -1,10 +1,9 @@
-// lib/widgets/friend_action_button.dart
 import 'package:flutter/material.dart';
-import 'package:my_note_app/api/api_service.dart'; // ให้ตรง path ของคุณ
+import 'package:my_note_app/api/api_service.dart'; 
 
 class FriendActionButton extends StatefulWidget {
-  final int meId;       // user ปัจจุบัน
-  final int otherId;    // โปรไฟล์ที่กำลังดู
+  final int meId;       
+  final int otherId;    
 
   const FriendActionButton({
     super.key,
@@ -17,7 +16,7 @@ class FriendActionButton extends StatefulWidget {
 }
 
 class _FriendActionButtonState extends State<FriendActionButton> {
-  String _status = 'none'; // none | pending_out | pending_in | friends
+  String _status = 'none'; 
   bool _busy = false;
 
   @override
@@ -35,10 +34,10 @@ class _FriendActionButtonState extends State<FriendActionButton> {
       final s = await ApiService.getFriendStatus(
         userId: widget.meId,
         otherUserId: widget.otherId,
-      ); // <-- ใช้ named params
+      ); 
       setState(() => _status = s);
     } catch (_) {
-      // จะโชว์ error ก็ได้
+
     }
   }
 
@@ -54,7 +53,7 @@ class _FriendActionButtonState extends State<FriendActionButton> {
       await ApiService.sendFriendRequest(
         fromUserId: widget.meId,
         toUserId: widget.otherId,
-      ); // <-- ใช้ named params
+      ); 
       setState(() => _status = 'pending_out');
       _toast('ส่งคำขอเป็นเพื่อนแล้ว');
     } catch (e) {

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:my_note_app/api/api_service.dart';
 
-/// ===== Top-level helper (ใช้ร่วมกัน) =====
 String absUrl(String p) {
   if (p.isEmpty) return p;
   if (p.startsWith('http://') || p.startsWith('https://')) return p;
@@ -11,7 +10,6 @@ String absUrl(String p) {
   return '${ApiService.host}/$p';
 }
 
-/// ===== Quick Post Detail (ขั้นต่ำ) =====
 class PostDetailScreen extends StatefulWidget {
   final int postId;
   final int viewerUserId;
@@ -59,7 +57,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         body: Center(child: Text('โหลดโพสต์ไม่สำเร็จ: $_err')),
       );
     }
-    final post = _data?['post'] ?? _data; // รองรับทั้ง {post, hasAccess} และแบบตรงๆ
+    final post = _data?['post'] ?? _data; 
     final text = (post?['text'] ?? '').toString();
     final img = (post?['image_url'] ?? '').toString();
     final hasAccess = (_data?['hasAccess'] == true) || (post?['price_type'] != 'paid');
@@ -99,7 +97,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 }
 
-/// ===== Notifications =====
 class NotificationScreen extends StatefulWidget {
   final int userId;
   const NotificationScreen({super.key, required this.userId});
@@ -152,7 +149,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       );
       if (res.statusCode == 200) {
         if (!mounted) return;
-        Navigator.pop(context, true); // กลับพร้อมสั่งให้หน้าก่อนหน้าล้าง badge
+        Navigator.pop(context, true); 
       } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -178,7 +175,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final int? postId = _toInt(n['post_id']);
     final int? notiId = _toInt(n['id']);
 
-    // mark read (พลาดได้ ไม่บล็อกการเปิดโพสต์)
     if (notiId != null) {
       try {
         await http.post(

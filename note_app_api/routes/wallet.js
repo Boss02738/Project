@@ -1,15 +1,12 @@
-// routes/wallet.js
 const express = require('express');
 const pool = require('../models/db');
 
 const router = express.Router();
 
-// helper: เอา userId จาก auth หรือ query
 function getUserId(req) {
   return req.user?.id ?? Number(req.query.user_id || req.body?.user_id);
 }
 
-// GET /api/wallet  -> { coins: number }
 router.get('/api/wallet', async (req, res) => {
   const userId = getUserId(req);
   if (!userId) return res.status(400).json({ error: 'invalid_user' });

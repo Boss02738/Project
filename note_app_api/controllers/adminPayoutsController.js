@@ -1,7 +1,7 @@
 const pool = require('../models/db');
 
 exports.markPaid = async (req, res) => {
-  const { id } = req.params; // payout_requests.id (UUID)
+  const { id } = req.params; 
   const { admin_note } = req.body;
   const r = await pool.query(
     `UPDATE payout_requests

@@ -4,7 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:my_note_app/api/api_service.dart';
 
 class WithdrawScreen extends StatefulWidget {
-  final int userId; // << ต้องส่งมาจาก Settings
+  final int userId;
   const WithdrawScreen({super.key, required this.userId});
 
   @override
@@ -19,9 +19,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   bool _loading = true;
   bool _submitting = false;
 
-  // ค่าคอนฟิกจากเซิร์ฟเวอร์
-  double? _feePercent;  // มาจาก .env ทาง API
-  int? _minCoins;       // มาจาก .env ทาง API (เช่น 100)
+  double? _feePercent;  
+  int? _minCoins;       
 
   XFile? _qrFile;
   final _api = ApiService();
@@ -43,7 +42,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     try {
       final results = await Future.wait([
         _api.getWalletBalance(userId: widget.userId),
-        _api.getWithdrawConfig(), // ดึง feePercent + minCoins
+        _api.getWithdrawConfig(), 
       ]);
 
       final bal = results[0] as int;
@@ -100,7 +99,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         balOk &&
         _netCoins > 0 &&
         _qrFile != null &&
-        _feePercent != null; // ต้องมีคอนฟิกแล้ว
+        _feePercent != null; 
   }
 
   Future<void> _submit() async {
@@ -216,7 +215,6 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
                         const SizedBox(height: 16),
 
-                        // ปุ่มแนบ/เปลี่ยนรูป QR — กว้างเต็มบรรทัด
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton.icon(
@@ -226,7 +224,6 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                           ),
                         ),
 
-                        // แสดงรูปเหนือปุ่มยืนยัน เต็มความกว้าง
                         if (_qrFile != null) ...[
                           const SizedBox(height: 12),
                           ClipRRect(
