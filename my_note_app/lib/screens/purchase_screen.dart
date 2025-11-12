@@ -1,14 +1,10 @@
 import 'dart:async';
-import 'dart:io';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:http/http.dart' as http;
-import '../api/api_service.dart';
+import 'purchase_slip_upload_screen.dart';
 
 class PurchaseScreen extends StatefulWidget {
-  final int purchaseId;            
+  final int purchaseId; // ใช้ int
   final int amountSatang;
   final String qrPayload;
   final DateTime expiresAt;
@@ -66,26 +62,55 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
-            mainAxisSize: MainAxisSize.min, 
+            mainAxisSize: MainAxisSize.min,
             children: [
               Card(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 child: Padding(
                   padding: const EdgeInsets.all(16),
                   child: Column(
                     children: [
-                      Text('ยอดที่ต้องโอน', style: Theme.of(context).textTheme.titleMedium),
+                      Text(
+                        'ยอดที่ต้องโอน',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
                       const SizedBox(height: 6),
-                      Text(amountText, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+                      Text(
+                        amountText,
+                        style: const TextStyle(
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                       const SizedBox(height: 14),
+
+                      // NOTE: ถ้าโปรเจ็กต์คุณใช้เวอร์ชันใหม่ จะมี QrImageView
+                      // ถ้าแดงว่าไม่มี QrImageView ให้ใช้ QrImage (ตัวนี้ด้านล่าง)
+                      // QrImageView(data: widget.qrPayload, size: 220),
                       QrImageView(
                         data: widget.qrPayload,
                         size: 220,
+                        // ไม่จำเป็น แต่กัน edge case ได้:
+                        // version: QrVersions.auto,
                       ),
+
                       const SizedBox(height: 10),
                       _expired
-                          ? const Text('หมดเวลา QR แล้ว', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))
-                          : Text('เวลาที่เหลือ: $mm:$ss', style: const TextStyle(fontWeight: FontWeight.w600)),
+                          ? const Text(
+                              'หมดเวลา QR แล้ว',
+                              style: TextStyle(
+                                color: Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            )
+                          : Text(
+                              'เวลาที่เหลือ: $mm:$ss',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                     ],
                   ),
                 ),
@@ -93,11 +118,20 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
               const SizedBox(height: 16),
               FilledButton.icon(
                 onPressed: _expired || _uploading ? null : _pickAndUploadSlip,
-                icon: _uploading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.upload),
+                icon: _uploading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.upload),
                 label: const Text('อัปโหลดสลิปโอนเงิน'),
               ),
               const SizedBox(height: 8),
-              const Text('หลังอัปโหลดสลิปแล้ว กรุณารอแอดมินตรวจสอบ/อนุมัติ', textAlign: TextAlign.center),
+              const Text(
+                'หลังอัปโหลดสลิปแล้ว กรุณารอแอดมินตรวจสอบ/อนุมัติ',
+                textAlign: TextAlign.center,
+              ),
             ],
           ),
         ),
@@ -106,55 +140,19 @@ class _PurchaseScreenState extends State<PurchaseScreen> {
   }
 
   Future<void> _pickAndUploadSlip() async {
-    final picker = ImagePicker();
-    final image = await picker.pickImage(source: ImageSource.gallery, imageQuality: 85);
-    if (image == null) return;
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (ctx) => PurchaseSlipUploadScreen(
+          purchaseId: widget.purchaseId, // ส่งเป็น int
+          amountSatang: widget.amountSatang,
+          postTitle: 'โพสต์ที่ต้องซื้อ',
+        ),
+      ),
+    );
 
-    setState(() => _uploading = true);
-    try {
-      final uri = Uri.parse('${ApiService.host}/api/purchases/${widget.purchaseId}/slip');
-      final req = http.MultipartRequest('POST', uri);
-      req.files.add(await http.MultipartFile.fromPath('slip', image.path, filename: 'slip.jpg'));
-      final streamed = await req.send();
-      final res = await http.Response.fromStream(streamed);
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body);
-        if (data['ok'] == true) {
-          if (!mounted) return;
-          await showDialog(
-            context: context,
-            builder: (_) => AlertDialog(
-              title: const Text('ส่งสลิปแล้ว'),
-              content: const Text('รอแอดมินตรวจสอบและอนุมัติ'),
-              actions: [
-                TextButton(
-                  onPressed: () {
-                    Navigator.of(context).pop(); 
-                  },
-                  child: const Text('ตกลง'),
-                ),
-              ],
-            ),
-          );
-
-          if (!mounted) return;
-          Navigator.of(context).popUntil((route) => route.isFirst);
-          return;
-        } else {
-          _toast('อัปโหลดไม่สำเร็จ');
-        }
-      } else {
-        _toast('อัปโหลดไม่สำเร็จ (${res.statusCode})');
-      }
-    } catch (e) {
-      _toast('ผิดพลาด: $e');
-    } finally {
-      if (mounted) setState(() => _uploading = false);
+    if (result == true && mounted) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
     }
-  }
-
-  void _toast(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 }

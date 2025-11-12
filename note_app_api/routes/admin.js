@@ -73,6 +73,7 @@ router.post("/admin/purchases/:id/approve", requireAdmin, async (req, res) => {
   try {
     await client.query("BEGIN");
 
+    // ล็อกแถว purchase ที่จะอนุมัติ
     const cur = await client.query(
       `SELECT id, post_id, buyer_id, seller_id, amount_satang, status
          FROM purchases WHERE id = $1 FOR UPDATE`,
@@ -80,41 +81,54 @@ router.post("/admin/purchases/:id/approve", requireAdmin, async (req, res) => {
     );
     if (cur.rowCount === 0) throw new Error("purchase_not_found");
     const o = cur.rows[0];
+    if (!o.buyer_id) throw new Error("purchase.buyer_id is null");
+    if (o.status === "approved") {
+      await client.query("ROLLBACK");
+      return res.redirect("/admin/purchases?status=pending");
+    }
     if (o.status !== "pending") throw new Error("invalid_status");
 
+    // ให้สิทธิ์ผู้ซื้อ (สำคัญ: user_id = buyer_id) + ผูก purchase_id
     await client.query(
-      `INSERT INTO purchased_posts (post_id, user_id, purchase_id)
-       VALUES ($1, $2, $3)
+      `INSERT INTO purchased_posts (user_id, post_id, granted_at, purchase_id)
+       VALUES ($1, $2, NOW(), $3)
        ON CONFLICT DO NOTHING`,
-      [o.post_id, o.buyer_id, o.id]
+      [o.buyer_id, o.post_id, o.id]
     );
 
+    // คำนวณเหรียญจากเรต
     const rateRow = await client.query(
       `SELECT COALESCE(coin_rate_satang_per_coin,100) AS rate
-       FROM admin_settings WHERE id=1`
+         FROM admin_settings WHERE id=1`
     );
     const rate = Number(rateRow.rows[0]?.rate || 100);
     const coins = Math.floor(Number(o.amount_satang) / rate);
 
+    // เติมเหรียญให้ผู้ขาย
     await client.query(
       `INSERT INTO user_wallets (user_id, coins, updated_at)
-       VALUES ($1, $2, now())
+       VALUES ($1, $2, NOW())
        ON CONFLICT (user_id) DO UPDATE
          SET coins = user_wallets.coins + EXCLUDED.coins,
-             updated_at = now()`,
+             updated_at = NOW()`,
       [o.seller_id, coins]
     );
 
+    // ลงธุรกรรมกระเป๋า
     await client.query(
       `INSERT INTO wallet_transactions
         (user_id, type, amount_satang, coins, rate_satang_per_coin, related_purchase_id, note, created_at)
-       VALUES ($1, 'credit_purchase', $2, $3, $4, $5, 'sale income', now())`,
+       VALUES ($1, 'credit_purchase', $2, $3, $4, $5, 'sale income (admin approve)', NOW())`,
       [o.seller_id, o.amount_satang, coins, rate, o.id]
     );
 
-    await client.query(`UPDATE purchases SET status='paid' WHERE id=$1`, [
-      o.id,
-    ]);
+    // สถานะที่ถูกต้องคือ 'approved'
+    await client.query(
+      `UPDATE purchases
+          SET status='approved', manually_approved_at=NOW(), updated_at=NOW()
+        WHERE id=$1`,
+      [o.id]
+    );
 
     await client.query("COMMIT");
     res.redirect("/admin/purchases?status=pending");
@@ -303,6 +317,144 @@ router.post("/admin/reports/:id/reject", requireAdmin, async (req, res) => {
   } catch (e) {
     console.error("reject report error:", e);
     res.status(500).send(String(e));
+  }
+});
+
+
+/* ============================================================
+   API: GET /api/admin/pending-slips (สำหรับ Flutter Admin)
+   ============================================================ */
+router.get("/api/admin/pending-slips", async (req, res) => {
+  try {
+    const q = await pool.query(`
+      SELECT 
+        pu.id,
+        pu.post_id,
+        pu.buyer_id,
+        pu.seller_id,
+        pu.amount_satang,
+        pu.status,
+        pu.expires_at,
+        pu.auto_verified_at,
+        pu.manually_approved_at,
+        pu.created_at,
+        p.text AS title,
+        ub.email AS buyer_email,
+        us.email AS seller_email,
+        ps.file_path,
+        ps.verification_result
+      FROM purchases pu
+      JOIN posts p ON p.id = pu.post_id
+      JOIN users ub ON ub.id_user = pu.buyer_id
+      JOIN users us ON us.id_user = pu.seller_id
+      LEFT JOIN LATERAL (
+        SELECT file_path, verification_result
+        FROM payment_slips s
+        WHERE s.purchase_id = pu.id
+        ORDER BY id DESC LIMIT 1
+      ) ps ON true
+      WHERE pu.status IN ('slip_uploaded', 'pending')
+      ORDER BY pu.created_at DESC
+    `);
+    
+    return res.json({
+      ok: true,
+      items: q.rows || []
+    });
+  } catch (e) {
+    console.error("get pending slips error:", e);
+    return res.status(500).json({ error: e.message || 'internal_error' });
+  }
+});
+
+
+/* ============================================================
+   API: POST /api/admin/purchases/:id/decision (Flutter Admin)
+   ============================================================ */
+router.post("/api/admin/purchases/:id/decision", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { decision } = req.body || {};
+
+    if (!id) return res.status(400).json({ error: 'invalid_id' });
+    if (!['approved', 'rejected'].includes(decision)) {
+      return res.status(400).json({ error: 'invalid_decision' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      const cur = await client.query(
+        `SELECT id, post_id, buyer_id, seller_id, amount_satang, status
+           FROM purchases
+          WHERE id = $1 FOR UPDATE`,
+        [id]
+      );
+      if (cur.rowCount === 0) throw new Error('purchase_not_found');
+
+      const p = cur.rows[0];
+      if (!['pending', 'slip_uploaded'].includes(p.status)) throw new Error('invalid_status');
+
+      if (decision === 'approved') {
+        // ให้สิทธิ์ผู้ซื้อ (user_id = buyer_id) + ผูก purchase_id
+        await client.query(
+          `INSERT INTO purchased_posts (user_id, post_id, granted_at, purchase_id)
+           VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT DO NOTHING`,
+          [p.buyer_id, p.post_id, p.id]
+        );
+
+        // เครดิตเหรียญผู้ขาย
+        const rateRow = await client.query(
+          `SELECT COALESCE(coin_rate_satang_per_coin,100) AS rate
+             FROM admin_settings WHERE id=1`
+        );
+        const rate = Number(rateRow.rows[0]?.rate || 100);
+        const coins = Math.floor(Number(p.amount_satang) / rate);
+
+        await client.query(
+          `INSERT INTO user_wallets (user_id, coins, updated_at)
+           VALUES ($1, $2, NOW())
+           ON CONFLICT (user_id) DO UPDATE
+             SET coins = user_wallets.coins + EXCLUDED.coins,
+                 updated_at = NOW()`,
+          [p.seller_id, coins]
+        );
+
+        await client.query(
+          `INSERT INTO wallet_transactions
+            (user_id, type, amount_satang, coins, rate_satang_per_coin, related_purchase_id, note, created_at)
+           VALUES ($1, 'credit_purchase', $2, $3, $4, $5, 'sale income (admin API approve)', NOW())`,
+          [p.seller_id, p.amount_satang, coins, rate, p.id]
+        );
+
+        await client.query(
+          `UPDATE purchases 
+             SET status='approved', manually_approved_at=NOW(), updated_at=NOW()
+           WHERE id=$1`,
+          [id]
+        );
+      } else {
+        await client.query(
+          `UPDATE purchases 
+             SET status='rejected', updated_at=NOW()
+           WHERE id=$1`,
+          [id]
+        );
+      }
+
+      await client.query('COMMIT');
+      return res.json({ ok: true, purchase_id: id, decision });
+    } catch (e) {
+      await client.query('ROLLBACK');
+      throw e;
+    } finally {
+      client.release();
+    }
+  } catch (e) {
+    console.error("admin decision error:", e);
+    return res.status(500).json({ error: e.message || 'internal_error' });
   }
 });
 
