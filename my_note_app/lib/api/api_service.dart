@@ -955,6 +955,25 @@ Future<bool> reportPost({
   return res.statusCode == 200;
 }
 
+Future<Map<String,dynamic>> createRoom({
+  required String roomIdOrName,
+  required int ownerId,
+  String? password,
+}) async {
+  final url = Uri.parse('host/rooms');
+  final body = {
+    'roomId': roomIdOrName,        // หรือใช้ name ก็ได้
+    'name': roomIdOrName,
+    'owner_id': ownerId,           // << สำคัญ
+    if (password != null && password.isNotEmpty) 'password': password,
+  };
+  final r = await http.post(url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body));
+  if (r.statusCode != 200) throw Exception('createRoom failed: ${r.body}');
+  return jsonDecode(r.body);
+}
+
 // Error อ่านง่ายขึ้นเวลามี status >= 400
 class HttpException implements Exception {
   final String message;
@@ -962,4 +981,3 @@ class HttpException implements Exception {
   @override
   String toString() => message;
 }
-

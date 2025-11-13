@@ -15,21 +15,18 @@ import 'package:scribble/scribble.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
-// ====== [ADDED] Save & Open files ======
+// ====== Save & Open files ======
 import 'package:file_saver/file_saver.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:pdf/pdf.dart';
 import 'package:open_file/open_file.dart';
-// ======================================
 
-/* ------------------ CONFIG ------------------ */
-
+// ------------------ CONFIG ------------------
 String get baseServerUrl =>
     Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
 
-/* =================== TEXT BOX MODEL =================== */
-
+// =================== TEXT BOX MODEL ===================
 class TextBoxData {
   final String id;
   final String text;
@@ -83,8 +80,7 @@ class TextBoxData {
   );
 }
 
-/* =================== IMAGE LAYER MODEL =================== */
-
+// =================== IMAGE LAYER MODEL ===================
 class ImageLayerData {
   final String id;
   final String bytesB64; // raw image base64 (png/jpg)
@@ -138,8 +134,7 @@ class ImageLayerData {
   );
 }
 
-/* =================== PAGE =================== */
-
+// =================== PAGE ===================
 Sketch emptySketch() => Sketch.fromJson({'lines': []});
 
 class NoteScribblePage extends StatefulWidget {
@@ -174,6 +169,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   double _strokeWidth = 4.0;
   bool _isEraser = false;
 
+  // RBAC state
+  int? _userId;
+  String _role = 'viewer'; // owner | editor | viewer
+  bool get offline => widget.socket == null;
+  bool get _canWrite => offline || _role == 'owner' || _role == 'editor';
+
   // saved custom colors
   static const _prefsKey = 'saved_colors';
   final List<Color> _savedColors = [];
@@ -195,8 +196,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   int _pendingSelfDeleteIndex = -1;
 
   String _title = 'Untitled';
-  bool get offline => widget.socket == null;
-
   late final PageController _pageController;
 
   final ImagePicker _picker = ImagePicker();
@@ -208,7 +207,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   @override
   void initState() {
     super.initState();
-
     _pageController = PageController(initialPage: _pageIndex);
 
     _pages = (widget.initialPages != null && widget.initialPages!.isNotEmpty)
@@ -232,8 +230,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         : List.generate(_pages.length, (_) => <ImageLayerData>[]);
 
     while (_textsPages.length < _pages.length) _textsPages.add(<TextBoxData>[]);
-    while (_imagePages.length < _pages.length)
+    while (_imagePages.length < _pages.length) {
       _imagePages.add(<ImageLayerData>[]);
+    }
 
     _title = widget.initialTitle ?? 'Untitled';
 
@@ -254,15 +253,42 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
     if (!offline) {
       _wireSocket();
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+
+      // สำคัญ: identify แล้ว join ซ้ำให้แน่ใจว่าบทบาทถูกต้อง
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        await _identifyAndRejoin();
+        // ขอเมทาดาต้าและสแนปช็อต
         widget.socket!.emit('get_pages_meta', {'boardId': widget.boardId});
         _requestInitForCurrentPage();
       });
     }
   }
 
-  /* ---------------- SAVED COLORS ---------------- */
+  /// ส่ง identify แล้ว join ซ้ำ (เพื่อให้ server ผูก userId กับ socket.data และประเมิน role ใหม่)
+  Future<void> _identifyAndRejoin() async {
+    if (offline) return;
+    final sock = widget.socket!;
+    final sp = await SharedPreferences.getInstance();
+    _userId = sp.getInt('user_id');
 
+    sock.onConnect((_) async {
+      if (_userId != null) {
+        sock.emit('identify', {'userId': _userId});
+      }
+      // join ซ้ำเสมอเพื่อให้ role ถูกต้องแม้เคย join มาก่อน
+      sock.emit('join_board', {'boardId': widget.boardId});
+    });
+
+    // ถ้าเชื่อมต่ออยู่แล้ว ให้ยิงเลย
+    if (sock.connected) {
+      if (_userId != null) {
+        sock.emit('identify', {'userId': _userId});
+      }
+      sock.emit('join', {'boardId': widget.boardId});
+    }
+  }
+
+  // ---------------- SAVED COLORS ----------------
   Future<void> _loadSavedColors() async {
     final sp = await SharedPreferences.getInstance();
     final ints = sp.getStringList(_prefsKey) ?? [];
@@ -299,16 +325,100 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       _savedColors.insert(0, c);
     }
     const cap = 12;
-    if (_savedColors.length > cap)
+    if (_savedColors.length > cap) {
       _savedColors.removeRange(cap, _savedColors.length);
+    }
     await _persistSavedColors();
     setState(() {});
   }
 
-  /* ---------------- SOCKET ---------------- */
-
+  // ---------------- SOCKET ----------------
   void _wireSocket() {
     final socket = widget.socket!;
+
+    // กันลิสเนอร์ซ้ำเวลาหน้าจอถูกสร้างใหม่
+    for (final ev in [
+      'join_ok',
+      'joined_board',
+      'join_error',
+      'init_data',
+      'set_sketch',
+      'clear_board',
+      'pages_meta',
+      'page_deleted',
+      'grant_write',
+      'write_request', // << ใหม่
+    ]) {
+      socket.off(ev);
+    }
+    socket.off('connect');
+
+    socket.on('join_ok', (data) {
+      try {
+        final role = (data is Map && data['role'] is String)
+            ? data['role'] as String
+            : 'viewer';
+        setState(() => _role = role);
+        if (!_canWrite) _showViewOnlyBanner();
+      } catch (_) {}
+    });
+
+    // socket.on('joined_board', (data) {
+    //   try {
+    //     final role = (data is Map && data['role'] is String)
+    //         ? (data['role'] as String)
+    //         : 'viewer';
+    //     setState(() => _role = role);
+    //     if (!_canWrite) _showViewOnlyBanner();
+    //   } catch (_) {}
+    // });
+
+    socket.on('join_error', (data) {
+      final msg = (data is Map && data['message'] is String)
+          ? data['message'] as String
+          : 'Join failed';
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(msg)));
+      }
+    });
+
+    socket.on('member_role_changed', (data) async {
+      try {
+        final uid = (data is Map && data['userId'] is int)
+            ? data['userId'] as int
+            : -1;
+        final role = (data is Map && data['role'] is String)
+            ? data['role'] as String
+            : null;
+        if (uid <= 0 || role == null) return;
+        final sp = await SharedPreferences.getInstance();
+        final me = sp.getInt('user_id');
+        if (me != null && me == uid) {
+          setState(() => _role = role);
+          if (!_canWrite) _showViewOnlyBanner();
+        }
+      } catch (_) {}
+    });
+
+    socket.on('grant_write', (data) async {
+      final uid = (data is Map && data['userId'] is int)
+          ? data['userId'] as int
+          : -1;
+      final sp = await SharedPreferences.getInstance();
+      final me = sp.getInt('user_id');
+      if (uid > 0 && me != null && uid == me) {
+        setState(() => _role = 'editor');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('คุณได้รับสิทธิ์เขียนแล้ว')),
+          );
+        }
+      }
+    });
+
+    // ====== snapshot/init handlers ======
     socket.on('init_data', (data) {
       try {
         final int page = (data['page'] ?? 0) as int;
@@ -466,6 +576,68 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         }
       } catch (_) {}
     });
+
+    // เมื่อเราได้รับสิทธิ์เขียน
+    socket.on('grant_write', (data) {
+      final uid = (data is Map && data['userId'] is int)
+          ? data['userId'] as int
+          : -1;
+      if (uid == _userId) {
+        setState(() => _role = 'editor');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('คุณได้รับสิทธิ์เขียนแล้ว')),
+          );
+        }
+      }
+    });
+
+    // << ใหม่: Owner จะเห็นคำขอสิทธิ์เขียนจากผู้ชม
+    socket.on('write_request', (data) {
+      try {
+        final reqUid = (data is Map && data['userId'] is int)
+            ? data['userId'] as int
+            : -1;
+        // final name = (data is Map && data['username'] is String)
+        //     ? data['username'] as String
+        //     : 'ผู้ใช้ $reqUid';
+        // โชว์แบนเนอร์พร้อมปุ่ม "อนุญาต"
+        if (mounted && _role == 'owner' && reqUid > 0) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 6),
+              content: Row(
+                children: [
+                  const Icon(Icons.edit, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(child: Text('ผู้ใช้ $reqUid ขอสิทธิ์เขียน')),
+                  TextButton(
+                    onPressed: () => _grantWriteTo(reqUid),
+                    child: const Text('อนุญาต'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+      } catch (_) {}
+    });
+  }
+
+  // อนุญาตสิทธิ์เขียนให้ผู้ใช้เป้าหมาย (กดจากฝั่ง Owner)
+  void _grantWriteTo(int userId) {
+    if (offline) return;
+    try {
+      widget.socket!.emit('grant_write', {
+        'boardId': widget.boardId,
+        'targetUserId': userId, // เป้าหมายที่จะให้สิทธิ์
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('อนุญาตสิทธิ์เขียนให้ UID $userId แล้ว')),
+        );
+      }
+    } catch (_) {}
   }
 
   void _ensurePages(int count) {
@@ -487,12 +659,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   void _scheduleSync() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 250), () {
-      if (!offline) _emitFullSketchWithTexts();
+      if (!offline && _canWrite) _emitFullSketchWithTexts();
     });
   }
 
   void _emitFullSketchWithTexts() {
-    if (offline) return;
+    if (offline || !_canWrite) return;
     _pages[_pageIndex] = _notifier.currentSketch;
 
     final sketchJson = _notifier.currentSketch.toJson();
@@ -512,14 +684,32 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   @override
   void dispose() {
     _debounce?.cancel();
-    widget.socket?.dispose();
+
+    // อย่าปิด socket ที่ส่งมาจากภายนอก (อาจใช้ร่วมทั้งแอป)
+    if (!offline) {
+      final s = widget.socket!;
+      for (final ev in [
+        'join_ok',
+        'joined_board',
+        'join_error',
+        'init_data',
+        'set_sketch',
+        'clear_board',
+        'pages_meta',
+        'page_deleted',
+        'grant_write',
+      ]) {
+        s.off(ev);
+      }
+      s.off('connect');
+    }
+
     _notifier.dispose();
     _pageController.dispose();
     super.dispose();
   }
 
-  /* ---------------- COVER PNG ---------------- */
-
+  // ---------------- COVER PNG ----------------
   Future<String?> _sketchToPngBase64(
     Sketch sketch, {
     int width = 512,
@@ -690,9 +880,13 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     }
   }
 
-  /* ---------------- SAVE DOC (server) ---------------- */
-
+  // ---------------- SAVE DOC (server) ----------------
   Future<void> _saveDocument() async {
+    if (!_canWrite) {
+      _needWriteSnack();
+      return;
+    }
+
     _pages[_pageIndex] = _notifier.currentSketch;
 
     final titleCtrl = TextEditingController(text: _title);
@@ -748,6 +942,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       }
     }
 
+    final sp = await SharedPreferences.getInstance();
+    final ownerId = sp.getInt('user_id');
+
     final payload = {
       if (widget.documentId != null) 'id': widget.documentId,
       'title': titleCtrl.text.trim().isEmpty
@@ -758,8 +955,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       'pages': pages,
       'coverPng': coverBase64,
       'cover_png': coverBase64,
-      if ((await SharedPreferences.getInstance()).getInt('user_id') != null)
-        'owner_id': (await SharedPreferences.getInstance()).getInt('user_id'),
+      if (ownerId != null) 'owner_id': ownerId,
     };
 
     try {
@@ -789,7 +985,19 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
   Future<void> _ensureStoragePermission() async {
     try {
-      await Permission.storage.request();
+      // ขอชุด permission ที่เกี่ยวข้อง เผื่อแต่ละเครื่อง/เวอร์ชันต้องการไม่เหมือนกัน
+      final candidates = <Permission>[
+        Permission.storage, // เดิม (Android <= 12)
+        Permission.manageExternalStorage,
+        Permission.photos, // Android 13+ / iOS (สื่อรูป)
+        Permission.videos, // Android 13+ (สื่อวิดีโอ)
+        Permission.audio, // Android 13+ (สื่อเสียง)
+        Permission.photosAddOnly, // iOS เพิ่มรูปอย่างเดียว
+      ];
+      for (final p in candidates) {
+        final s = await p.request();
+        if (s.isGranted) return;
+      }
     } catch (_) {}
   }
 
@@ -798,7 +1006,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       _pages[i],
       texts: _textsPages[i],
       images: _imagePages[i],
-      width: 1240, 
+      width: 1240,
       height: 1754,
     );
     final bytes = (b64 == null) ? Uint8List(0) : base64Decode(b64);
@@ -829,7 +1037,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
     if (!mounted) return;
     if (savedPath != null && savedPath.isNotEmpty) {
-      // เปิดไฟล์ทันที
       await OpenFile.open(savedPath);
     } else {
       ScaffoldMessenger.of(
@@ -874,10 +1081,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
     if (!mounted) return;
     if (savedPath != null && savedPath.isNotEmpty) {
-      // เปิด PDF ทันที
-      await OpenFile.open(
-        savedPath,
-      ); // ← หรือ OpenFile.open(savedPath) ถ้าใช้ open_file
+      await OpenFile.open(savedPath);
     } else {
       ScaffoldMessenger.of(
         context,
@@ -917,11 +1121,49 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     }
   }
 
-  /* ---------------- UI ---------------- */
+  // =================== UI ===================
+  void _needWriteSnack() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('ขณะนี้เป็นโหมดอ่านอย่างเดียว')),
+    );
+  }
+
+  void _showViewOnlyBanner() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.visibility, size: 18),
+            const SizedBox(width: 8),
+            const Expanded(
+              child: Text('คุณเข้ามาเป็น Viewer (อ่านอย่างเดียว)'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (offline) return;
+                widget.socket!.emit('request_write', {
+                  'boardId': widget.boardId,
+                  if (_userId != null) 'userId': _userId,
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('ส่งคำขอสิทธิ์เขียนแล้ว')),
+                );
+              },
+              child: const Text('ขอสิทธิ์เขียน'),
+            ),
+          ],
+        ),
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final titleText = offline ? 'Document: $_title' : 'Room: ${widget.boardId}';
+    final titleText = offline
+        ? 'Document: $_title'
+        : 'Room: ${widget.boardId} (${_role.toUpperCase()})';
 
     return Scaffold(
       appBar: AppBar(
@@ -941,7 +1183,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               },
               icon: const Icon(Icons.content_copy),
             ),
-          // สลับโหมด วาด / แก้ไขรูป
           IconButton(
             tooltip: 'เมนู',
             icon: const Icon(Icons.menu),
@@ -951,19 +1192,23 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(84),
           child: _TopToolbar(
+            enabled: _canWrite,
             isEraser: _isEraser,
             color: _color,
             strokeWidth: _strokeWidth,
             savedColors: _savedColors,
             onPen: () {
+              if (!_canWrite) return _needWriteSnack();
               setState(() => _isEraser = false);
               _notifier.setColor(_color);
             },
             onEraser: () {
+              if (!_canWrite) return _needWriteSnack();
               setState(() => _isEraser = true);
               _notifier.setEraser();
             },
             onPickPresetColor: (c) async {
+              if (!_canWrite) return _needWriteSnack();
               setState(() {
                 _color = c;
                 _isEraser = false;
@@ -972,6 +1217,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               await _registerUsedColor(c);
             },
             onPickSavedColor: (c) async {
+              if (!_canWrite) return _needWriteSnack();
               setState(() {
                 _color = c;
                 _isEraser = false;
@@ -980,6 +1226,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               await _registerUsedColor(c, reorderIfExists: false);
             },
             onOpenRainbowPicker: () async {
+              if (!_canWrite) return _needWriteSnack();
               final chosen = await _openRainbowPicker(context, _color);
               if (chosen != null) {
                 setState(() {
@@ -991,12 +1238,14 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               }
             },
             onRemoveSavedColor: (c) async {
+              if (!_canWrite) return;
               setState(
                 () => _savedColors.removeWhere((x) => x.value == c.value),
               );
               await _persistSavedColors();
             },
             onChangeWidth: (v) {
+              if (!_canWrite) return _needWriteSnack();
               setState(() => _strokeWidth = v);
               _notifier.setStrokeWidth(v);
             },
@@ -1004,7 +1253,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         ),
       ),
 
-      // Sheet
       body: SafeArea(
         child: PageView.builder(
           controller: _pageController,
@@ -1037,9 +1285,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               child: isCurrent
                   ? Stack(
                       children: [
-                        // 1) รูปภาพชั้นล่าง: รับทัชเฉพาะโหมดแก้ไขรูป
+                        // 1) รูปภาพชั้นล่าง
                         IgnorePointer(
-                          ignoring: !_editImagesMode,
+                          ignoring: !_editImagesMode || !_canWrite,
                           child: Stack(
                             children: List.generate(images.length, (idx) {
                               final layer = images[idx];
@@ -1066,9 +1314,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           ),
                         ),
 
-                        // 2) Scribble ด้านบน: รับทัชเฉพาะโหมดวาด → วาดทับรูปได้
+                        // 2) Scribble
                         IgnorePointer(
-                          ignoring: _editImagesMode,
+                          ignoring: !_canWrite || _editImagesMode,
                           child: Scribble(
                             notifier: _notifier,
                             drawPen: !_isEraser,
@@ -1076,11 +1324,23 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           ),
                         ),
 
-                        // 3) ข้อความอยู่บนสุด
-                        ...texts.map((t) => _buildTextBoxWidget(t)),
+                        // 3) ข้อความบนสุด
+                        ...texts.map(
+                          (t) => _buildTextBoxWidget(t, enabled: _canWrite),
+                        ),
 
-                        // 4) แถบควบคุมรูป (เฉพาะโหมดแก้ไขรูป)
-                        if (_editImagesMode) _selectedImageFloatingToolbar(),
+                        // 4) แถบควบคุมรูป
+                        if (_editImagesMode && _canWrite)
+                          _selectedImageFloatingToolbar(),
+                        if (!_canWrite)
+                          Positioned(
+                            left: 12,
+                            top: 12,
+                            child: Chip(
+                              avatar: const Icon(Icons.visibility, size: 16),
+                              label: const Text('VIEW ONLY'),
+                            ),
+                          ),
                       ],
                     )
                   : const SizedBox.expand(),
@@ -1137,37 +1397,36 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               const SizedBox(width: 8),
               IconButton(
                 tooltip: 'Add new page (below)',
-                onPressed: () {
-                  _pages[_pageIndex] = _notifier.currentSketch;
-                  setState(() {
-                    _pages.add(emptySketch());
-                    _textsPages.add(<TextBoxData>[]);
-                    _imagePages.add(<ImageLayerData>[]);
-                    _selectedImageIndex = -1;
-                  });
-                  final newIndex = _pages.length - 1;
-                  _notifier.setSketch(sketch: _pages[newIndex]);
-                  _pageController.animateToPage(
-                    newIndex,
-                    duration: const Duration(milliseconds: 250),
-                    curve: Curves.easeOut,
-                  );
-                  setState(() => _pageIndex = newIndex);
-                  if (!offline) {
-                    widget.socket!.emit('add_page', {
-                      'boardId': widget.boardId,
-                      'page': _pageIndex,
-                    });
-                  }
-                },
+                onPressed: !_canWrite
+                    ? () => _needWriteSnack()
+                    : () {
+                        _pages[_pageIndex] = _notifier.currentSketch;
+                        setState(() {
+                          _pages.add(emptySketch());
+                          _textsPages.add(<TextBoxData>[]);
+                          _imagePages.add(<ImageLayerData>[]);
+                          _selectedImageIndex = -1;
+                        });
+                        final newIndex = _pages.length - 1;
+                        _notifier.setSketch(sketch: _pages[newIndex]);
+                        _pageController.animateToPage(
+                          newIndex,
+                          duration: const Duration(milliseconds: 250),
+                          curve: Curves.easeOut,
+                        );
+                        setState(() => _pageIndex = newIndex);
+                        if (!offline) {
+                          widget.socket!.emit('add_page', {'boardId': widget.boardId});
+                        }
+                      },
                 icon: const Icon(Icons.add_circle),
               ),
               const SizedBox(width: 4),
               IconButton(
                 tooltip: 'Delete this page',
-                onPressed: (_pages.length > 1)
-                    ? () async {
-                        // ====== [ADDED] Confirm before delete ======
+                onPressed: (!_canWrite || _pages.length <= 1)
+                    ? () => _needWriteSnack()
+                    : () async {
                         final ok = await showDialog<bool>(
                           context: context,
                           builder: (ctx) => AlertDialog(
@@ -1188,7 +1447,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           ),
                         );
                         if (ok != true) return;
-                        // ==========================================
 
                         final deletedIndex = _pageIndex;
                         _pendingSelfDeleteIndex = deletedIndex;
@@ -1213,8 +1471,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           });
                           _requestInitForCurrentPage();
                         }
-                      }
-                    : null,
+                      },
                 icon: const Icon(Icons.delete_forever),
               ),
               const SizedBox(width: 8),
@@ -1240,8 +1497,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     );
   }
 
-  /* ---------------- Floating toolbar for image ---------------- */
-
+  // ---------------- Floating toolbar for image ----------------
   Widget _selectedImageFloatingToolbar() {
     final hasSel =
         _selectedImageIndex >= 0 &&
@@ -1289,9 +1545,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     _scheduleSync();
   }
 
-  /* ---------------- Image layers ---------------- */
-
+  // ---------------- Image layers ----------------
   Future<void> _addImageLayer() async {
+    if (!_canWrite) {
+      _needWriteSnack();
+      return;
+    }
     try {
       final XFile? file = await _picker.pickImage(source: ImageSource.gallery);
       if (file == null) return;
@@ -1319,6 +1578,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   }
 
   void _deleteSelectedImage() {
+    if (!_canWrite) {
+      _needWriteSnack();
+      return;
+    }
     final idx = _selectedImageIndex;
     if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
     setState(() {
@@ -1330,35 +1593,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     _scheduleSync();
   }
 
-  // void _bringImageToFront() {
-  //   final idx = _selectedImageIndex;
-  //   if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
-  //   setState(() {
-  //     final list = [..._imagePages[_pageIndex]];
-  //     final l = list.removeAt(idx);
-  //     list.add(l);
-  //     _imagePages[_pageIndex] = list;
-  //     _selectedImageIndex = list.length - 1;
-  //   });
-  //   _scheduleSync();
-  // }
-
-  // void _sendImageToBack() {
-  //   final idx = _selectedImageIndex;
-  //   if (idx < 0 || idx >= _imagePages[_pageIndex].length) return;
-  //   setState(() {
-  //     final list = [..._imagePages[_pageIndex]];
-  //     final l = list.removeAt(idx);
-  //     list.insert(0, l);
-  //     _imagePages[_pageIndex] = list;
-  //     _selectedImageIndex = 0;
-  //   });
-  //   _scheduleSync();
-  // }
-
-  /* ---------------- Text box controls ---------------- */
-
+  // ---------------- Text box controls ----------------
   Future<void> _addTextBox() async {
+    if (!_canWrite) {
+      _needWriteSnack();
+      return;
+    }
     final textCtrl = TextEditingController();
     int fontPx = 18;
 
@@ -1453,22 +1693,24 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     _scheduleSync();
   }
 
-  Widget _buildTextBoxWidget(TextBoxData t) {
+  Widget _buildTextBoxWidget(TextBoxData t, {required bool enabled}) {
     return Positioned(
       left: t.x,
       top: t.y,
       child: GestureDetector(
-        onPanUpdate: (d) {
-          setState(() {
-            final nx = (t.x + d.delta.dx);
-            final ny = (t.y + d.delta.dy);
-            _textsPages[_pageIndex] = _textsPages[_pageIndex]
-                .map((e) => e.id == t.id ? e.copyWith(x: nx, y: ny) : e)
-                .toList();
-          });
-          _scheduleSync();
-        },
-        onTap: () => _editTextBox(t),
+        onPanUpdate: enabled
+            ? (d) {
+                setState(() {
+                  final nx = (t.x + d.delta.dx);
+                  final ny = (t.y + d.delta.dy);
+                  _textsPages[_pageIndex] = _textsPages[_pageIndex]
+                      .map((e) => e.id == t.id ? e.copyWith(x: nx, y: ny) : e)
+                      .toList();
+                });
+                _scheduleSync();
+              }
+            : null,
+        onTap: enabled ? () => _editTextBox(t) : null,
         child: DecoratedBox(
           decoration: BoxDecoration(
             color: Colors.white.withOpacity(0.0),
@@ -1500,6 +1742,11 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   }
 
   Future<void> _editTextBox(TextBoxData t) async {
+    if (!_canWrite) {
+      _needWriteSnack();
+      return;
+    }
+
     final textCtrl = TextEditingController(text: t.text);
     int fontPx = t.fontSize.round();
     Color current = Color(t.color);
@@ -1509,15 +1756,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
           title: const Text('Edit Text'),
-          // ✅ ทำให้เนื้อหาเลื่อนแนวตั้งได้ (กัน overflow)
           scrollable: true,
-          // ✅ ลดขอบซ้ายขวาให้พอดีมือถือ
           insetPadding: const EdgeInsets.symmetric(
             horizontal: 16,
             vertical: 24,
           ),
           content: ConstrainedBox(
-            // ✅ จำกัดความกว้างสูงสุดของ dialog (แท็บเล็ต/จอใหญ่)
             constraints: const BoxConstraints(maxWidth: 420),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1529,7 +1773,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                   children: [
                     const Text('Font size'),
                     const SizedBox(width: 12),
-                    // ✅ กันล้นแถว (ให้กล่องตัวเลขยืด/หดได้)
                     Expanded(
                       child: _fontBox(
                         value: fontPx,
@@ -1544,7 +1787,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                   child: Text('Color'),
                 ),
                 const SizedBox(height: 8),
-                // ✅ ให้พื้นที่เลือกสี “ยืด/หด” ได้ (ถ้ากว้างมากจะตัดบรรทัดเอง)
                 Flexible(
                   child: _colorSwatchesInline(
                     current: current,
@@ -1601,8 +1843,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     }
   }
 
-  /* ------------- palette helpers ------------- */
-
+  // ------------- palette helpers -------------
   Widget _fontBox({required int value, required ValueChanged<int> onChanged}) {
     final ctrl = TextEditingController(text: value.toString());
     return Row(
@@ -1808,7 +2049,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // กลุ่มปุ่มลัด (เป็นตาราง)
                   GridView(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -1850,7 +2090,11 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           label: 'ซิงก์',
                           onTap: () {
                             Navigator.pop(ctx);
-                            _emitFullSketchWithTexts();
+                            if (_canWrite) {
+                              _emitFullSketchWithTexts();
+                            } else {
+                              _needWriteSnack();
+                            }
                           },
                         ),
                       if (!offline)
@@ -1859,6 +2103,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           label: 'เคลียร์หน้านี้',
                           onTap: () {
                             Navigator.pop(ctx);
+                            if (!_canWrite) return _needWriteSnack();
                             _notifier.clear();
                             _pages[_pageIndex] = emptySketch();
                             _textsPages[_pageIndex] = <TextBoxData>[];
@@ -1876,6 +2121,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                         label: _editImagesMode ? 'ไปโหมดวาด' : 'แก้ไขรูป',
                         onTap: () {
                           Navigator.pop(ctx);
+                          if (!_canWrite) return _needWriteSnack();
                           setState(() {
                             _editImagesMode = !_editImagesMode;
                             _selectedImageIndex = -1;
@@ -1887,9 +2133,26 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                         label: 'ส่งออก',
                         onTap: () {
                           Navigator.pop(context);
-                          _openExportChooser(); // ← เรียกเมนูเลือก PNG/PDF
+                          _openExportChooser();
                         },
                       ),
+                      if (!offline && !_canWrite)
+                        _ActionButton(
+                          icon: Icons.edit,
+                          label: 'ขอสิทธิ์เขียน',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            widget.socket!.emit('request_write', {
+                              'boardId': widget.boardId,
+                              if (_userId != null) 'userId': _userId,
+                            });
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('ส่งคำขอสิทธิ์เขียนแล้ว'),
+                              ),
+                            );
+                          },
+                        ),
                     ],
                   ),
                 ],
@@ -1917,7 +2180,6 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    // ใช้ surfaceVariant แทน surfaceContainerHighest เพื่อรองรับ Flutter เวอร์ชันเก่า
     final bg = cs.surfaceVariant;
     final border = cs.outlineVariant;
 
@@ -1951,6 +2213,7 @@ class _ActionButton extends StatelessWidget {
 /* ---------------- TOP TOOLBAR ---------------- */
 class _TopToolbar extends StatelessWidget {
   const _TopToolbar({
+    required this.enabled,
     required this.isEraser,
     required this.color,
     required this.strokeWidth,
@@ -1964,6 +2227,7 @@ class _TopToolbar extends StatelessWidget {
     required this.onChangeWidth,
   });
 
+  final bool enabled;
   final bool isEraser;
   final Color color;
   final double strokeWidth;
@@ -1987,6 +2251,11 @@ class _TopToolbar extends StatelessWidget {
       Colors.blue,
     ];
 
+    Widget disabledWrap(Widget child) => Opacity(
+      opacity: enabled ? 1 : 0.5,
+      child: AbsorbPointer(absorbing: !enabled, child: child),
+    );
+
     return Container(
       alignment: Alignment.centerLeft,
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -1994,96 +2263,108 @@ class _TopToolbar extends StatelessWidget {
         scrollDirection: Axis.horizontal,
         child: Row(
           children: [
-            _toolButton(
-              context,
-              icon: Icons.edit,
-              selected: !isEraser,
-              tooltip: 'Pen',
-              onTap: onPen,
+            disabledWrap(
+              _toolButton(
+                context,
+                icon: Icons.edit,
+                selected: !isEraser,
+                tooltip: 'Pen',
+                onTap: onPen,
+              ),
             ),
             const SizedBox(width: 4),
-            _toolButton(
-              context,
-              icon: Icons.cleaning_services,
-              selected: isEraser,
-              tooltip: 'Eraser',
-              onTap: onEraser,
+            disabledWrap(
+              _toolButton(
+                context,
+                icon: Icons.cleaning_services,
+                selected: isEraser,
+                tooltip: 'Eraser',
+                onTap: onEraser,
+              ),
             ),
             const SizedBox(width: 8),
-            Row(
-              children: [
-                const Icon(Icons.line_weight, size: 20),
-                SizedBox(
-                  width: 140,
-                  child: Slider(
-                    min: 1,
-                    max: 20,
-                    value: strokeWidth,
-                    onChanged: onChangeWidth,
+            disabledWrap(
+              Row(
+                children: [
+                  const Icon(Icons.line_weight, size: 20),
+                  SizedBox(
+                    width: 140,
+                    child: Slider(
+                      min: 1,
+                      max: 20,
+                      value: strokeWidth,
+                      onChanged: onChangeWidth,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
             const VerticalDivider(width: 16),
-            Row(
-              children: presets
-                  .map(
-                    (c) => Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 6.0),
-                      child: _ringColorDot(
-                        color: c,
-                        selected: c.value == color.value && !isEraser,
-                        onTap: () => onPickPresetColor(c),
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-            if (savedColors.isNotEmpty) ...[
-              const SizedBox(width: 8),
+            disabledWrap(
               Row(
-                children: savedColors
+                children: presets
                     .map(
                       (c) => Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            _ringColorDot(
-                              color: c,
-                              selected: c.value == color.value && !isEraser,
-                              onTap: () => onPickSavedColor(c),
-                            ),
-                            Positioned(
-                              right: -2,
-                              top: -2,
-                              child: InkWell(
-                                onTap: () => onRemoveSavedColor(c),
-                                borderRadius: BorderRadius.circular(8),
-                                child: Container(
-                                  width: 16,
-                                  height: 16,
-                                  decoration: BoxDecoration(
-                                    color: Colors.white,
-                                    borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: Colors.black26),
-                                  ),
-                                  child: const Icon(Icons.close, size: 12),
-                                ),
-                              ),
-                            ),
-                          ],
+                        padding: const EdgeInsets.symmetric(horizontal: 6.0),
+                        child: _ringColorDot(
+                          color: c,
+                          selected: c.value == color.value && !isEraser,
+                          onTap: () => onPickPresetColor(c),
                         ),
                       ),
                     )
                     .toList(),
               ),
+            ),
+            if (savedColors.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              disabledWrap(
+                Row(
+                  children: savedColors
+                      .map(
+                        (c) => Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              _ringColorDot(
+                                color: c,
+                                selected: c.value == color.value && !isEraser,
+                                onTap: () => onPickSavedColor(c),
+                              ),
+                              Positioned(
+                                right: -2,
+                                top: -2,
+                                child: InkWell(
+                                  onTap: () => onRemoveSavedColor(c),
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    width: 16,
+                                    height: 16,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.black26),
+                                    ),
+                                    child: const Icon(Icons.close, size: 12),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
             ],
             const SizedBox(width: 8),
-            FilledButton.tonalIcon(
-              onPressed: onOpenRainbowPicker,
-              icon: const Icon(Icons.palette),
-              label: const Text('Palette'),
+            disabledWrap(
+              FilledButton.tonalIcon(
+                onPressed: onOpenRainbowPicker,
+                icon: const Icon(Icons.palette),
+                label: const Text('Palette'),
+              ),
             ),
           ],
         ),
@@ -2153,7 +2434,6 @@ class _TopToolbar extends StatelessWidget {
 }
 
 /* ---------------- RAINBOW 2D PANEL ---------------- */
-
 class _RainbowPanel2D extends StatefulWidget {
   const _RainbowPanel2D({
     required this.height,
@@ -2268,7 +2548,6 @@ class _RainbowPanel2DState extends State<_RainbowPanel2D> {
 }
 
 /* ---------------- Image layer widget ---------------- */
-
 class _ImageLayerWidget extends StatefulWidget {
   final ImageLayerData layer;
   final bool selected;

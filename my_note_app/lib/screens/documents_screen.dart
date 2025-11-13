@@ -1,27 +1,41 @@
 // lib/screens/documents_screen.dart
 import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:scribble/scribble.dart' as sc;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
-import 'drawing_screen.dart'; // NoteScribblePage, TextBoxData, ImageLayerData
+// ใช้ของที่ประกาศใน drawing_screen
+import 'drawing_screen.dart'
+    show NoteScribblePage, TextBoxData, ImageLayerData, baseServerUrl;
 
-// ===== Server base =====
-String get baseServerUrl =>
-    Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
-
+/* ----------------------------------------------------------
+ * Utils
+ * ---------------------------------------------------------- */
 String _cleanB64(String? s) {
   if (s == null) return '';
   return s.replaceFirst(RegExp(r'^data:image/[^;]+;base64,'), '');
 }
 
+Future<int?> _getUserId() async {
+  final sp = await SharedPreferences.getInstance();
+  return sp.getInt('user_id');
+}
+
+IO.Socket _newSocket() => IO.io(
+      baseServerUrl,
+      IO.OptionBuilder()
+          .setTransports(['websocket'])
+          .disableAutoConnect()
+          .build(),
+    );
+
+/* ==========================================================
+ * Documents Screen
+ * ========================================================== */
 class DocumentsScreen extends StatefulWidget {
   const DocumentsScreen({super.key});
-
   @override
   State<DocumentsScreen> createState() => _DocumentsScreenState();
 }
@@ -36,10 +50,140 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
     _loadDocs();
   }
 
-  // ---------- Join / Create ----------
+  /* ---------------- Spinner helpers ---------------- */
+  void _showSpinner() {
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+  }
+
+  void _hideSpinner() {
+    if (!mounted) return;
+    if (Navigator.of(context, rootNavigator: true).canPop()) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+  }
+
+  /* ---------------- Central join flow (fixes owner->viewer) ----------------
+   * บังคับลำดับ identify → join และ "รอ join_ok" ก่อน push หน้าถัดไป
+   */
+  Future<void> _connectAndOpenRoom({
+    required String roomId,
+    String? password,
+    required String? documentId,
+    required String title,
+    required List<sc.Sketch> pagesSketch,
+    required List<List<TextBoxData>> pagesTexts,
+    required List<List<ImageLayerData>> pagesImages,
+  }) async {
+    final socket = _newSocket();
+    var finished = false;
+
+    void finishError(String msg) {
+      if (finished) return;
+      finished = true;
+      _hideSpinner();
+      socket.dispose();
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(msg)));
+      }
+    }
+
+    void openLive() {
+      if (finished) return;
+      finished = true;
+      _hideSpinner();
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => NoteScribblePage(
+            boardId: roomId,
+            socket: socket,
+            documentId: documentId,
+            initialTitle: title,
+            initialPages: pagesSketch,
+            initialTextsPerPage: pagesTexts,
+            initialImagesPerPage: pagesImages,
+          ),
+        ),
+      );
+    }
+
+    // Events
+    socket.onConnect((_) async {
+      final uid = await _getUserId();
+      if (uid != null) {
+        socket.emit('identify', {'userId': uid}); // สำคัญ!
+      }
+      socket.emit('join', {
+        'boardId': roomId,
+        if (uid != null) 'userId': uid, // สำคัญ!
+        if (password != null && password.isNotEmpty) 'password': password,
+      });
+    });
+
+    socket.on('join_ok', (_) => openLive());
+
+    socket.on('join_error', (data) async {
+      final msg = (data is Map && data['message'] is String)
+          ? data['message'] as String
+          : 'เข้าห้องไม่สำเร็จ';
+      final needsPassword = msg.toLowerCase().contains('password') ||
+          msg.toLowerCase().contains('require');
+
+      if (needsPassword) {
+        if (!mounted) return;
+        final pwCtrl = TextEditingController();
+        final retry = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('ต้องใช้รหัสผ่าน'),
+            content: TextField(
+              controller: pwCtrl,
+              obscureText: true,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Password'),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('ยกเลิก')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('ส่ง')),
+            ],
+          ),
+        );
+        if (retry == true && pwCtrl.text.trim().isNotEmpty) {
+          final uid = await _getUserId();
+          socket.emit('join', {
+            'boardId': roomId,
+            if (uid != null) 'userId': uid,
+            'password': pwCtrl.text.trim(),
+          });
+          return; // รอผลรอบใหม่
+        }
+      }
+      finishError(msg);
+    });
+
+    socket.onConnectError((_) => finishError('เชื่อมต่อไม่ได้'));
+
+    // เริ่ม
+    _showSpinner();
+    socket.connect();
+  }
+
+  /* ======================= Join via dialog ======================= */
   Future<void> _joinRoomDialog() async {
     final roomIdCtrl = TextEditingController();
     final pwdCtrl = TextEditingController();
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -54,105 +198,40 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
             ),
             TextField(
               controller: pwdCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Password (if required)',
-              ),
+              decoration:
+                  const InputDecoration(labelText: 'Password (ถ้ามี)'),
               obscureText: true,
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('ยกเลิก')),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Join'),
-          ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('เข้าร่วม')),
         ],
       ),
     );
     if (ok != true || roomIdCtrl.text.trim().isEmpty) return;
 
-    final roomId = roomIdCtrl.text.trim();
-    final socket = IO.io(
-      baseServerUrl,
-      IO.OptionBuilder()
-          .setTransports(['websocket'])
-          .disableAutoConnect()
-          .build(),
+    await _connectAndOpenRoom(
+      roomId: roomIdCtrl.text.trim(),
+      password: pwdCtrl.text.trim(),
+      documentId: null,
+      title: 'Joined Room',
+      pagesSketch: const <sc.Sketch>[],
+      pagesTexts: const <List<TextBoxData>>[],
+      pagesImages: const <List<ImageLayerData>>[],
     );
-
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    try {
-      bool? joinResult;
-      String? errorMessage;
-
-      socket.onConnect((_) {
-        socket.emit('join', {
-          'boardId': roomId,
-          if (pwdCtrl.text.isNotEmpty) 'password': pwdCtrl.text,
-        });
-      });
-      socket.on('join_ok', (_) => joinResult = true);
-      socket.on('join_error', (data) {
-        joinResult = false;
-        errorMessage = (data is Map && data['message'] is String)
-            ? data['message'] as String
-            : 'Could not join room';
-      });
-
-      socket.connect();
-
-      for (var i = 0; i < 20; i++) {
-        if (joinResult != null) break;
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
-
-      if (!mounted) return;
-      Navigator.pop(context); // close loading
-
-      if (joinResult == true) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => NoteScribblePage(
-              boardId: roomId,
-              socket: socket,
-              documentId: null,
-              initialTitle: 'Joined Room',
-              initialPages: const <sc.Sketch>[],
-              initialTextsPerPage: const <List<TextBoxData>>[],
-              initialImagesPerPage: const <List<ImageLayerData>>[],
-            ),
-          ),
-        );
-      } else {
-        socket.dispose();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMessage ?? 'Failed to join room')),
-        );
-      }
-    } catch (_) {
-      if (!mounted) return;
-      Navigator.pop(context);
-      socket.dispose();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not connect to server')),
-      );
-    }
   }
 
+  /* ======================= Create Room ======================= */
   Future<void> _createRoomDialog() async {
     final nameCtrl = TextEditingController();
     final pwdCtrl = TextEditingController();
+
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -161,113 +240,85 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Room name (optional)',
-              ),
-            ),
+                controller: nameCtrl,
+                decoration:
+                    const InputDecoration(labelText: 'Room name (optional)')),
             TextField(
-              controller: pwdCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Password (optional)',
-              ),
-            ),
+                controller: pwdCtrl,
+                decoration:
+                    const InputDecoration(labelText: 'Password (optional)')),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('ยกเลิก')),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Create'),
-          ),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('สร้าง')),
         ],
       ),
     );
     if (ok != true) return;
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final uid = prefs.getInt('user_id');
-      final body = {
+      final uid = await _getUserId();
+      final body = <String, dynamic>{
         if (nameCtrl.text.trim().isNotEmpty) 'name': nameCtrl.text.trim(),
         if (pwdCtrl.text.trim().isNotEmpty) 'password': pwdCtrl.text.trim(),
-        if (uid != null) 'user_id': uid,
+        if (uid != null) 'owner_id': uid, // บันทึกเจ้าของตั้งแต่สร้าง
       };
+
+      _showSpinner();
       final r = await http.post(
         Uri.parse('$baseServerUrl/rooms'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(body),
       );
-      if (r.statusCode == 200) {
-        final j = jsonDecode(r.body) as Map<String, dynamic>;
-        final roomId = j['roomId'] as String? ?? j['id'] as String?;
-        if (roomId == null) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('สร้างห้องไม่สำเร็จ (no id)')),
-          );
-          return;
-        }
+      _hideSpinner();
 
-        final socket = IO.io(
-          baseServerUrl,
-          IO.OptionBuilder()
-              .setTransports(['websocket'])
-              .disableAutoConnect()
-              .build(),
-        );
-        socket.connect();
-        socket.onConnect(
-          (_) => socket.emit('join', {
-            'boardId': roomId,
-            'password': pwdCtrl.text.trim(),
-          }),
-        );
-
-        if (!mounted) return;
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => NoteScribblePage(
-              boardId: roomId,
-              socket: socket,
-              documentId: null,
-              initialTitle: nameCtrl.text.trim().isEmpty
-                  ? 'Untitled'
-                  : nameCtrl.text.trim(),
-              initialPages: const <sc.Sketch>[],
-              initialTextsPerPage: const <List<TextBoxData>>[],
-              initialImagesPerPage: const <List<ImageLayerData>>[],
-            ),
-          ),
-        );
-      } else {
+      if (r.statusCode != 200) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('สร้างห้องไม่สำเร็จ (${r.statusCode})')),
-        );
+            SnackBar(content: Text('สร้างห้องไม่สำเร็จ (${r.statusCode})')));
+        return;
       }
-    } catch (e) {
+
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      final roomId = (j['roomId'] ?? j['id'])?.toString();
+      if (roomId == null || roomId.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('สร้างห้องไม่สำเร็จ (no id)')));
+        return;
+      }
+
+      // เข้าห้องที่สร้าง โดย "รอ join_ok" เพื่อไม่ให้ role เพี้ยน
+      await _connectAndOpenRoom(
+        roomId: roomId,
+        password: pwdCtrl.text.trim(),
+        documentId: null,
+        title: nameCtrl.text.trim().isEmpty ? 'Untitled' : nameCtrl.text.trim(),
+        pagesSketch: const <sc.Sketch>[],
+        pagesTexts: const <List<TextBoxData>>[],
+        pagesImages: const <List<ImageLayerData>>[],
+      );
+    } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('สร้างห้องไม่สำเร็จ')));
+      _hideSpinner();
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('สร้างห้องไม่สำเร็จ')));
     }
   }
 
-  // ---------- Documents ----------
+  /* ======================= Load/Delete/Open docs ======================= */
   Future<void> _loadDocs() async {
     setState(() => _loading = true);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final uid = prefs.getInt('user_id');
+      final uid = await _getUserId();
       final uri = (uid != null)
-          ? Uri.parse(
-              '$baseServerUrl/documents',
-            ).replace(queryParameters: {'user_id': '$uid'})
+          ? Uri.parse('$baseServerUrl/documents')
+              .replace(queryParameters: {'user_id': '$uid'})
           : Uri.parse('$baseServerUrl/documents');
 
       final r = await http.get(uri);
@@ -283,28 +334,24 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('โหลดรายการเอกสารไม่สำเร็จ')),
-      );
+          const SnackBar(content: Text('โหลดรายการเอกสารไม่สำเร็จ')));
     }
   }
 
   Future<void> _delete(_DocItem d) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final uid = prefs.getInt('user_id');
+      final uid = await _getUserId();
       final uri = (uid != null)
-          ? Uri.parse(
-              '$baseServerUrl/documents/${d.id}',
-            ).replace(queryParameters: {'user_id': '$uid'})
+          ? Uri.parse('$baseServerUrl/documents/${d.id}')
+              .replace(queryParameters: {'user_id': '$uid'})
           : Uri.parse('$baseServerUrl/documents/${d.id}');
       final r = await http.delete(uri);
       if (r.statusCode != 200) throw Exception('HTTP ${r.statusCode}');
       setState(() => _docs.removeWhere((x) => x.id == d.id));
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('ลบเอกสารไม่สำเร็จ')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('ลบเอกสารไม่สำเร็จ')));
     }
   }
 
@@ -315,11 +362,12 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
       final data = jsonDecode(r.body) as Map<String, dynamic>;
 
       final rawBoard = data['boardId'] ?? data['board_id'];
-      final boardId = (rawBoard is String) ? rawBoard.trim() : null;
+      final boardId =
+          (rawBoard is String) ? rawBoard.trim() : rawBoard?.toString();
       final title = (data['title'] as String?) ?? 'Untitled';
 
       // raw pages
-      final rawPages = (data['pages'] as List)
+      final rawPages = (data['pages'] as List? ?? const [])
           .map((p) => Map<String, dynamic>.from((p as Map)['data'] as Map))
           .toList();
 
@@ -335,13 +383,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         final mm = Map<String, dynamic>.from(m);
         final arr = (mm['texts'] as List?) ?? const [];
         return arr
-            .map(
-              (e) => TextBoxData.fromJson(Map<String, dynamic>.from(e as Map)),
-            )
+            .map((e) => TextBoxData.fromJson(Map<String, dynamic>.from(e)))
             .toList();
       }).toList();
 
-      // images (clean base64 prefix)
+      // images (clean base64)
       final pagesImages = rawPages.map<List<ImageLayerData>>((m) {
         final mm = Map<String, dynamic>.from(m);
         final arr = (mm['images'] as List?) ?? const [];
@@ -353,166 +399,48 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
         }).toList();
       }).toList();
 
-      final hasRealBoard =
-          boardId != null &&
+      final hasRealBoard = boardId != null &&
           boardId.isNotEmpty &&
           boardId.toLowerCase() != 'offline';
 
-      if (hasRealBoard) {
-        final socket = IO.io(
-          baseServerUrl,
-          IO.OptionBuilder()
-              .setTransports(['websocket'])
-              .disableAutoConnect()
-              .build(),
-        );
-
+      if (!hasRealBoard) {
+        // เปิดแบบออฟไลน์
         if (!mounted) return;
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => const Center(child: CircularProgressIndicator()),
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => NoteScribblePage(
+              boardId: 'offline',
+              socket: null,
+              documentId: d.id,
+              initialTitle: title,
+              initialPages: pagesSketch,
+              initialTextsPerPage: pagesTexts,
+              initialImagesPerPage: pagesImages,
+            ),
+          ),
         );
-
-        void closeSpinnerSafe() {
-          if (!mounted) return;
-          try {
-            Navigator.of(context, rootNavigator: true).pop();
-          } catch (_) {}
-        }
-
-        void openLive() {
-          if (!mounted) return;
-          closeSpinnerSafe();
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => NoteScribblePage(
-                boardId: boardId!,
-                socket: socket,
-                documentId: d.id,
-                initialTitle: title,
-                initialPages: pagesSketch,
-                initialTextsPerPage: pagesTexts,
-                initialImagesPerPage: pagesImages,
-              ),
-            ),
-          );
-        }
-
-        void openOffline([String? reason]) {
-          if (!mounted) return;
-          closeSpinnerSafe();
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => NoteScribblePage(
-                boardId: boardId ?? 'offline',
-                socket: null,
-                documentId: d.id,
-                initialTitle: title,
-                initialPages: pagesSketch,
-                initialTextsPerPage: pagesTexts,
-                initialImagesPerPage: pagesImages,
-              ),
-            ),
-          );
-          socket.dispose();
-          if (reason != null) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text('เปิดแบบออฟไลน์: $reason')));
-          }
-        }
-
-        socket.on('join_ok', (_) => openLive());
-
-        // ✅ คืนบล็อค "ถามรหัสแล้วลองใหม่" เมื่อ join_error
-        socket.on('join_error', (data) async {
-          final msg = (data is Map && data['message'] is String)
-              ? data['message'] as String
-              : 'เข้าห้องไม่สำเร็จ';
-
-          final needsPassword =
-              msg.toLowerCase().contains('password') ||
-              msg.toLowerCase().contains('require');
-
-          if (needsPassword) {
-            if (!mounted) return;
-            final pwdCtrl = TextEditingController();
-            final retry = await showDialog<bool>(
-              context: context,
-              builder: (ctx) => AlertDialog(
-                title: const Text('รหัสผ่านห้อง'),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(msg),
-                    const SizedBox(height: 8),
-                    TextField(
-                      controller: pwdCtrl,
-                      decoration: const InputDecoration(labelText: 'Password'),
-                      obscureText: true,
-                      autofocus: true,
-                    ),
-                  ],
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx, false),
-                    child: const Text('ยกเลิก'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(ctx, true),
-                    child: const Text('ส่ง'),
-                  ),
-                ],
-              ),
-            );
-
-            if (retry == true && pwdCtrl.text.trim().isNotEmpty) {
-              socket.emit('join', {
-                'boardId': boardId,
-                'password': pwdCtrl.text.trim(),
-              });
-              return; // รอ join_ok/join_error รอบถัดไป
-            }
-          }
-
-          openOffline(msg);
-        });
-
-        socket.onConnectError((_) => openOffline('เชื่อมต่อไม่ได้'));
-        socket.onConnect((_) => socket.emit('join', {'boardId': boardId}));
-        socket.connect();
         return;
       }
 
-      // ไม่มี boardId ใช้ live -> ออฟไลน์
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => NoteScribblePage(
-            boardId: 'offline',
-            socket: null,
-            documentId: d.id,
-            initialTitle: title,
-            initialPages: pagesSketch,
-            initialTextsPerPage: pagesTexts,
-            initialImagesPerPage: pagesImages,
-          ),
-        ),
+      // Live: ใช้ flow กลาง (identify → join → join_ok) เพื่อให้ role ถูกต้อง
+      await _connectAndOpenRoom(
+        roomId: boardId!,
+        password: null,
+        documentId: d.id,
+        title: title,
+        pagesSketch: pagesSketch,
+        pagesTexts: pagesTexts,
+        pagesImages: pagesImages,
       );
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('เปิดเอกสารไม่สำเร็จ')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('เปิดเอกสารไม่สำเร็จ')));
     }
   }
 
-  // ---------- UI (ไม่มี Scaffold/AppBar เพื่อไม่ให้ซ้อน) ----------
+  /* ======================= UI ======================= */
   @override
   Widget build(BuildContext context) {
     if (_loading) return const Center(child: CircularProgressIndicator());
@@ -554,11 +482,11 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
                       itemCount: _docs.length,
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            childAspectRatio: 0.9,
-                            crossAxisSpacing: 12,
-                            mainAxisSpacing: 12,
-                          ),
+                        crossAxisCount: 2,
+                        childAspectRatio: 0.9,
+                        crossAxisSpacing: 12,
+                        mainAxisSpacing: 12,
+                      ),
                       itemBuilder: (_, i) {
                         final d = _docs[i];
                         return _DocCard(
@@ -576,7 +504,9 @@ class _DocumentsScreenState extends State<DocumentsScreen> {
   }
 }
 
-// ===== Models & Cards =====
+/* ==========================================================
+ * Models & Card
+ * ========================================================== */
 class _DocItem {
   final String id;
   final String? title;
@@ -593,14 +523,14 @@ class _DocItem {
   });
 
   factory _DocItem.fromJson(Map<String, dynamic> j) => _DocItem(
-    id: j['id'] as String,
-    title: j['title'] as String?,
-    boardId: (j['board_id'] ?? j['boardId']) as String?,
-    coverPng: (j['cover_png'] ?? j['coverPng']) as String?,
-    updatedAt: j['updated_at'] != null
-        ? DateTime.tryParse(j['updated_at'].toString())
-        : null,
-  );
+        id: j['id'] as String,
+        title: j['title'] as String?,
+        boardId: (j['board_id'] ?? j['boardId']) as String?,
+        coverPng: (j['cover_png'] ?? j['coverPng']) as String?,
+        updatedAt: j['updated_at'] != null
+            ? DateTime.tryParse(j['updated_at'].toString())
+            : null,
+      );
 }
 
 class _DocCard extends StatelessWidget {
@@ -640,9 +570,8 @@ class _DocCard extends StatelessWidget {
             AspectRatio(
               aspectRatio: 4 / 3,
               child: ClipRRect(
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(14),
-                ),
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(14)),
                 child: cover,
               ),
             ),
@@ -659,9 +588,7 @@ class _DocCard extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                          ),
+                              fontWeight: FontWeight.w600, fontSize: 14),
                         ),
                         const SizedBox(height: 4),
                         Text(
