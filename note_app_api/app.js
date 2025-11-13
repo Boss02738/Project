@@ -86,7 +86,7 @@ app.use("/api/search", searchRoutes);
 app.use("/api", userRoutes);
 app.use(withdrawalsRouter);
 app.use(walletRouter);
-app.use(purchasesRouter);
+app.use("/api/purchases", purchasesRouter);
 app.use("/api/friends", friendRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use(adminRoutes);
@@ -182,14 +182,19 @@ async function ensurePricingPaymentsSchema() {
       status VARCHAR(16) NOT NULL DEFAULT 'pending',
       qr_payload TEXT,
       expires_at TIMESTAMPTZ,
-      created_at TIMESTAMPTZ DEFAULT now()
+      auto_verified_at TIMESTAMPTZ,
+      manually_approved_at TIMESTAMPTZ,
+      admin_id INT,
+      created_at TIMESTAMPTZ DEFAULT now(),
+      updated_at TIMESTAMPTZ DEFAULT now()
     );
 
     CREATE TABLE IF NOT EXISTS public.payment_slips (
       id SERIAL PRIMARY KEY,
       purchase_id INT NOT NULL REFERENCES public.purchases(id) ON DELETE CASCADE,
       file_path TEXT NOT NULL,
-      uploaded_at TIMESTAMPTZ DEFAULT now()
+      uploaded_at TIMESTAMPTZ DEFAULT now(),
+      verification_result JSONB
     );
 
     CREATE TABLE IF NOT EXISTS public.post_access (
@@ -202,19 +207,55 @@ async function ensurePricingPaymentsSchema() {
 
     CREATE TABLE IF NOT EXISTS public.purchased_posts (
       post_id INT NOT NULL REFERENCES public.posts(id) ON DELETE CASCADE,
-      user_id INT NOT NULL REFERENCES public.users(id_user) ON DELETE CASCADE,
-      granted_at TIMESTAMPTZ DEFAULT now(),
-      PRIMARY KEY (post_id, user_id)
+      buyer_id INT NOT NULL REFERENCES public.users(id_user) ON DELETE CASCADE,
+      purchased_at TIMESTAMPTZ DEFAULT now(),
+      PRIMARY KEY (post_id, buyer_id)
     );
   `);
 
   await pool.query(`
-    CREATE INDEX IF NOT EXISTS idx_purchases_status_created     ON public.purchases(status, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_post_access_user             ON public.post_access(user_id, granted_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_purchased_posts_user         ON public.purchased_posts(user_id, granted_at DESC);
+    ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS auto_verified_at TIMESTAMPTZ;
+    ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS manually_approved_at TIMESTAMPTZ;
+    ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS admin_id INT;
+    ALTER TABLE public.purchases ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+    
+    ALTER TABLE public.payment_slips ADD COLUMN IF NOT EXISTS verification_result JSONB;
+  `);
+
+  // Ensure the purchases.status check constraint includes all statuses we use
+  await pool.query(`
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint c
+    JOIN pg_class t ON c.conrelid = t.oid
+    WHERE c.contype = 'c' AND t.relname = 'purchases' AND c.conname = 'purchases_status_check'
+  ) THEN
+    ALTER TABLE public.purchases DROP CONSTRAINT purchases_status_check;
+  END IF;
+  ALTER TABLE public.purchases ADD CONSTRAINT purchases_status_check CHECK (
+    status = ANY (ARRAY[
+      'pending'::text,
+      'qr_generated'::text,
+      'slip_uploaded'::text,
+      'approved'::text,
+      'rejected'::text,
+      'expired'::text,
+      'paid'::text
+    ])
+  );
+END$$;
+  `);
+
+  // Create commonly used indexes. For purchased_posts we tolerate older schemas
+  // that use `user_id` instead of `buyer_id` by adding a `buyer_id` column
+  // when needed and copying values from `user_id`.
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_purchases_status_created ON public.purchases(status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_post_access_user ON public.post_access(user_id, granted_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_purchased_posts_user ON public.purchased_posts(user_id, granted_at DESC);
   `);
 }
-
 async function ensureCollabAccessSchema() {
   await pool.query(
     `ALTER TABLE boards DROP CONSTRAINT IF EXISTS boards_owner_id_fkey;`
@@ -255,6 +296,64 @@ async function ensureCollabAccessSchema() {
      WHERE b.owner_id IS NOT NULL AND bm.board_id IS NULL;
   `);
 }
+
+await pool.query(`
+DO $$
+BEGIN
+  IF EXISTS(
+    SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='purchased_posts'
+  ) THEN
+    -- Ensure purchased_at exists
+    IF NOT EXISTS(
+      SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='purchased_posts' AND column_name='purchased_at'
+    ) THEN
+      ALTER TABLE public.purchased_posts ADD COLUMN purchased_at TIMESTAMPTZ DEFAULT now();
+    END IF;
+
+    -- If buyer_id missing but user_id present, create buyer_id and copy values
+    IF NOT EXISTS(
+      SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='purchased_posts' AND column_name='buyer_id'
+    ) AND EXISTS(
+      SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='purchased_posts' AND column_name='user_id'
+    ) THEN
+      ALTER TABLE public.purchased_posts ADD COLUMN buyer_id INT;
+      UPDATE public.purchased_posts SET buyer_id = user_id WHERE buyer_id IS NULL;
+      -- Try to add FK if users.id_user or users.id exists (ignore if already exists)
+      IF EXISTS(
+        SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='id_user'
+      ) THEN
+        BEGIN
+          ALTER TABLE public.purchased_posts
+            ADD CONSTRAINT purchased_posts_buyer_fkey FOREIGN KEY (buyer_id) REFERENCES public.users(id_user) ON DELETE CASCADE;
+        EXCEPTION WHEN duplicate_object THEN
+          NULL;
+        END;
+      ELSIF EXISTS(
+        SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='users' AND column_name='id'
+      ) THEN
+        BEGIN
+          ALTER TABLE public.purchased_posts
+            ADD CONSTRAINT purchased_posts_buyer_fkey FOREIGN KEY (buyer_id) REFERENCES public.users(id) ON DELETE CASCADE;
+        EXCEPTION WHEN duplicate_object THEN
+          NULL;
+        END;
+      END IF;
+    END IF;
+
+    -- Create index on buyer_id if present, otherwise fall back to user_id
+    IF EXISTS(
+      SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='purchased_posts' AND column_name='buyer_id'
+    ) THEN
+      EXECUTE 'CREATE INDEX IF NOT EXISTS idx_purchased_posts_buyer ON public.purchased_posts(buyer_id, purchased_at DESC)';
+    ELSIF EXISTS(
+      SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='purchased_posts' AND column_name='user_id'
+    ) THEN
+      EXECUTE 'CREATE INDEX IF NOT EXISTS idx_purchased_posts_user ON public.purchased_posts(user_id, purchased_at DESC)';
+    END IF;
+  END IF;
+END$$;
+  `);
+
 
 /* ===================================================================
    HELPERS
@@ -448,111 +547,9 @@ function generatePromptPayPayload(phoneOrID, amountBaht) {
 }
 
 /* ===================================================================
-   PAYMENTS FLOW
+   PAYMENTS FLOW (ปรับเป็นสคีมา INT)
    =================================================================== */
-app.post("/api/purchases", async (req, res) => {
-  try {
-    const { postId, buyerId } = req.body;
-
-    const pr = await pool.query(
-      `SELECT p.id, p.user_id AS seller_id, p.price_type, p.price_amount_satang,
-              u.phone AS seller_phone
-         FROM public.posts p
-         JOIN public.users u ON u.id_user = p.user_id
-        WHERE p.id = $1`,
-      [postId]
-    );
-    if (!pr.rowCount) return res.status(404).json({ error: "post_not_found" });
-
-    const post = pr.rows[0];
-    if (post.price_type !== "paid")
-      return res.status(400).json({ error: "post_is_free" });
-    if (!post.seller_phone)
-      return res.status(400).json({ error: "seller_no_phone" });
-
-    const amountBaht = post.price_amount_satang / 100.0;
-    const payload = generatePromptPayPayload(post.seller_phone, amountBaht);
-    const expiresAt = dayjs().add(10, "minute").toISOString();
-
-    const ins = await pool.query(
-      `INSERT INTO public.purchases
-         (post_id, buyer_id, seller_id, amount_satang, currency, status, qr_payload, expires_at)
-       VALUES ($1,$2,$3,$4,'THB','pending',$5,$6)
-       RETURNING *`,
-      [
-        postId,
-        buyerId,
-        post.seller_id,
-        post.price_amount_satang,
-        payload,
-        expiresAt,
-      ]
-    );
-
-    const qrPngDataUrl = await QRCode.toDataURL(payload);
-    res.json({ purchase: ins.rows[0], qrPngDataUrl });
-  } catch (e) {
-    console.error("POST /api/purchases", e);
-    res.status(500).json({ error: "internal_error" });
-  }
-});
-
-app.get("/api/purchases/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const r = await pool.query(`SELECT * FROM public.purchases WHERE id = $1`, [
-      id,
-    ]);
-    if (!r.rowCount) return res.status(404).json({ error: "not_found" });
-
-    const purchase = r.rows[0];
-    if (
-      purchase.status === "pending" &&
-      purchase.expires_at &&
-      dayjs().isAfter(purchase.expires_at)
-    ) {
-      const up = await pool.query(
-        `UPDATE public.purchases SET status='expired' WHERE id=$1 RETURNING *`,
-        [id]
-      );
-      return res.json({ purchase: up.rows[0] });
-    }
-    res.json({ purchase });
-  } catch (e) {
-    console.error("GET /api/purchases/:id", e);
-    res.status(500).json({ error: "internal_error" });
-  }
-});
-
-app.post("/api/purchases/:id/slip", upload.single("slip"), async (req, res) => {
-  try {
-    const { id } = req.params;
-    if (!req.file) return res.status(400).json({ error: "missing_slip_file" });
-
-    const pr = await pool.query(`SELECT * FROM public.purchases WHERE id=$1`, [
-      id,
-    ]);
-    if (!pr.rowCount)
-      return res.status(404).json({ error: "purchase_not_found" });
-    if (pr.rows[0].status === "expired")
-      return res.status(400).json({ error: "purchase_expired" });
-
-    const rel =
-      "/" + path.relative(process.cwd(), req.file.path).replace(/\\/g, "/");
-    await pool.query(
-      `INSERT INTO public.payment_slips (purchase_id, file_path) VALUES ($1,$2)`,
-      [id, rel]
-    );
-    const up = await pool.query(
-      `UPDATE public.purchases SET status='slip_uploaded' WHERE id=$1 RETURNING *`,
-      [id]
-    );
-    res.json({ purchase: up.rows[0] });
-  } catch (e) {
-    console.error("POST /api/purchases/:id/slip", e);
-    res.status(500).json({ error: "internal_error" });
-  }
-});
+// Old endpoints removed - using purchasesRouter instead
 
 /* ===================================================================
    Socket.IO: NoteCoLab + Roles

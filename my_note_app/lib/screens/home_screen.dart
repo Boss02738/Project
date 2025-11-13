@@ -93,57 +93,92 @@ class _HomeState extends State<homescreen> {
     }
   }
 
-  Future<void> _handleBuy({
-    required int postId,
-    required int amountSatang,
-  }) async {
-    if (_userId == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('กรุณาเข้าสู่ระบบก่อนซื้อโพสต์')),
-      );
-      return;
-    }
+ Map<String, dynamic> _normalizePurchase(dynamic raw) {
+  // รองรับทั้ง { ok, purchase:{...} } และ { id, ... } ตรง ๆ
+  final obj = (raw is Map && raw['purchase'] is Map)
+      ? (raw['purchase'] as Map)
+      : (raw as Map);
 
-    late final Map<String, dynamic> created;
+  return {
+    'already_owned': (raw is Map && raw['already_owned'] == true),
+    'id': _asInt(obj['id']),
+    'amount_satang': _asInt(obj['amount_satang']),
+    'qr_payload': _asStr(obj['qr_payload']),
+    // รองรับทั้ง expires_at และ expiresAt
+    'expires_at': obj['expires_at'] ?? obj['expiresAt'],
+  };
+}
 
-    try {
-      created = await ApiService.startPurchase(
-        postId: postId,
-        buyerId: _userId!,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('สร้างคำสั่งซื้อไม่สำเร็จ : $e')));
-      return;
-    }
-
-    if (created['id'] == null ||
-        created['qr_payload'] == null ||
-        created['expires_at'] == null) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ข้อมูลคำสั่งซื้อไม่ถูกต้อง')),
-      );
-      return;
-    }
-
+Future<void> _handleBuy({
+  required int postId,
+  required int amountSatang,
+}) async {
+  if (_userId == null) {
     if (!mounted) return;
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PurchaseScreen(
-          purchaseId: _asInt(created['id']),
-          amountSatang: _asInt(created['amount_satang'], fallback: amountSatang),
-          qrPayload: _asStr(created['qr_payload']),
-          expiresAt: _asDate(created['expires_at']),
-        ),
-      ),
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('กรุณาเข้าสู่ระบบก่อนซื้อโพสต์')),
     );
-
-    await _reload();
+    return;
   }
+
+  late final Map<String, dynamic> createdRaw;
+  try {
+    createdRaw = await ApiService.startPurchase(
+      postId: postId,
+      buyerId: _userId!,
+    );
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('สร้างคำสั่งซื้อไม่สำเร็จ : $e')));
+    return;
+  }
+
+  final created = _normalizePurchase(createdRaw);
+
+  // ✅ ซื้อไว้แล้ว → แจ้งและรีโหลดฟีด
+  if (created['already_owned'] == true) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('คุณมีสิทธิ์เข้าถึงโพสต์นี้แล้ว')),
+    );
+    await _reload();
+    return;
+  }
+
+  // ✅ ตรวจว่ามีพารามิเตอร์สำคัญครบ
+  if (created['id'] == 0 ||
+      (created['qr_payload'] as String).isEmpty ||
+      created['expires_at'] == null) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('ข้อมูลคำสั่งซื้อไม่ถูกต้อง')),
+    );
+    return;
+  }
+
+  // ✅ parse expiresAt ให้ชัวร์
+  final expRaw = created['expires_at'];
+  final expiresAt = expRaw is DateTime
+      ? expRaw
+      : _asDate(expRaw);
+
+  if (!mounted) return;
+  await Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => PurchaseScreen(
+        purchaseId: _asInt(created['id']),
+        amountSatang:
+            _asInt(created['amount_satang'], fallback: amountSatang),
+        qrPayload: _asStr(created['qr_payload']),
+        expiresAt: expiresAt,
+      ),
+    ),
+  );
+
+  await _reload();
+}
 
   Widget _paidBar({required int postId, required int amountSatang}) {
     final priceBaht = amountSatang / 100.0;

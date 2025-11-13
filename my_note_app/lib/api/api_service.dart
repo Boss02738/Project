@@ -21,8 +21,8 @@ class ApiService {
     if (kIsWeb) {
       return 'http://localhost:3000';
     }
-    if (Platform.isAndroid) return 'http://10.0.2.2:3000'; // Android emulator
-    return 'http://10.35.147.27:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
+    if (Platform.isAndroid) return 'http://192.168.1.127:3000'; // Android emulator
+    return 'http://192.168.1.127:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
   }
 
   // -------- Base paths --------
@@ -525,86 +525,52 @@ class ApiService {
     return postJson('/api/purchases', {'postId': postId, 'buyerId': buyerId});
   }
 
-  static Future<Map<String, dynamic>?> createPurchase({
-    required int postId,
-    required int buyerId,
-  }) async {
-    Future<Map<String, dynamic>> _call(String path) async {
-      final uri = Uri.parse('$host$path');
-      final body = jsonEncode({
-        'postId': postId,
-        'buyerId': buyerId,
-        'post_id': postId,
-        'buyer_id': buyerId,
-      });
+static Future<Map<String, dynamic>> createPurchase({
+  required int postId,
+  required int buyerId,
+}) async {
+  final r = await http.post(
+    Uri.parse('$host/api/purchases'),
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode({'postId': postId, 'buyerId': buyerId}),
+  ).timeout(_reqTimeout);
+  _ensureOk(r);
+  return jsonDecode(r.body) as Map<String, dynamic>;
+}
 
-      final r = await http
-          .post(uri, headers: {'Content-Type': 'application/json'}, body: body)
-          .timeout(_reqTimeout);
+static Future<Map<String, dynamic>> getPurchase(int id) async {
+  final r = await http.get(Uri.parse('$host/api/purchases/$id')).timeout(_reqTimeout);
+  _ensureOk(r);
+  return jsonDecode(r.body) as Map<String, dynamic>;
+}
 
-      if (r.statusCode < 200 || r.statusCode >= 300) {
-        throw HttpException(
-          'HTTP ${r.statusCode} ${r.reasonPhrase}: ${r.body}',
-        );
-      }
-      return _decode(r.body);
-    }
+ static Future<Map<String, dynamic>> uploadPurchaseSlip({
+  required int purchaseId,
+  required File slipFile,
+}) async {
+  final req = http.MultipartRequest(
+    'POST',
+    Uri.parse('$host/api/purchases/$purchaseId/slip'),
+  );
+  req.files.add(await http.MultipartFile.fromPath('slip', slipFile.path));
+  final streamed = await req.send().timeout(_reqTimeout);
+  final res = await http.Response.fromStream(streamed);
+  _ensureOk(res);
+  return jsonDecode(res.body) as Map<String, dynamic>;
+}
 
-    Map<String, dynamic> _normalize(Map<String, dynamic> data) {
-      final purchase = (data['purchase'] is Map)
-          ? (data['purchase'] as Map).cast<String, dynamic>()
-          : <String, dynamic>{};
-
-      final id = data['id'] ?? purchase['id'] ?? data['purchase_id'];
-      final amt =
-          data['amount_satang'] ??
-          data['amountSatang'] ??
-          purchase['amount_satang'] ??
-          purchase['amountSatang'] ??
-          0;
-      final qr =
-          data['qr_payload'] ??
-          data['qrPayload'] ??
-          purchase['qr_payload'] ??
-          purchase['qrPayload'];
-      final exp =
-          data['expires_at'] ?? data['expiresAt'] ?? purchase['expires_at'];
-
-      if (id == null || qr == null) return data;
-
-      return {
-        'id': id is int ? id : int.tryParse('$id') ?? id,
-        'amount_satang': amt is int ? amt : int.tryParse('$amt') ?? 0,
-        'qr_payload': '$qr',
-        'expires_at': exp,
-      };
-    }
-
-    try {
-      final data = await _call('/api/purchases');
-      return _normalize(data);
-    } on HttpException catch (e) {
-      if (e.toString().contains('404')) {
-        final data = await _call('/api/purchases');
-        return _normalize(data);
-      }
-      rethrow;
-    }
-  }
-
-  static Future<Map<String, dynamic>> getPurchase(String purchaseId) async {
-    return getJson('/api/purchases/$purchaseId');
-  }
-
-  static Future<Map<String, dynamic>> uploadPurchaseSlip({
+  /// ตรวจสอบสถานะการซื้อ
+  /// - ถ้า status = 'approved' → สามารถเข้าถึงโพสต์ได้แล้ว
+  /// - ถ้า status = 'slip_uploaded' → รอการตรวจสอบ
+  /// - ถ้า status = 'pending' → รอชำระเงิน
+  static Future<Map<String, dynamic>> checkPurchaseStatus({
     required String purchaseId,
-    required File slipFile,
   }) async {
-    return uploadFile(
-      '/api/purchases/$purchaseId/slip',
-      filePath: slipFile.path,
-      fieldName: 'slip',
-    );
+    try {
+      return await getJson('/api/purchases/$purchaseId');
+    } catch (e) {
+      throw Exception('Failed to check purchase status: $e');
+    }
   }
 
   Future<bool> archivePost(int postId, int userId) async {
