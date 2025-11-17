@@ -21,8 +21,8 @@ class ApiService {
     if (kIsWeb) {
       return 'http://localhost:3000';
     }
-    if (Platform.isAndroid) return 'http://192.168.1.127:3000'; // Android emulator
-    return 'http://192.168.1.127:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
+    if (Platform.isAndroid) return 'http://192.168.1.122:3000'; // Android emulator
+    return 'http://192.168.1.122:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
   }
 
   // -------- Base paths --------
@@ -548,11 +548,13 @@ static Future<Map<String, dynamic>> getPurchase(int id) async {
   required int purchaseId,
   required File slipFile,
 }) async {
-  final req = http.MultipartRequest(
-    'POST',
-    Uri.parse('$host/api/purchases/$purchaseId/slip'),
-  );
-  req.files.add(await http.MultipartFile.fromPath('slip', slipFile.path));
+final req = http.MultipartRequest(
+  'POST',
+  Uri.parse('${ApiService.host}/api/purchases/$purchaseId/slip'),
+);
+req.files.add(
+  await http.MultipartFile.fromPath('slip', slipFile.path),
+);
   final streamed = await req.send().timeout(_reqTimeout);
   final res = await http.Response.fromStream(streamed);
   _ensureOk(res);

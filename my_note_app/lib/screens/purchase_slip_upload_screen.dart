@@ -150,43 +150,60 @@ class _PurchaseSlipUploadScreenState extends State<PurchaseSlipUploadScreen> {
     );
   }
 
-  void _showPendingDialog(dynamic verification) {
-    String? error;
-    String? amount;
+void _showPendingDialog(dynamic verification) {
+  String message;
 
-    if (verification is Map) {
-      error = verification['error'] as String?;
-      final amt = verification['amount'];
-      if (amt is num) {
-        amount = '${amt.toStringAsFixed(2)} บาท';
-      }
+  if (verification is Map && verification['provider'] == 'slipok') {
+    final code = verification['code'];
+    final m = verification['message'];
+
+    message =
+        'SlipOK ตอบกลับว่า [code $code]\n'
+        '${m ?? 'ไม่ทราบสาเหตุ'}\n\n'
+        'กรุณารอแอดมินตรวจสอบ หรือเช็กว่าจำนวนเงินและบัญชีปลายทางตรงกับที่ระบบกำหนดหรือไม่';
+  } else if (verification is Map) {
+    // เคสเก่า: OCR ด้วย Tesseract
+    final error = verification['error'] as String?;
+    final amt = verification['amount'];
+    String? amount;
+    if (amt is num) {
+      amount = '${amt.toStringAsFixed(2)} บาท';
     }
 
-    final message = error == 'amount_mismatch'
-        ? 'ระบบตรวจสอบสลิปแล้ว แต่พบว่าจำนวนเงิน ($amount) ไม่ตรงกับที่ต้องชำระ '
-            '(${(widget.amountSatang / 100).toStringAsFixed(2)} บาท) '
-            'กรุณารอการตรวจสอบจากแอดมิน'
-        : 'ระบบไม่สามารถอ่านข้อมูลจากสลิป (${error ?? 'ไม่ทราบสาเหตุ'}) '
-            'กรุณารอการตรวจสอบจากแอดมิน';
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('⏳ รอการตรวจสอบ'),
-        content: Text(message),
-        actions: [
-          FilledButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              Navigator.pop(context);
-            },
-            child: const Text('ปิด'),
-          ),
-        ],
-      ),
-    );
+    if (error == 'amount_mismatch') {
+      message =
+          'ระบบตรวจสอบสลิปแล้ว แต่พบว่าจำนวนเงิน (${amount ?? '-'}) '
+          'ไม่ตรงกับที่ต้องชำระ '
+          '(${(widget.amountSatang / 100).toStringAsFixed(2)} บาท)\n'
+          'กรุณารอการตรวจสอบจากแอดมิน';
+    } else {
+      message =
+          'ระบบไม่สามารถอ่านข้อมูลจากสลิป (${error ?? 'ไม่ทราบสาเหตุ'}) '
+          'กรุณารอการตรวจสอบจากแอดมิน';
+    }
+  } else {
+    message =
+        'ระบบไม่สามารถอ่านข้อมูลจากสลิป กรุณารอการตรวจสอบจากแอดมิน';
   }
+
+  showDialog(
+    context: context,
+    barrierDismissible: false,
+    builder: (ctx) => AlertDialog(
+      title: const Text('⏳ รอการตรวจสอบ'),
+      content: Text(message),
+      actions: [
+        FilledButton(
+          onPressed: () {
+            Navigator.pop(ctx);
+            Navigator.pop(context);
+          },
+          child: const Text('ปิด'),
+        ),
+      ],
+    ),
+  );
+}
 
   @override
   Widget build(BuildContext context) {
