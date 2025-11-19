@@ -134,6 +134,20 @@ class ImageLayerData {
   );
 }
 
+class RoomMember {
+  final int userId;
+  final String? name;
+
+  RoomMember({required this.userId, this.name});
+
+  factory RoomMember.fromJson(Map<String, dynamic> j) {
+    return RoomMember(
+      userId: (j['userId'] ?? j['id']) as int,
+      name: j['name'] as String?, // ให้ server ส่ง field name มาด้วย
+    );
+  }
+}
+
 // =================== PAGE ===================
 Sketch emptySketch() => Sketch.fromJson({'lines': []});
 
@@ -146,6 +160,10 @@ class NoteScribblePage extends StatefulWidget {
   final List<List<TextBoxData>>? initialTextsPerPage;
   final List<List<ImageLayerData>>? initialImagesPerPage;
 
+  // meta ต่อหน้า: หัวข้อ + ผู้รับผิดชอบ
+  final List<String>? initialPageTitles;
+  final List<int?>? initialPageOwners;
+
   const NoteScribblePage({
     super.key,
     required this.boardId,
@@ -155,6 +173,8 @@ class NoteScribblePage extends StatefulWidget {
     this.initialPages,
     this.initialTextsPerPage,
     this.initialImagesPerPage,
+    this.initialPageTitles,
+    this.initialPageOwners,
   });
 
   @override
@@ -173,7 +193,30 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   int? _userId;
   String _role = 'viewer'; // owner | editor | viewer
   bool get offline => widget.socket == null;
-  bool get _canWrite => offline || _role == 'owner' || _role == 'editor';
+  bool get _canWriteBoard => offline || _role == 'owner' || _role == 'editor';
+
+  bool _canWriteForPage(int index) {
+    if (offline) return true; // offline เขียนได้ทุกหน้า
+
+    // ไม่ใช่ editor/owner เลย => เขียนไม่ได้แน่นอน
+    if (!(_role == 'owner' || _role == 'editor')) return false;
+
+    // owner ห้อง เขียนได้ทุกหน้า
+    if (_role == 'owner') return true;
+
+    // editor: ต้องดู page_owner
+    if (index < 0 || index >= _pageOwners.length) return false;
+    final ownerId = _pageOwners[index];
+
+    // ถ้าไม่มีคนรับผิดชอบ => editor เขียนได้
+    if (ownerId == null) return true;
+
+    // ถ้ามี page_owner_id => ต้องตรงกับ userId ถึงจะเขียนได้
+    if (_userId == null) return false;
+    return ownerId == _userId;
+  }
+
+  bool get _canWriteHere => _canWriteForPage(_pageIndex);
 
   // saved custom colors
   static const _prefsKey = 'saved_colors';
@@ -192,6 +235,14 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   late List<Sketch> _pages;
   late List<List<TextBoxData>> _textsPages;
   late List<List<ImageLayerData>> _imagePages;
+
+  // meta ต่อหน้า
+  late List<String> _pageTitles;
+  late List<int?> _pageOwners;
+
+  // สมาชิกในห้อง (ใช้ตอนเลือกผู้รับผิดชอบ)
+  List<RoomMember> _members = [];
+
   int _pageIndex = 0;
   int _pendingSelfDeleteIndex = -1;
 
@@ -229,9 +280,31 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               .toList()
         : List.generate(_pages.length, (_) => <ImageLayerData>[]);
 
-    while (_textsPages.length < _pages.length) _textsPages.add(<TextBoxData>[]);
+    while (_textsPages.length < _pages.length) {
+      _textsPages.add(<TextBoxData>[]);
+    }
     while (_imagePages.length < _pages.length) {
       _imagePages.add(<ImageLayerData>[]);
+    }
+
+    // meta ต่อหน้า
+    _pageTitles =
+        (widget.initialPageTitles != null &&
+            widget.initialPageTitles!.isNotEmpty)
+        ? List<String>.from(widget.initialPageTitles!)
+        : List<String>.filled(_pages.length, '', growable: true);
+
+    _pageOwners =
+        (widget.initialPageOwners != null &&
+            widget.initialPageOwners!.isNotEmpty)
+        ? List<int?>.from(widget.initialPageOwners!)
+        : List<int?>.filled(_pages.length, null, growable: true);
+
+    while (_pageTitles.length < _pages.length) {
+      _pageTitles.add('');
+    }
+    while (_pageOwners.length < _pages.length) {
+      _pageOwners.add(null);
     }
 
     _title = widget.initialTitle ?? 'Untitled';
@@ -254,10 +327,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     if (!offline) {
       _wireSocket();
 
-      // สำคัญ: identify แล้ว join ซ้ำให้แน่ใจว่าบทบาทถูกต้อง
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         await _identifyAndRejoin();
-        // ขอเมทาดาต้าและสแนปช็อต
         widget.socket!.emit('get_pages_meta', {'boardId': widget.boardId});
         _requestInitForCurrentPage();
       });
@@ -275,16 +346,16 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       if (_userId != null) {
         sock.emit('identify', {'userId': _userId});
       }
-      // join ซ้ำเสมอเพื่อให้ role ถูกต้องแม้เคย join มาก่อน
-      sock.emit('join_board', {'boardId': widget.boardId});
+      sock.emit('join', {'boardId': widget.boardId});
+      sock.emit('get_room_members', {'boardId': widget.boardId});
     });
 
-    // ถ้าเชื่อมต่ออยู่แล้ว ให้ยิงเลย
     if (sock.connected) {
       if (_userId != null) {
         sock.emit('identify', {'userId': _userId});
       }
       sock.emit('join', {'boardId': widget.boardId});
+      sock.emit('get_room_members', {'boardId': widget.boardId});
     }
   }
 
@@ -336,7 +407,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   void _wireSocket() {
     final socket = widget.socket!;
 
-    // กันลิสเนอร์ซ้ำเวลาหน้าจอถูกสร้างใหม่
     for (final ev in [
       'join_ok',
       'joined_board',
@@ -347,7 +417,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       'pages_meta',
       'page_deleted',
       'grant_write',
-      'write_request', // << ใหม่
+      'write_request',
+      'room_members',
+      'member_joined',
+      'member_left',
     ]) {
       socket.off(ev);
     }
@@ -359,19 +432,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             ? data['role'] as String
             : 'viewer';
         setState(() => _role = role);
-        if (!_canWrite) _showViewOnlyBanner();
+        if (!_canWriteBoard) _showViewOnlyBanner();
+
+        // ขอ list สมาชิกหลัง join สำเร็จ
+        socket.emit('get_room_members', {'boardId': widget.boardId});
       } catch (_) {}
     });
-
-    // socket.on('joined_board', (data) {
-    //   try {
-    //     final role = (data is Map && data['role'] is String)
-    //         ? (data['role'] as String)
-    //         : 'viewer';
-    //     setState(() => _role = role);
-    //     if (!_canWrite) _showViewOnlyBanner();
-    //   } catch (_) {}
-    // });
 
     socket.on('join_error', (data) {
       final msg = (data is Map && data['message'] is String)
@@ -397,7 +463,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         final me = sp.getInt('user_id');
         if (me != null && me == uid) {
           setState(() => _role = role);
-          if (!_canWrite) _showViewOnlyBanner();
+          if (!_canWriteBoard) _showViewOnlyBanner();
         }
       } catch (_) {}
     });
@@ -451,10 +517,22 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                   .toList() ??
               <ImageLayerData>[];
 
+          // meta
+          final String pageTitle = (jsonMap['page_title'] as String?) ?? '';
+          final dynamic ownerRaw = jsonMap['page_owner_id'];
+          int? ownerId;
+          if (ownerRaw is int) {
+            ownerId = ownerRaw;
+          } else if (ownerRaw != null) {
+            ownerId = int.tryParse(ownerRaw.toString());
+          }
+
           _ensurePages(page + 1);
           _pages[page] = sketch;
           _textsPages[page] = texts;
           _imagePages[page] = images;
+          _pageTitles[page] = pageTitle;
+          _pageOwners[page] = ownerId;
 
           if (page == _pageIndex) {
             _notifier.setSketch(sketch: sketch);
@@ -462,11 +540,13 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             setState(() {});
           }
         } else if (page == _pageIndex) {
-          _notifier.clear();
           _pages[_pageIndex] = emptySketch();
           _textsPages[_pageIndex] = <TextBoxData>[];
           _imagePages[_pageIndex] = <ImageLayerData>[];
+          _pageTitles[_pageIndex] = '';
+          _pageOwners[_pageIndex] = null;
           _selectedImageIndex = -1;
+          _notifier.clear();
           setState(() {});
         }
       } catch (_) {}
@@ -502,10 +582,22 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                 .toList() ??
             <ImageLayerData>[];
 
+        // meta
+        final String pageTitle = (jsonMap['page_title'] as String?) ?? '';
+        final dynamic ownerRaw = jsonMap['page_owner_id'];
+        int? ownerId;
+        if (ownerRaw is int) {
+          ownerId = ownerRaw;
+        } else if (ownerRaw != null) {
+          ownerId = int.tryParse(ownerRaw.toString());
+        }
+
         _ensurePages(page + 1);
         _pages[page] = incoming;
         _textsPages[page] = texts;
         _imagePages[page] = images;
+        _pageTitles[page] = pageTitle;
+        _pageOwners[page] = ownerId;
 
         if (page == _pageIndex) {
           _notifier.setSketch(sketch: _pages[_pageIndex]);
@@ -524,6 +616,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         _pages[page] = emptySketch();
         _textsPages[page] = <TextBoxData>[];
         _imagePages[page] = <ImageLayerData>[];
+        _pageTitles[page] = '';
+        _pageOwners[page] = null;
         if (page == _pageIndex) {
           _selectedImageIndex = -1;
           _notifier.clear();
@@ -542,6 +636,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               _pages.add(emptySketch());
               _textsPages.add(<TextBoxData>[]);
               _imagePages.add(<ImageLayerData>[]);
+              _pageTitles.add('');
+              _pageOwners.add(null);
             }
           }
           if (_pageIndex >= _pages.length) {
@@ -567,6 +663,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             _pages.removeAt(d);
             _textsPages.removeAt(d);
             _imagePages.removeAt(d);
+            _pageTitles.removeAt(d);
+            _pageOwners.removeAt(d);
             _selectedImageIndex = -1;
             if (_pageIndex > d) _pageIndex -= 1;
             if (_pageIndex >= _pages.length) _pageIndex = _pages.length - 1;
@@ -577,7 +675,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       } catch (_) {}
     });
 
-    // เมื่อเราได้รับสิทธิ์เขียน
+    // ซ้ำกับด้านบน แต่ของเดิมมีอยู่แล้ว ขอคงไว้
     socket.on('grant_write', (data) {
       final uid = (data is Map && data['userId'] is int)
           ? data['userId'] as int
@@ -592,16 +690,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       }
     });
 
-    // << ใหม่: Owner จะเห็นคำขอสิทธิ์เขียนจากผู้ชม
+    // Owner เห็นคำขอสิทธิ์เขียน
     socket.on('write_request', (data) {
       try {
         final reqUid = (data is Map && data['userId'] is int)
             ? data['userId'] as int
             : -1;
-        // final name = (data is Map && data['username'] is String)
-        //     ? data['username'] as String
-        //     : 'ผู้ใช้ $reqUid';
-        // โชว์แบนเนอร์พร้อมปุ่ม "อนุญาต"
         if (mounted && _role == 'owner' && reqUid > 0) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -622,6 +716,64 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         }
       } catch (_) {}
     });
+
+    socket.on('room_members', (data) {
+      try {
+        final list = (data is Map && data['members'] is List)
+            ? data['members'] as List
+            : const [];
+        setState(() {
+          _members = list
+              .map(
+                (e) => RoomMember.fromJson(Map<String, dynamic>.from(e as Map)),
+              )
+              .toList();
+        });
+      } catch (_) {}
+    });
+    // รายชื่อสมาชิกในห้อง
+    socket.on('room_members', (data) {
+      try {
+        List list;
+        if (data is List) {
+          list = data;
+        } else if (data is Map && data['members'] is List) {
+          list = data['members'] as List;
+        } else {
+          list = const [];
+        }
+
+        setState(() {
+          _members = list
+              .map(
+                (e) => RoomMember.fromJson(Map<String, dynamic>.from(e as Map)),
+              )
+              .toList();
+        });
+      } catch (_) {}
+    });
+
+    socket.on('member_joined', (data) {
+      try {
+        final m = RoomMember.fromJson(Map<String, dynamic>.from(data as Map));
+        final exists = _members.any((x) => x.userId == m.userId);
+        if (!exists) {
+          setState(() => _members = [..._members, m]);
+        }
+      } catch (_) {}
+    });
+
+    socket.on('member_left', (data) {
+      try {
+        final id = (data is Map && data['userId'] is int)
+            ? data['userId'] as int
+            : null;
+        if (id == null) return;
+        setState(() {
+          _members = _members.where((m) => m.userId != id).toList();
+        });
+      } catch (_) {}
+    });
   }
 
   // อนุญาตสิทธิ์เขียนให้ผู้ใช้เป้าหมาย (กดจากฝั่ง Owner)
@@ -630,7 +782,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
     try {
       widget.socket!.emit('grant_write', {
         'boardId': widget.boardId,
-        'targetUserId': userId, // เป้าหมายที่จะให้สิทธิ์
+        'targetUserId': userId,
       });
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -645,6 +797,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       _pages.add(emptySketch());
       _textsPages.add(<TextBoxData>[]);
       _imagePages.add(<ImageLayerData>[]);
+      _pageTitles.add('');
+      _pageOwners.add(null);
     }
   }
 
@@ -659,12 +813,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   void _scheduleSync() {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 250), () {
-      if (!offline && _canWrite) _emitFullSketchWithTexts();
+      if (!offline && _canWriteHere) _emitFullSketchWithTexts();
     });
   }
 
   void _emitFullSketchWithTexts() {
-    if (offline || !_canWrite) return;
+    if (offline || !_canWriteHere) return;
     _pages[_pageIndex] = _notifier.currentSketch;
 
     final sketchJson = _notifier.currentSketch.toJson();
@@ -672,6 +826,12 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
       'lines': (sketchJson['lines'] ?? []),
       'texts': _textsPages[_pageIndex].map((t) => t.toJson()).toList(),
       'images': _imagePages[_pageIndex].map((img) => img.toJson()).toList(),
+      'page_title': (_pageTitles.length > _pageIndex)
+          ? _pageTitles[_pageIndex]
+          : '',
+      'page_owner_id': (_pageOwners.length > _pageIndex)
+          ? _pageOwners[_pageIndex]
+          : null,
     };
 
     widget.socket!.emit('set_sketch', {
@@ -685,7 +845,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   void dispose() {
     _debounce?.cancel();
 
-    // อย่าปิด socket ที่ส่งมาจากภายนอก (อาจใช้ร่วมทั้งแอป)
     if (!offline) {
       final s = widget.socket!;
       for (final ev in [
@@ -698,6 +857,10 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         'pages_meta',
         'page_deleted',
         'grant_write',
+        'write_request',
+        'room_members',
+        'member_joined',
+        'member_left',
       ]) {
         s.off(ev);
       }
@@ -751,7 +914,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         for (final t in texts) {
           minX = math.min(minX, t.x);
           minY = math.min(minY, t.y);
-          maxX = math.max(maxX, t.x + t.fontSize * (t.text.length * 0.6));
+          maxX = math.max(minX, t.x + t.fontSize * (t.text.length * 0.6));
           maxY = math.max(maxY, t.y + t.fontSize * 1.2);
         }
       }
@@ -882,7 +1045,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
   // ---------------- SAVE DOC (server) ----------------
   Future<void> _saveDocument() async {
-    if (!_canWrite) {
+    if (!_canWriteBoard) {
       _needWriteSnack();
       return;
     }
@@ -920,6 +1083,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
           'lines': _pages[i].toJson()['lines'] ?? [],
           'texts': _textsPages[i].map((t) => t.toJson()).toList(),
           'images': _imagePages[i].map((img) => img.toJson()).toList(),
+          'page_title': (_pageTitles.length > i) ? _pageTitles[i] : '',
+          'page_owner_id': (_pageOwners.length > i) ? _pageOwners[i] : null,
         },
       });
     }
@@ -985,14 +1150,13 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
   Future<void> _ensureStoragePermission() async {
     try {
-      // ขอชุด permission ที่เกี่ยวข้อง เผื่อแต่ละเครื่อง/เวอร์ชันต้องการไม่เหมือนกัน
       final candidates = <Permission>[
-        Permission.storage, // เดิม (Android <= 12)
+        Permission.storage,
         Permission.manageExternalStorage,
-        Permission.photos, // Android 13+ / iOS (สื่อรูป)
-        Permission.videos, // Android 13+ (สื่อวิดีโอ)
-        Permission.audio, // Android 13+ (สื่อเสียง)
-        Permission.photosAddOnly, // iOS เพิ่มรูปอย่างเดียว
+        Permission.photos,
+        Permission.videos,
+        Permission.audio,
+        Permission.photosAddOnly,
       ];
       for (final p in candidates) {
         final s = await p.request();
@@ -1124,7 +1288,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   // =================== UI ===================
   void _needWriteSnack() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('ขณะนี้เป็นโหมดอ่านอย่างเดียว')),
+      const SnackBar(content: Text('คุณไม่มีสิทธิ์เขียนในหน้านี้ (VIEW ONLY)')),
     );
   }
 
@@ -1157,6 +1321,117 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         duration: const Duration(seconds: 5),
       ),
     );
+  }
+
+  // -------- แก้ meta ของหน้านี้ (หัวข้อ + ผู้รับผิดชอบ) --------
+  Future<void> _editPageMeta() async {
+    if (!offline && _role != 'owner') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('เฉพาะเจ้าของห้องเท่านั้นที่แก้หัวข้อได้'),
+        ),
+      );
+      return;
+    }
+
+    final currentTitle = (_pageTitles.length > _pageIndex)
+        ? _pageTitles[_pageIndex]
+        : '';
+    final currentOwnerId = (_pageOwners.length > _pageIndex)
+        ? _pageOwners[_pageIndex]
+        : null;
+
+    final titleCtrl = TextEditingController(text: currentTitle);
+    int? selectedOwnerId = currentOwnerId;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) {
+          return AlertDialog(
+            title: const Text('หัวข้อ & ผู้รับผิดชอบของหน้านี้'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'หัวข้อของหน้านี้',
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                if (_members.isNotEmpty) ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'ผู้รับผิดชอบหน้านี้',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  DropdownButtonFormField<int?>(
+                    value: selectedOwnerId,
+                    items: [
+                      const DropdownMenuItem<int?>(
+                        value: null,
+                        child: Text('— ไม่มีผู้รับผิดชอบ —'),
+                      ),
+                      ..._members.map(
+                        (m) => DropdownMenuItem<int?>(
+                          value: m.userId,
+                          child: Text(
+                            m.name != null && m.name!.isNotEmpty
+                                ? m.name!
+                                : 'UID ${m.userId}',
+                          ),
+                        ),
+                      ),
+                    ],
+                    onChanged: (v) => setSt(() => selectedOwnerId = v),
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'ยังไม่มีข้อมูลสมาชิกในห้อง (ต้องให้ server ส่ง event room_members มาก่อน)',
+                    style: TextStyle(fontSize: 12),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('ยกเลิก'),
+              ),
+              TextButton(
+                onPressed: () {
+                  setSt(() => selectedOwnerId = null);
+                  Navigator.pop(ctx, true);
+                },
+                child: const Text('ล้างผู้รับผิดชอบ'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('บันทึก'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (ok != true) return;
+
+    setState(() {
+      _pageTitles[_pageIndex] = titleCtrl.text.trim();
+      _pageOwners[_pageIndex] = selectedOwnerId;
+    });
+    _scheduleSync();
   }
 
   @override
@@ -1192,23 +1467,23 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(84),
           child: _TopToolbar(
-            enabled: _canWrite,
+            enabled: _canWriteHere,
             isEraser: _isEraser,
             color: _color,
             strokeWidth: _strokeWidth,
             savedColors: _savedColors,
             onPen: () {
-              if (!_canWrite) return _needWriteSnack();
+              if (!_canWriteHere) return _needWriteSnack();
               setState(() => _isEraser = false);
               _notifier.setColor(_color);
             },
             onEraser: () {
-              if (!_canWrite) return _needWriteSnack();
+              if (!_canWriteHere) return _needWriteSnack();
               setState(() => _isEraser = true);
               _notifier.setEraser();
             },
             onPickPresetColor: (c) async {
-              if (!_canWrite) return _needWriteSnack();
+              if (!_canWriteHere) return _needWriteSnack();
               setState(() {
                 _color = c;
                 _isEraser = false;
@@ -1217,7 +1492,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               await _registerUsedColor(c);
             },
             onPickSavedColor: (c) async {
-              if (!_canWrite) return _needWriteSnack();
+              if (!_canWriteHere) return _needWriteSnack();
               setState(() {
                 _color = c;
                 _isEraser = false;
@@ -1226,7 +1501,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               await _registerUsedColor(c, reorderIfExists: false);
             },
             onOpenRainbowPicker: () async {
-              if (!_canWrite) return _needWriteSnack();
+              if (!_canWriteHere) return _needWriteSnack();
               final chosen = await _openRainbowPicker(context, _color);
               if (chosen != null) {
                 setState(() {
@@ -1238,21 +1513,20 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               }
             },
             onRemoveSavedColor: (c) async {
-              if (!_canWrite) return;
+              if (!_canWriteHere) return;
               setState(
                 () => _savedColors.removeWhere((x) => x.value == c.value),
               );
               await _persistSavedColors();
             },
             onChangeWidth: (v) {
-              if (!_canWrite) return _needWriteSnack();
+              if (!_canWriteHere) return _needWriteSnack();
               setState(() => _strokeWidth = v);
               _notifier.setStrokeWidth(v);
             },
           ),
         ),
       ),
-
       body: SafeArea(
         child: PageView.builder(
           controller: _pageController,
@@ -1275,6 +1549,33 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
             final texts = _textsPages[i];
             final images = _imagePages[i];
 
+            final canWriteHere = _canWriteForPage(i);
+            final String pageTitle =
+                (_pageTitles.length > i && _pageTitles[i].trim().isNotEmpty)
+                ? _pageTitles[i].trim()
+                : 'หน้าที่ ${i + 1}';
+            final int? ownerUid = (_pageOwners.length > i)
+                ? _pageOwners[i]
+                : null;
+
+            RoomMember? ownerMember;
+            if (ownerUid != null) {
+              ownerMember = _members.firstWhere(
+                (m) => m.userId == ownerUid,
+                orElse: () => RoomMember(userId: ownerUid!, name: null),
+              );
+            }
+
+            final String headerText;
+            if (ownerUid == null) {
+              headerText = pageTitle;
+            } else if (ownerMember?.name != null &&
+                ownerMember!.name!.isNotEmpty) {
+              headerText = '$pageTitle • ผู้รับผิดชอบ: ${ownerMember!.name}';
+            } else {
+              headerText = '$pageTitle • ผู้รับผิดชอบ: UID $ownerUid';
+            }
+
             final sheet = Container(
               margin: const EdgeInsets.fromLTRB(12, 12, 12, 24),
               decoration: BoxDecoration(
@@ -1287,7 +1588,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                       children: [
                         // 1) รูปภาพชั้นล่าง
                         IgnorePointer(
-                          ignoring: !_editImagesMode || !_canWrite,
+                          ignoring: !_editImagesMode || !canWriteHere,
                           child: Stack(
                             children: List.generate(images.length, (idx) {
                               final layer = images[idx];
@@ -1316,7 +1617,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
                         // 2) Scribble
                         IgnorePointer(
-                          ignoring: !_canWrite || _editImagesMode,
+                          ignoring: !_canWriteHere || _editImagesMode,
                           child: Scribble(
                             notifier: _notifier,
                             drawPen: !_isEraser,
@@ -1326,13 +1627,13 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
                         // 3) ข้อความบนสุด
                         ...texts.map(
-                          (t) => _buildTextBoxWidget(t, enabled: _canWrite),
+                          (t) => _buildTextBoxWidget(t, enabled: _canWriteHere),
                         ),
 
                         // 4) แถบควบคุมรูป
-                        if (_editImagesMode && _canWrite)
+                        if (_editImagesMode && _canWriteHere)
                           _selectedImageFloatingToolbar(),
-                        if (!_canWrite)
+                        if (!canWriteHere)
                           Positioned(
                             left: 12,
                             top: 12,
@@ -1358,6 +1659,23 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
             return Column(
               children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 8, bottom: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          headerText, // ใช้ String ตรงนี้ใน Text widget
+                          textAlign: TextAlign.center,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 Expanded(child: sheet),
                 footer,
               ],
@@ -1365,8 +1683,6 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
           },
         ),
       ),
-
-      // Bottom controller
       bottomNavigationBar: SafeArea(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -1397,7 +1713,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               const SizedBox(width: 8),
               IconButton(
                 tooltip: 'Add new page (below)',
-                onPressed: !_canWrite
+                onPressed: !_canWriteBoard
                     ? () => _needWriteSnack()
                     : () {
                         _pages[_pageIndex] = _notifier.currentSketch;
@@ -1405,6 +1721,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           _pages.add(emptySketch());
                           _textsPages.add(<TextBoxData>[]);
                           _imagePages.add(<ImageLayerData>[]);
+                          _pageTitles.add('');
+                          _pageOwners.add(null);
                           _selectedImageIndex = -1;
                         });
                         final newIndex = _pages.length - 1;
@@ -1416,7 +1734,9 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                         );
                         setState(() => _pageIndex = newIndex);
                         if (!offline) {
-                          widget.socket!.emit('add_page', {'boardId': widget.boardId});
+                          widget.socket!.emit('add_page', {
+                            'boardId': widget.boardId,
+                          });
                         }
                       },
                 icon: const Icon(Icons.add_circle),
@@ -1424,7 +1744,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
               const SizedBox(width: 4),
               IconButton(
                 tooltip: 'Delete this page',
-                onPressed: (!_canWrite || _pages.length <= 1)
+                onPressed: (!_canWriteHere || _pages.length <= 1)
                     ? () => _needWriteSnack()
                     : () async {
                         final ok = await showDialog<bool>(
@@ -1454,6 +1774,8 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           _pages.removeAt(deletedIndex);
                           _textsPages.removeAt(deletedIndex);
                           _imagePages.removeAt(deletedIndex);
+                          _pageTitles.removeAt(deletedIndex);
+                          _pageOwners.removeAt(deletedIndex);
                           _selectedImageIndex = -1;
                           final next = deletedIndex.clamp(0, _pages.length - 1);
                           _pageIndex = next;
@@ -1547,7 +1869,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
   // ---------------- Image layers ----------------
   Future<void> _addImageLayer() async {
-    if (!_canWrite) {
+    if (!_canWriteHere) {
       _needWriteSnack();
       return;
     }
@@ -1578,7 +1900,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   }
 
   void _deleteSelectedImage() {
-    if (!_canWrite) {
+    if (!_canWriteHere) {
       _needWriteSnack();
       return;
     }
@@ -1595,7 +1917,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
 
   // ---------------- Text box controls ----------------
   Future<void> _addTextBox() async {
-    if (!_canWrite) {
+    if (!_canWriteHere) {
       _needWriteSnack();
       return;
     }
@@ -1742,7 +2064,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
   }
 
   Future<void> _editTextBox(TextBoxData t) async {
-    if (!_canWrite) {
+    if (!_canWriteHere) {
       _needWriteSnack();
       return;
     }
@@ -2077,6 +2399,23 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                         },
                       ),
                       _ActionButton(
+                        icon: Icons.topic,
+                        label: 'หัวข้อหน้านี้',
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _editPageMeta();
+                        },
+                      ),
+                      if (!offline && _role == 'owner')
+                        _ActionButton(
+                          icon: Icons.group_add,
+                          label: 'เชิญเพื่อนเข้าห้อง',
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            _openInviteFriendsSheet();
+                          },
+                        ),
+                      _ActionButton(
                         icon: Icons.save,
                         label: 'บันทึก',
                         onTap: () {
@@ -2090,7 +2429,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           label: 'ซิงก์',
                           onTap: () {
                             Navigator.pop(ctx);
-                            if (_canWrite) {
+                            if (_canWriteHere) {
                               _emitFullSketchWithTexts();
                             } else {
                               _needWriteSnack();
@@ -2103,11 +2442,13 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           label: 'เคลียร์หน้านี้',
                           onTap: () {
                             Navigator.pop(ctx);
-                            if (!_canWrite) return _needWriteSnack();
+                            if (!_canWriteHere) return _needWriteSnack();
                             _notifier.clear();
                             _pages[_pageIndex] = emptySketch();
                             _textsPages[_pageIndex] = <TextBoxData>[];
                             _imagePages[_pageIndex] = <ImageLayerData>[];
+                            _pageTitles[_pageIndex] = '';
+                            _pageOwners[_pageIndex] = null;
                             _selectedImageIndex = -1;
                             widget.socket!.emit('clear_board', {
                               'boardId': widget.boardId,
@@ -2121,7 +2462,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                         label: _editImagesMode ? 'ไปโหมดวาด' : 'แก้ไขรูป',
                         onTap: () {
                           Navigator.pop(ctx);
-                          if (!_canWrite) return _needWriteSnack();
+                          if (!_canWriteHere) return _needWriteSnack();
                           setState(() {
                             _editImagesMode = !_editImagesMode;
                             _selectedImageIndex = -1;
@@ -2136,7 +2477,7 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                           _openExportChooser();
                         },
                       ),
-                      if (!offline && !_canWrite)
+                      if (!offline && !_canWriteBoard)
                         _ActionButton(
                           icon: Icons.edit,
                           label: 'ขอสิทธิ์เขียน',
@@ -2155,6 +2496,13 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
                         ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Room: ${widget.boardId}',
+                    style: Theme.of(
+                      ctx,
+                    ).textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
                 ],
               ),
             );
@@ -2162,6 +2510,92 @@ class _NoteScribblePageState extends State<NoteScribblePage> {
         );
       },
     );
+  }
+
+  Future<void> _openInviteFriendsSheet() async {
+    if (offline || _role != 'owner') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('เฉพาะเจ้าของห้องเท่านั้นที่เชิญเพื่อนได้'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final me = sp.getInt('user_id');
+      if (me == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ไม่พบ user_id ในเครื่อง')),
+        );
+        return;
+      }
+
+      final uri = Uri.parse(
+        '$baseServerUrl/api/boards/${widget.boardId}/friends?user_id=$me',
+      );
+      final resp = await http.get(uri);
+
+      if (resp.statusCode != 200) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('โหลดรายชื่อเพื่อนไม่สำเร็จ (${resp.statusCode})'),
+          ),
+        );
+        return;
+      }
+
+      final List<dynamic> raw = jsonDecode(resp.body) as List<dynamic>;
+      final friends = raw
+          .map(
+            (e) => _InviteFriend.fromJson(Map<String, dynamic>.from(e as Map)),
+          )
+          .toList();
+
+      if (!mounted) return;
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        showDragHandle: true,
+        builder: (ctx) {
+          return _InviteFriendsSheet(
+            boardId: widget.boardId,
+            meUserId: me,
+            initial: friends,
+          );
+        },
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('เกิดข้อผิดพลาด: $e')));
+    }
+  }
+}
+
+class _InviteFriend {
+  final int userId;
+  final String name;
+
+  _InviteFriend({required this.userId, required this.name});
+
+  factory _InviteFriend.fromJson(Map<String, dynamic> j) {
+    final dynamic idRaw = j['userId'] ?? j['id'] ?? j['user_id'];
+    final int id = (idRaw is int) ? idRaw : int.parse(idRaw.toString());
+
+    final String name =
+        (j['name'] ??
+                j['display_name'] ??
+                j['fullname'] ??
+                j['full_name'] ??
+                j['email'] ??
+                'ไม่ทราบชื่อ')
+            .toString();
+
+    return _InviteFriend(userId: id, name: name);
   }
 }
 
@@ -2543,6 +2977,122 @@ class _RainbowPanel2DState extends State<_RainbowPanel2D> {
           ),
         );
       },
+    );
+  }
+}
+
+class _InviteFriendsSheet extends StatefulWidget {
+  final String boardId;
+  final int meUserId;
+  final List<_InviteFriend> initial;
+
+  const _InviteFriendsSheet({
+    required this.boardId,
+    required this.meUserId,
+    required this.initial,
+  });
+
+  @override
+  State<_InviteFriendsSheet> createState() => _InviteFriendsSheetState();
+}
+
+class _InviteFriendsSheetState extends State<_InviteFriendsSheet> {
+  late List<_InviteFriend> _friends;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _friends = List<_InviteFriend>.from(widget.initial);
+  }
+
+  Future<void> _invite(_InviteFriend f) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      final resp = await http.post(
+        Uri.parse('$baseServerUrl/api/boards/${widget.boardId}/invite'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'user_id': widget.meUserId,
+          'target_user_id': f.userId,
+        }),
+      );
+
+      if (!mounted) return;
+      if (resp.statusCode == 200) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('เชิญ ${f.name} เข้าห้องแล้ว')));
+        setState(() {
+          _friends.removeWhere((x) => x.userId == f.userId);
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('เชิญไม่สำเร็จ (${resp.statusCode})')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('เชิญไม่สำเร็จ: $e')));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+          left: 16,
+          right: 16,
+          top: 12,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'เชิญเพื่อนเข้าห้องโน๊ต',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 12),
+            if (_friends.isEmpty)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'ยังไม่มีเพื่อนที่ยังไม่ได้อยู่ในห้องนี้',
+                  textAlign: TextAlign.center,
+                ),
+              )
+            else
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: _friends.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (ctx, i) {
+                    final f = _friends[i];
+                    return ListTile(
+                      leading: const CircleAvatar(child: Icon(Icons.person)),
+                      title: Text(f.name),
+                      subtitle: Text('UID ${f.userId}'),
+                      trailing: TextButton.icon(
+                        onPressed: _busy ? null : () => _invite(f),
+                        icon: const Icon(Icons.send),
+                        label: const Text('เชิญ'),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
     );
   }
 }

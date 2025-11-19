@@ -10,6 +10,33 @@ import 'package:http/http.dart' as http;
 
 const _reqTimeout = Duration(seconds: 20);
 
+/// ====== Model: BoardTopic (หัวข้อในแต่ละบอร์ดโน๊ต) ======
+class BoardTopic {
+  final String id;
+  final String boardId;
+  final String title;
+  final int orderIndex;
+  final DateTime createdAt;
+
+  BoardTopic({
+    required this.id,
+    required this.boardId,
+    required this.title,
+    required this.orderIndex,
+    required this.createdAt,
+  });
+
+  factory BoardTopic.fromJson(Map<String, dynamic> json) {
+    return BoardTopic(
+      id: json['id'] as String,
+      boardId: json['board_id'] as String,
+      title: (json['title'] as String?) ?? '',
+      orderIndex: (json['order_index'] as int?) ?? 0,
+      createdAt: DateTime.parse(json['created_at'] as String),
+    );
+  }
+}
+
 class ApiService {
   // ================= BASE URL =================
   // CHANGED: รองรับ --dart-define=API_BASE ทั้ง Web และ Non-Web
@@ -21,8 +48,8 @@ class ApiService {
     if (kIsWeb) {
       return 'http://localhost:3000';
     }
-    if (Platform.isAndroid) return 'http://192.168.1.127:3000'; // Android emulator
-    return 'http://192.168.1.127:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
+    if (Platform.isAndroid) return 'http://10.0.2.2:3000'; // Android emulator
+    return 'http://192.168.1.157:3000'; // ปรับเป็น IP เครื่อง dev ของคุณ
   }
 
   // -------- Base paths --------
@@ -87,6 +114,42 @@ class ApiService {
     if (i < 0) throw const FormatException('Invalid data URL');
     final b64 = dataUrl.substring(i + 1);
     return base64Decode(b64);
+  }
+
+  // ============== Boards / Topics (หัวข้อโน๊ต) ==============
+
+  /// ดึงหัวข้อทั้งหมดของ board หนึ่ง ๆ
+  static Future<List<BoardTopic>> getBoardTopics(String boardId) async {
+    final uri = Uri.parse('$host/api/boards/$boardId/topics');
+    final res = await http.get(uri).timeout(_reqTimeout);
+    _ensureOk(res);
+
+    // รองรับ utf8 (กันตัวอักษรไทยเพี้ยน)
+    final body = utf8.decode(res.bodyBytes);
+    final data = jsonDecode(body) as List<dynamic>;
+    return data
+        .map((e) => BoardTopic.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// สร้างหัวข้อใหม่ใน board นั้น ๆ
+  static Future<BoardTopic> createBoardTopic({
+    required String boardId,
+    required String title,
+  }) async {
+    final uri = Uri.parse('$host/api/boards/$boardId/topics');
+    final res = await http
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'title': title}),
+        )
+        .timeout(_reqTimeout);
+    _ensureOk(res);
+
+    final body = utf8.decode(res.bodyBytes);
+    final data = jsonDecode(body) as Map<String, dynamic>;
+    return BoardTopic.fromJson(data);
   }
 
   // ============== Auth ==============
@@ -525,39 +588,43 @@ class ApiService {
     return postJson('/api/purchases', {'postId': postId, 'buyerId': buyerId});
   }
 
-static Future<Map<String, dynamic>> createPurchase({
-  required int postId,
-  required int buyerId,
-}) async {
-  final r = await http.post(
-    Uri.parse('$host/api/purchases'),
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({'postId': postId, 'buyerId': buyerId}),
-  ).timeout(_reqTimeout);
-  _ensureOk(r);
-  return jsonDecode(r.body) as Map<String, dynamic>;
-}
+  static Future<Map<String, dynamic>> createPurchase({
+    required int postId,
+    required int buyerId,
+  }) async {
+    final r = await http
+        .post(
+          Uri.parse('$host/api/purchases'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'postId': postId, 'buyerId': buyerId}),
+        )
+        .timeout(_reqTimeout);
+    _ensureOk(r);
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
 
-static Future<Map<String, dynamic>> getPurchase(int id) async {
-  final r = await http.get(Uri.parse('$host/api/purchases/$id')).timeout(_reqTimeout);
-  _ensureOk(r);
-  return jsonDecode(r.body) as Map<String, dynamic>;
-}
+  static Future<Map<String, dynamic>> getPurchase(int id) async {
+    final r = await http
+        .get(Uri.parse('$host/api/purchases/$id'))
+        .timeout(_reqTimeout);
+    _ensureOk(r);
+    return jsonDecode(r.body) as Map<String, dynamic>;
+  }
 
- static Future<Map<String, dynamic>> uploadPurchaseSlip({
-  required int purchaseId,
-  required File slipFile,
-}) async {
-  final req = http.MultipartRequest(
-    'POST',
-    Uri.parse('$host/api/purchases/$purchaseId/slip'),
-  );
-  req.files.add(await http.MultipartFile.fromPath('slip', slipFile.path));
-  final streamed = await req.send().timeout(_reqTimeout);
-  final res = await http.Response.fromStream(streamed);
-  _ensureOk(res);
-  return jsonDecode(res.body) as Map<String, dynamic>;
-}
+  static Future<Map<String, dynamic>> uploadPurchaseSlip({
+    required int purchaseId,
+    required File slipFile,
+  }) async {
+    final req = http.MultipartRequest(
+      'POST',
+      Uri.parse('$host/api/purchases/$purchaseId/slip'),
+    );
+    req.files.add(await http.MultipartFile.fromPath('slip', slipFile.path));
+    final streamed = await req.send().timeout(_reqTimeout);
+    final res = await http.Response.fromStream(streamed);
+    _ensureOk(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
 
   /// ตรวจสอบสถานะการซื้อ
   /// - ถ้า status = 'approved' → สามารถเข้าถึงโพสต์ได้แล้ว
@@ -655,23 +722,20 @@ static Future<Map<String, dynamic>> getPurchase(int id) async {
       );
     }
   }
-  // Future<bool> deletePost(int id) async {
-  //   final r = await http.delete(Uri.parse('$_posts/$id')).timeout(_reqTimeout);
-  //   return r.statusCode == 200;
-  // }
-Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
-  final uri = Uri.parse('$_posts/$id');
-  final res = await http
-      .delete(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: (userId == null) ? null : jsonEncode({'user_id': userId}),
-      )
-      .timeout(_reqTimeout);
 
-  final data = jsonDecode(res.body);
-  return {'ok': res.statusCode == 200, 'message': data['message'] ?? ''};
-}
+  Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
+    final uri = Uri.parse('$_posts/$id');
+    final res = await http
+        .delete(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: (userId == null) ? null : jsonEncode({'user_id': userId}),
+        )
+        .timeout(_reqTimeout);
+
+    final data = jsonDecode(res.body);
+    return {'ok': res.statusCode == 200, 'message': data['message'] ?? ''};
+  }
 
   // ============== Friends ==============
 
@@ -794,26 +858,12 @@ Future<Map<String, dynamic>> deletePost(int id, {int? userId}) async {
   }
 
   Future<Map<String, dynamic>> getWithdrawConfig() async {
-  final uri = Uri.parse('$host/api/withdrawals/config');
-
-  final res = await http.get(
-    uri,
-    headers: {
-      'Accept': 'application/json',
-      // ถ้ามี token ให้ใส่แบบนี้:
-      // 'Authorization': 'Bearer $token',
-    },
-  );
-
-  if (res.statusCode != 200) {
-    throw '(${res.statusCode}) ${res.body}';
+    final r = await http.get(Uri.parse('$host/api/withdrawals/config'));
+    if (r.statusCode != 200) {
+      throw Exception('config ${r.statusCode}: ${r.body}');
+    }
+    return jsonDecode(r.body) as Map<String, dynamic>;
   }
-
-  final data = jsonDecode(res.body);
-  return (data is Map<String, dynamic>)
-      ? data
-      : <String, dynamic>{};
-}
 
   /// ดึงยอดเหรียญคงเหลือของผู้ใช้
   Future<int> getWalletBalance({int? userId}) async {
@@ -907,7 +957,7 @@ Future<bool> reportPost({
   required String reason,
   String? details,
 }) async {
-  final url = Uri.parse('host/api/reports');
+  final url = Uri.parse('${ApiService.host}/api/reports');
   final res = await http.post(
     url,
     headers: {'Content-Type': 'application/json'},
@@ -921,23 +971,25 @@ Future<bool> reportPost({
   return res.statusCode == 200;
 }
 
-Future<Map<String,dynamic>> createRoom({
+Future<Map<String, dynamic>> createRoom({
   required String roomIdOrName,
   required int ownerId,
   String? password,
 }) async {
-  final url = Uri.parse('host/rooms');
+  final url = Uri.parse('${ApiService.host}/rooms');
   final body = {
-    'roomId': roomIdOrName,        // หรือใช้ name ก็ได้
+    'roomId': roomIdOrName, // หรือใช้ name ก็ได้
     'name': roomIdOrName,
-    'owner_id': ownerId,           // << สำคัญ
+    'owner_id': ownerId, // << สำคัญ
     if (password != null && password.isNotEmpty) 'password': password,
   };
-  final r = await http.post(url,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(body));
+  final r = await http.post(
+    url,
+    headers: {'Content-Type': 'application/json'},
+    body: jsonEncode(body),
+  );
   if (r.statusCode != 200) throw Exception('createRoom failed: ${r.body}');
-  return jsonDecode(r.body);
+  return jsonDecode(r.body) as Map<String, dynamic>;
 }
 
 // Error อ่านง่ายขึ้นเวลามี status >= 400

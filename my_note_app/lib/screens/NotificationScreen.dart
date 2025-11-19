@@ -4,6 +4,7 @@ import 'package:http/http.dart' as http;
 import 'package:my_note_app/api/api_service.dart';
 import 'package:my_note_app/widgets/post_card.dart';
 import 'package:my_note_app/screens/profile_screen.dart';
+import 'package:my_note_app/screens/Drawing_Screen.dart' as rt; // 👈 เพิ่มอันนี้
 
 /// ===== helpers =====
 String absUrl(String p) {
@@ -52,7 +53,9 @@ Map<String, dynamic> normalizePostForCard(Map raw) {
   } else if (imgs is String && imgs.trim().startsWith('[')) {
     try {
       final parsed = (jsonDecode(imgs) as List)
-          .map((e) => e is Map ? (e['image_url'] ?? e['url'] ?? '').toString() : e.toString())
+          .map((e) => e is Map
+              ? (e['image_url'] ?? e['url'] ?? '').toString()
+              : e.toString())
           .where((e) => e.isNotEmpty)
           .toList();
       images = parsed;
@@ -74,25 +77,26 @@ Map<String, dynamic> normalizePostForCard(Map raw) {
   }
 
   return <String, dynamic>{
-    'id'         : asInt(data['id']),
-    'user_id'    : asInt(data['user_id'] ?? data['author_id'] ?? data['owner_id']),
-    'username'   : username,
-    'avatar_url' : avatarUrl,
-
-    'subject'    : (data['subject'] ?? '').toString(),
-    'year_label' : (data['year_label'] ?? '').toString(),
-    'text'       : (data['text'] ?? '').toString(),
-    'created_at' : (data['created_at'] ?? '').toString(),
-
-    'images'     : images,
-    'image_url'  : (data['image_url'] ?? '').toString(), // legacy
-
-    'file_url'   : (data['file_url'] ?? '').toString(),
-
-    'like_count'    : asInt(data['like_count']),
-    'comment_count' : asInt(data['comment_count']),
-    'liked_by_me'   : asBool(
-      data['liked_by_me'] ?? data['like_by_me'] ?? data['likedByMe'] ?? data['is_liked'] ?? data['liked'] ?? false,
+    'id': asInt(data['id']),
+    'user_id': asInt(data['user_id'] ?? data['author_id'] ?? data['owner_id']),
+    'username': username,
+    'avatar_url': avatarUrl,
+    'subject': (data['subject'] ?? '').toString(),
+    'year_label': (data['year_label'] ?? '').toString(),
+    'text': (data['text'] ?? '').toString(),
+    'created_at': (data['created_at'] ?? '').toString(),
+    'images': images,
+    'image_url': (data['image_url'] ?? '').toString(), // legacy
+    'file_url': (data['file_url'] ?? '').toString(),
+    'like_count': asInt(data['like_count']),
+    'comment_count': asInt(data['comment_count']),
+    'liked_by_me': asBool(
+      data['liked_by_me'] ??
+          data['like_by_me'] ??
+          data['likedByMe'] ??
+          data['is_liked'] ??
+          data['liked'] ??
+          false,
     ),
   };
 }
@@ -101,7 +105,8 @@ Map<String, dynamic> normalizePostForCard(Map raw) {
 class PostDetailScreen extends StatefulWidget {
   final int postId;
   final int viewerUserId;
-  const PostDetailScreen({super.key, required this.postId, required this.viewerUserId});
+  const PostDetailScreen(
+      {super.key, required this.postId, required this.viewerUserId});
 
   @override
   State<PostDetailScreen> createState() => _PostDetailScreenState();
@@ -138,7 +143,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     } catch (_) {}
 
     try {
-      final uri = Uri.parse('${ApiService.host}/api/posts/${widget.postId}?user_id=${widget.viewerUserId}');
+      final uri = Uri.parse(
+          '${ApiService.host}/api/posts/${widget.postId}?user_id=${widget.viewerUserId}');
       final res = await http.get(uri);
       if (res.statusCode == 200) {
         final json = jsonDecode(res.body) as Map<String, dynamic>;
@@ -163,7 +169,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+          body: Center(child: CircularProgressIndicator()));
     }
     if (_err != null) {
       return Scaffold(
@@ -215,8 +222,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
   String _timeText(String iso) {
     try {
       final t = DateTime.parse(iso).toLocal();
-      return '${t.year}-${t.month.toString().padLeft(2,'0')}-${t.day.toString().padLeft(2,'0')} '
-             '${t.hour.toString().padLeft(2,'0')}:${t.minute.toString().padLeft(2,'0')}';
+      return '${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')} '
+          '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
     } catch (_) {
       return iso;
     }
@@ -238,7 +245,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
     if (_marking) return;
     setState(() => _marking = true);
     try {
-      final uri = Uri.parse('${ApiService.host}/api/notifications/mark-all-read');
+      final uri =
+          Uri.parse('${ApiService.host}/api/notifications/mark-all-read');
       final res = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
@@ -250,7 +258,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
       } else {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('ทำเครื่องหมายไม่สำเร็จ (${res.statusCode})')),
+          SnackBar(
+              content:
+                  Text('ทำเครื่องหมายไม่สำเร็จ (${res.statusCode})')),
         );
       }
     } catch (e) {
@@ -281,19 +291,38 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final int? postId = _toInt(n['post_id']);
     final int? notiId = _toInt(n['id']);
     final int? actorId = _toInt(n['actor_id']);
+    final int? boardId = _toInt(n['board_id']); // 👈 เพิ่มรองรับ board_id
+    final String action = (n['action'] ?? '').toString();
 
     // mark read (ไม่บล็อก)
     if (notiId != null) {
       try {
         await http.post(
-          Uri.parse('${ApiService.host}/api/notifications/$notiId/mark-read'),
+          Uri.parse(
+              '${ApiService.host}/api/notifications/$notiId/mark-read'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'user_id': widget.userId}),
         );
       } catch (_) {}
     }
 
-    // ถ้ามี post → เปิดโพสต์
+    // ✅ 1) กรณีเป็นการเชิญเข้าห้องโน้ต (board_invite)
+    if (action == 'board_invite' && boardId != null) {
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => rt.NoteScribblePage(
+            boardId: boardId.toString(), // ปรับให้ตรงกับ constructor จริงของคุณ
+            socket: null,      // ถ้า constructor ใช้ชื่อ parameter อื่นให้แก้ตรงนี้
+          ),
+        ),
+      );
+      await _refresh();
+      return;
+    }
+
+    // 2) ถ้ามี post → เปิดโพสต์ (logic เดิม)
     if (postId != null) {
       if (!mounted) return;
       await Navigator.push(
@@ -309,7 +338,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       return;
     }
 
-    // ✅ ไม่มี post → เปิดโปรไฟล์ผู้กระทำ (รองรับ noti ประเภท friend, follow, ฯลฯ)
+    // 3) ไม่มี post / board → เปิดโปรไฟล์ผู้กระทำ (รองรับ noti ประเภท friend, follow ฯลฯ)
     if (actorId != null) {
       await _openProfile(actorId);
     }
@@ -330,7 +359,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
           TextButton(
             onPressed: _marking ? null : _markAllRead,
             child: _marking
-                ? const Text('กำลังทำ...', style: TextStyle(color: Colors.grey))
+                ? const Text('กำลังทำ...',
+                    style: TextStyle(color: Colors.grey))
                 : const Text('อ่านทั้งหมด'),
           ),
         ],
@@ -342,7 +372,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (snap.hasError) {
-            return Center(child: Text('เกิดข้อผิดพลาด: ${snap.error}'));
+            return Center(
+                child: Text('เกิดข้อผิดพลาด: ${snap.error}'));
           }
           final items = snap.data ?? [];
           if (items.isEmpty) {
@@ -362,34 +393,55 @@ class _NotificationScreenState extends State<NotificationScreen> {
             child: ListView.separated(
               padding: const EdgeInsets.all(12),
               itemCount: items.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 10),
+              separatorBuilder: (_, __) =>
+                  const SizedBox(height: 10),
               itemBuilder: (_, i) {
-                final n        = (items[i] as Map).cast<String, dynamic>();
-                final isRead   = (n['is_read'] ?? false) as bool;
-                final msg      = (n['message'] ?? '').toString();
-                final action   = (n['action'] ?? '').toString();
-                final ts       = (n['created_at'] ?? '').toString();
-                final actor    = (n['actor_name'] ?? '').toString();
+                final n =
+                    (items[i] as Map).cast<String, dynamic>();
+                final isRead =
+                    (n['is_read'] ?? false) as bool;
+                final msg =
+                    (n['message'] ?? '').toString();
+                final action =
+                    (n['action'] ?? '').toString();
+                final ts =
+                    (n['created_at'] ?? '').toString();
+                final actor =
+                    (n['actor_name'] ?? '').toString();
 
                 // ✅ ใช้คีย์ให้ตรงกับ API
-                final avatar   = (n['actor_avatar'] ?? '').toString();
-                final thumb    = (n['post_image'] ?? '').toString();
+                final avatar =
+                    (n['actor_avatar'] ?? '').toString();
+                final thumb =
+                    (n['post_image'] ?? '').toString();
 
                 return Material(
                   color: isRead
-                      ? Theme.of(context).colorScheme.surface
-                      : Theme.of(context).colorScheme.surfaceTint.withOpacity(.10),
-                  borderRadius: BorderRadius.circular(14),
+                      ? Theme.of(context)
+                          .colorScheme
+                          .surface
+                      : Theme.of(context)
+                          .colorScheme
+                          .surfaceTint
+                          .withOpacity(.10),
+                  borderRadius:
+                      BorderRadius.circular(14),
                   child: ListTile(
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(14)),
 
                     // ✅ แตะ avatar เพื่อไปโปรไฟล์ของผู้กระทำ
                     leading: InkWell(
                       onTap: () {
-                        final actorId = _toInt(n['actor_id']);
-                        if (actorId != null) _openProfile(actorId);
+                        final actorId =
+                            _toInt(n['actor_id']);
+                        if (actorId != null) {
+                          _openProfile(actorId);
+                        }
                       },
-                      child: _Avatar(url: avatar, name: actor),
+                      child: _Avatar(
+                          url: avatar, name: actor),
                     ),
 
                     title: Text(
@@ -406,11 +458,17 @@ class _NotificationScreenState extends State<NotificationScreen> {
                     // ✅ แสดงรูปแรกของโพสต์ทางขวา
                     trailing: (thumb.isNotEmpty)
                         ? ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius:
+                                BorderRadius.circular(8),
                             child: Image.network(
                               absUrl(thumb),
-                              width: 56, height: 56, fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported),
+                              width: 56,
+                              height: 56,
+                              fit: BoxFit.cover,
+                              errorBuilder:
+                                  (_, __, ___) =>
+                                      const Icon(Icons
+                                          .image_not_supported),
                             ),
                           )
                         : const Icon(Icons.chevron_right),
@@ -434,7 +492,8 @@ class _Avatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final initials = (name.isNotEmpty ? name.trim()[0].toUpperCase() : '?');
+    final initials =
+        (name.isNotEmpty ? name.trim()[0].toUpperCase() : '?');
     if (url.isNotEmpty) {
       return CircleAvatar(
         radius: 22,
@@ -447,7 +506,9 @@ class _Avatar extends StatelessWidget {
     return CircleAvatar(
       radius: 22,
       backgroundColor: Colors.blueGrey.shade100,
-      child: Text(initials, style: const TextStyle(fontWeight: FontWeight.bold)),
+      child: Text(initials,
+          style:
+              const TextStyle(fontWeight: FontWeight.bold)),
     );
   }
 }

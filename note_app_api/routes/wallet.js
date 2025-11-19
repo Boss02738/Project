@@ -11,9 +11,9 @@ router.get('/api/wallet', async (req, res) => {
   const userId = getUserId(req);
   if (!userId) return res.status(400).json({ error: 'invalid_user' });
   try {
-    const q = await pool.query(
-      `SELECT coins FROM user_wallets WHERE user_id = $1`,
-      [userId]
+    const q = await pool.query(`
+      SELECT coins FROM user_wallets WHERE user_id = $1,
+      [userId]`
     );
     const coins = q.rowCount ? Number(q.rows[0].coins) : 0;
     return res.json({ coins });
