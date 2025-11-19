@@ -1,3 +1,35 @@
+// import 'package:socket_io_client/socket_io_client.dart' as IO;
+
+// class SocketService {
+//   static final SocketService _i = SocketService._internal();
+//   factory SocketService() => _i;
+//   SocketService._internal();
+
+//   IO.Socket? _socket;
+
+//   void connect(String baseUrl) {
+//     _socket ??= IO.io(baseUrl, IO.OptionBuilder()
+//         .setTransports(['websocket'])
+//         .disableAutoConnect()
+//         .build());
+//     if (!(_socket?.connected ?? false)) _socket!.connect();
+//   }
+
+//   void joinUserRoom(int userId) {
+//     _socket?.emit('join_user', {'userId': userId});
+//   }
+
+//   void onNotify(void Function(dynamic data) handler) {
+//     _socket?.on('notify', handler);
+//   }
+
+//   void dispose() {
+//     _socket?.dispose();
+//     _socket = null;
+//   }
+// }
+
+// lib/services/socket_service.dart
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
 class SocketService {
@@ -17,34 +49,18 @@ class SocketService {
           .disableAutoConnect()
           .build(),
     );
-
-    // เคลียร์ listener เดิมก่อนกันซ้ำ
-    _socket!
-      ..off('connect')
-      ..on('connect', (_) {
-        // debug ดูใน log ได้
-        print('[socket] connected to $baseUrl');
-      });
-
-    if (!(_socket?.connected ?? false)) {
-      _socket!.connect();
-    }
+    if (!(_socket?.connected ?? false)) _socket!.connect();
   }
 
-  /// (เดิมชื่อ joinUserRoom) แต่ฝั่ง server ของคุณใช้ event ชื่อ `register`
-  /// app.js:
-  ///   socket.on("register", (userId) => {
-  ///     socket.join(`user:${id}`);
-  ///     ...
-  ///   });
-  void registerUser(int userId) {
+  void joinUserRoom(int userId) {
+    // ให้ตรงกับ server: socket.on("register", ...)
     _socket?.emit('register', userId);
   }
 
   // ถ้ายังมีฝั่ง server ใช้ 'notify' อยู่ก็เก็บไว้ได้
   void onNotify(void Function(dynamic data) handler) {
-    _socket?.off('notify');
-    _socket?.on('notify', handler);
+    // ให้ตรงกับ notificationController: io.to(...).emit("notification:new", item)
+    _socket?.on('notification:new', handler);
   }
 
   /// ฟัง event ตอนโดนเชิญเข้าห้องโน้ต

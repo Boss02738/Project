@@ -6,3 +6,4 @@ function generatePromptPayPayload({ target, amount }) {
 }
 
 module.exports = { generatePromptPayPayload };
+  

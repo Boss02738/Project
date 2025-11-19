@@ -611,20 +611,22 @@ class ApiService {
     return jsonDecode(r.body) as Map<String, dynamic>;
   }
 
-  static Future<Map<String, dynamic>> uploadPurchaseSlip({
-    required int purchaseId,
-    required File slipFile,
-  }) async {
-    final req = http.MultipartRequest(
-      'POST',
-      Uri.parse('$host/api/purchases/$purchaseId/slip'),
-    );
-    req.files.add(await http.MultipartFile.fromPath('slip', slipFile.path));
-    final streamed = await req.send().timeout(_reqTimeout);
-    final res = await http.Response.fromStream(streamed);
-    _ensureOk(res);
-    return jsonDecode(res.body) as Map<String, dynamic>;
-  }
+ static Future<Map<String, dynamic>> uploadPurchaseSlip({
+  required int purchaseId,
+  required File slipFile,
+}) async {
+final req = http.MultipartRequest(
+  'POST',
+  Uri.parse('${ApiService.host}/api/purchases/$purchaseId/slip'),
+);
+req.files.add(
+  await http.MultipartFile.fromPath('slip', slipFile.path),
+);
+  final streamed = await req.send().timeout(_reqTimeout);
+  final res = await http.Response.fromStream(streamed);
+  _ensureOk(res);
+  return jsonDecode(res.body) as Map<String, dynamic>;
+}
 
   /// ตรวจสอบสถานะการซื้อ
   /// - ถ้า status = 'approved' → สามารถเข้าถึงโพสต์ได้แล้ว
