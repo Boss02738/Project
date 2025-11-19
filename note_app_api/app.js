@@ -1,6 +1,3 @@
-// Project/note_app_api/app.js  (API + NoteCoLab realtime + Payments + Roles)
-require("dotenv").config();
-
 /* ================= CORE & THIRD-PARTY ================= */
 const express = require("express");
 const http = require("http");
@@ -15,6 +12,7 @@ const dayjs = require("dayjs");
 const QRCode = require("qrcode");
 const session = require("express-session");
 const expressLayouts = require("express-ejs-layouts");
+require("dotenv").config();
 
 /* ================= DB ================= */
 const pool = require("./models/db");
@@ -31,6 +29,7 @@ const purchasesRouter = require("./routes/purchases");
 const reportRoutes = require("./routes/reportRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
 const friendRoutes = require("./routes/friendRoutes");
+const boardTopicsRoutes = require("./routes/boardTopics");
 
 /* ================= APP/HTTP/IO ================= */
 const app = express();
@@ -84,12 +83,13 @@ app.use("/api/auth", authRoutes);
 app.use("/api/posts", postRoutes);
 app.use("/api/search", searchRoutes);
 app.use("/api", userRoutes);
-app.use(withdrawalsRouter);
+app.use("/api/withdrawals", withdrawalsRouter);
 app.use(walletRouter);
 app.use("/api/purchases", purchasesRouter);
 app.use("/api/friends", friendRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use(adminRoutes);
+app.use("/api/boards", boardTopicsRoutes);
 
 /* ================= HEALTH ================= */
 app.get("/", (_req, res) =>
@@ -143,6 +143,8 @@ async function ensureSchema3Tables() {
     ALTER TABLE board_pages ALTER COLUMN snapshot SET DEFAULT '{"lines":[],"texts":[],"images":[]}'::jsonb;
     ALTER TABLE board_pages ADD COLUMN IF NOT EXISTS version    BIGINT  DEFAULT 1;
     ALTER TABLE board_pages ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+    -- NEW: รองรับ topic_id สำหรับผูกหน้ากับหัวข้อ
+    ALTER TABLE board_pages ADD COLUMN IF NOT EXISTS topic_id   UUID;
 
     ALTER TABLE documents   ADD COLUMN IF NOT EXISTS title      TEXT;
     ALTER TABLE documents   ADD COLUMN IF NOT EXISTS board_id   TEXT;
@@ -247,57 +249,14 @@ BEGIN
 END$$;
   `);
 
-  // Create commonly used indexes. For purchased_posts we tolerate older schemas
-  // that use `user_id` instead of `buyer_id` by adding a `buyer_id` column
-  // when needed and copying values from `user_id`.
+  // Create commonly used indexes
   await pool.query(`
     CREATE INDEX IF NOT EXISTS idx_purchases_status_created ON public.purchases(status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_post_access_user ON public.post_access(user_id, granted_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_purchased_posts_user ON public.purchased_posts(user_id, granted_at DESC);
   `);
-}
-async function ensureCollabAccessSchema() {
-  await pool.query(
-    `ALTER TABLE boards DROP CONSTRAINT IF EXISTS boards_owner_id_fkey;`
-  );
+
+  // handle legacy schemas for purchased_posts
   await pool.query(`
-    ALTER TABLE boards
-    ADD CONSTRAINT boards_owner_id_fkey
-    FOREIGN KEY (owner_id) REFERENCES public.users(id_user)
-    ON UPDATE CASCADE ON DELETE SET NULL;
-  `);
-
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS board_members (
-      board_id  TEXT    NOT NULL REFERENCES boards(id)                 ON DELETE CASCADE,
-      user_id   INTEGER NOT NULL REFERENCES public.users(id_user)      ON DELETE CASCADE,
-      role      TEXT    NOT NULL CHECK (role IN ('owner','editor','viewer')),
-      joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      PRIMARY KEY (board_id, user_id)
-    );
-  `);
-
-  await pool.query(
-    `CREATE UNIQUE INDEX IF NOT EXISTS uniq_board_owner    ON board_members(board_id) WHERE role='owner';`
-  );
-  await pool.query(
-    `CREATE INDEX  IF NOT EXISTS idx_board_members_board   ON board_members(board_id);`
-  );
-  await pool.query(
-    `CREATE INDEX  IF NOT EXISTS idx_board_members_user    ON board_members(user_id);`
-  );
-
-  await pool.query(`
-    INSERT INTO board_members (board_id, user_id, role)
-    SELECT b.id, b.owner_id, 'owner'
-      FROM boards b
-      JOIN public.users u ON u.id_user = b.owner_id
- LEFT JOIN board_members bm ON bm.board_id=b.id AND bm.user_id=b.owner_id
-     WHERE b.owner_id IS NOT NULL AND bm.board_id IS NULL;
-  `);
-}
-
-await pool.query(`
 DO $$
 BEGIN
   IF EXISTS(
@@ -353,7 +312,48 @@ BEGIN
   END IF;
 END$$;
   `);
+}
 
+async function ensureCollabAccessSchema() {
+  await pool.query(
+    `ALTER TABLE boards DROP CONSTRAINT IF EXISTS boards_owner_id_fkey;`
+  );
+  await pool.query(`
+    ALTER TABLE boards
+    ADD CONSTRAINT boards_owner_id_fkey
+    FOREIGN KEY (owner_id) REFERENCES public.users(id_user)
+    ON UPDATE CASCADE ON DELETE SET NULL;
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS board_members (
+      board_id  TEXT    NOT NULL REFERENCES boards(id)                 ON DELETE CASCADE,
+      user_id   INTEGER NOT NULL REFERENCES public.users(id_user)      ON DELETE CASCADE,
+      role      TEXT    NOT NULL CHECK (role IN ('owner','editor','viewer')),
+      joined_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (board_id, user_id)
+    );
+  `);
+
+  await pool.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uniq_board_owner    ON board_members(board_id) WHERE role='owner';`
+  );
+  await pool.query(
+    `CREATE INDEX  IF NOT EXISTS idx_board_members_board   ON board_members(board_id);`
+  );
+  await pool.query(
+    `CREATE INDEX  IF NOT EXISTS idx_board_members_user    ON board_members(user_id);`
+  );
+
+  await pool.query(`
+    INSERT INTO board_members (board_id, user_id, role)
+    SELECT b.id, b.owner_id, 'owner'
+      FROM boards b
+      JOIN public.users u ON u.id_user = b.owner_id
+ LEFT JOIN board_members bm ON bm.board_id=b.id AND bm.user_id=b.owner_id
+     WHERE b.owner_id IS NOT NULL AND bm.board_id IS NULL;
+  `);
+}
 
 /* ===================================================================
    HELPERS
@@ -402,6 +402,7 @@ async function upsertBoard({ id, name, password, ownerId = null }) {
     );
   }
 }
+
 async function getBoard(id) {
   const { rows } = await pool.query(
     `SELECT id, name, password_hash, owner_id FROM boards WHERE id=$1`,
@@ -409,6 +410,35 @@ async function getBoard(id) {
   );
   return rows[0] || null;
 }
+
+/**
+ * หา topic หลักของ board ถ้าไม่มีก็สร้าง "หัวข้อหลัก" ให้
+ */
+async function getOrCreateDefaultTopic(boardId) {
+  // board_topics.id เป็น UUID, board_id เป็น TEXT
+  const { rows } = await pool.query(
+    `
+    SELECT id
+    FROM board_topics
+    WHERE board_id = $1
+    ORDER BY order_index, created_at
+    LIMIT 1
+    `,
+    [boardId]
+  );
+  if (rows[0]) return rows[0].id;
+
+  const insert = await pool.query(
+    `
+    INSERT INTO board_topics (id, board_id, title, order_index)
+    VALUES (gen_random_uuid(), $1, $2, 0)
+    RETURNING id
+    `,
+    [boardId, "หัวข้อหลัก"]
+  );
+  return insert.rows[0].id;
+}
+
 async function getPageCount(boardId) {
   const { rows } = await pool.query(
     `SELECT COALESCE(MAX(page_index),-1) AS max_page FROM board_pages WHERE board_id=$1`,
@@ -416,14 +446,20 @@ async function getPageCount(boardId) {
   );
   return Number(rows[0]?.max_page ?? -1) + 1;
 }
+
+/**
+ * ปรับให้ใส่ topic_id ด้วย (ใช้ default topic ของ board นั้น ๆ)
+ */
 async function ensurePageExists(boardId, pageIndex) {
+  const topicId = await getOrCreateDefaultTopic(boardId);
   await pool.query(
-    `INSERT INTO board_pages (board_id, page_index)
-     VALUES ($1,$2)
+    `INSERT INTO board_pages (board_id, page_index, topic_id)
+     VALUES ($1,$2,$3)
      ON CONFLICT (board_id, page_index) DO NOTHING`,
-    [boardId, pageIndex]
+    [boardId, pageIndex, topicId]
   );
 }
+
 async function setPageSnapshot(boardId, pageIndex, snapshotJson) {
   await ensurePageExists(boardId, pageIndex);
   await pool.query(
@@ -576,6 +612,7 @@ async function getMemberRole(boardId, userId) {
   );
   return rows[0]?.role || null;
 }
+
 async function ensureMember(boardId, userId) {
   const { rows } = await pool.query(`SELECT owner_id FROM boards WHERE id=$1`, [
     boardId,
@@ -590,7 +627,8 @@ async function ensureMember(boardId, userId) {
   );
   return role;
 }
-// >>> แก้เป็น UPSERT เสมอ
+
+// >>> UPSERT เสมอ
 async function upsertMemberRole(boardId, targetUserId, role) {
   if (!["viewer", "editor", "owner"].includes(role))
     throw new Error("invalid role");
@@ -604,9 +642,41 @@ async function upsertMemberRole(boardId, targetUserId, role) {
     [boardId, targetUserId, role]
   );
 }
+
+// คืน true ถ้า user เป็น owner หรือ editor ของ board นั้น
 async function canEdit(boardId, userId) {
   const r = await getMemberRole(boardId, userId);
   return r === "owner" || r === "editor";
+}
+
+// === NEW: ดึงรายชื่อสมาชิกในบอร์ด (สำหรับส่งให้ client) ===
+async function getRoomMembers(boardId) {
+  const { rows } = await pool.query(
+    `
+    SELECT
+      bm.user_id AS user_id,
+      bm.role    AS role,
+      COALESCE(u.username, u.email::text) AS name
+    FROM board_members bm
+    LEFT JOIN public.users u
+      ON u.id_user = bm.user_id
+    WHERE bm.board_id = $1
+    ORDER BY
+      CASE bm.role
+        WHEN 'owner'  THEN 0
+        WHEN 'editor' THEN 1
+        ELSE 2
+      END,
+      u.username, u.email
+    `,
+    [boardId]
+  );
+
+  return rows.map((r) => ({
+    userId: r.user_id,
+    role: r.role,
+    name: r.name, // จะไปเป็น RoomMember.name ใน Flutter
+  }));
 }
 
 /** Socket handlers */
@@ -660,12 +730,10 @@ io.on("connection", (socket) => {
       }
 
       socket.emit("join_ok", { boardId, role: roleNow || "viewer" });
-      socket
-        .to(boardId)
-        .emit("joined_board", {
-          userId: uid || null,
-          role: roleNow || "viewer",
-        });
+      socket.to(boardId).emit("joined_board", {
+        userId: uid || null,
+        role: roleNow || "viewer",
+      });
       await ensurePageExists(boardId, 0);
     } catch (e) {
       console.error("join error", e);
@@ -679,20 +747,41 @@ io.on("connection", (socket) => {
       const uid = Number(socket.data.userId);
       if (!Number.isInteger(uid) || uid <= 0)
         return socket.emit("error_msg", "unauthorized");
+
       const roleNow =
         (await getMemberRole(boardId, uid)) ??
         (await ensureMember(boardId, uid));
+
       socket.join(boardId);
+
+      // ดึงรายชื่อสมาชิกทั้งหมด (รวมเราเอง) ส่งให้คนที่เพิ่ง join
+      const members = await getRoomMembers(boardId);
       socket.emit("join_ok", { boardId, role: roleNow });
-      io.to(boardId).emit("member_joined", { userId: uid, role: roleNow });
-      socket.to(boardId).emit("joined_board", { userId: uid, role: roleNow });
+      socket.emit("room_members", { boardId, members });
+
+      // หา record ของตัวเรา เพื่อส่งชื่อไปกับ member_joined
+      const me = members.find((m) => m.userId === uid);
+
+      io.to(boardId).emit("member_joined", {
+        userId: uid,
+        role: roleNow,
+        name: me ? me.name : null,
+      });
+
+      socket.to(boardId).emit("joined_board", {
+        userId: uid,
+        role: roleNow,
+        name: me ? me.name : null,
+      });
+
       await ensurePageExists(boardId, 0);
     } catch (e) {
+      console.error("join_board error", e);
       socket.emit("error_msg", String(e.message));
     }
   });
 
-  // ผู้ชมขอสิทธิ์เขียน → ส่งตรงถึง owner + fanout (client filter เอง)
+  // ผู้ชมขอสิทธิ์เขียน
   socket.on("request_write", async ({ boardId }) => {
     try {
       const uid = Number(socket.data.userId);
@@ -705,13 +794,11 @@ io.on("connection", (socket) => {
       for (const sid of ownerSockets) {
         const s = io.sockets.sockets.get(sid);
         if (s && s.rooms.has(boardId)) {
-          // >>> ใช้คีย์ userId ให้ตรงกับ Flutter
           s.emit("write_request", { boardId, userId: uid });
           delivered++;
         }
       }
 
-      // fanout ทั้งห้อง (owner ที่เข้าห้องด้วยจะเห็นแน่)
       io.to(boardId).emit("write_request", {
         boardId,
         userId: uid,
@@ -741,13 +828,11 @@ io.on("connection", (socket) => {
 
       await upsertMemberRole(boardId, tid, "editor");
 
-      // แจ้งเฉพาะผู้ถูกอนุญาต (เฉพาะ socket ที่อยู่ในห้อง)
       const targetSockets = socketsByUser.get(tid) || new Set();
       for (const sid of targetSockets) {
         const s = io.sockets.sockets.get(sid);
         if (s && s.rooms.has(boardId)) s.emit("grant_write", { userId: tid });
       }
-      // กระจายสถานะรวม
       io.to(boardId).emit("member_role_changed", {
         boardId,
         userId: tid,
@@ -784,18 +869,62 @@ io.on("connection", (socket) => {
   });
 
   // ===== Content events (guard viewer) =====
-  async function requireEditOrDeny(boardId, evtName, cb) {
+  async function requireEditOrDeny(boardId, evtName, cb, pageIndex = null) {
     const uid = Number(socket.data.userId);
-    if (!Number.isInteger(uid) || uid <= 0)
+    if (!Number.isInteger(uid) || uid <= 0) {
       return socket.emit("permission_denied", {
         event: evtName,
         reason: "unauthorized",
       });
-    if (!(await canEdit(boardId, uid)))
+    }
+
+    // ยังต้องเป็น owner/editor เหมือนเดิม
+    const role = await getMemberRole(boardId, uid);
+    const canBoardEdit = role === "owner" || role === "editor";
+    if (!canBoardEdit) {
       return socket.emit("permission_denied", {
         event: evtName,
         reason: "viewer_only",
       });
+    }
+
+    // ถ้ามีระบุ pageIndex: เช็ค page_owner เพิ่ม
+    if (pageIndex !== null) {
+      try {
+        const snap = await getSnapshot(boardId, pageIndex);
+        const snapJson = snap?.snapshot || {};
+        let pageOwnerId = snapJson.page_owner_id ?? null;
+
+        if (typeof pageOwnerId === "string") {
+          const n = parseInt(pageOwnerId, 10);
+          pageOwnerId = Number.isInteger(n) ? n : null;
+        }
+
+        if (pageOwnerId && Number.isInteger(pageOwnerId) && pageOwnerId > 0) {
+          // ดึง owner ของ board
+          const board = await getBoard(boardId);
+          const boardOwnerId = board?.owner_id || null;
+
+          // rule:
+          // - เจ้าของห้อง: อนุญาตเสมอ
+          // - ถ้าไม่ใช่เจ้าของห้อง ต้องเป็น page_owner เท่านั้น
+          if (uid !== pageOwnerId && uid !== boardOwnerId) {
+            return socket.emit("permission_denied", {
+              event: evtName,
+              reason: "not_page_owner",
+            });
+          }
+        }
+      } catch (e) {
+        console.error("page-level check error", e);
+        // ถ้าเช็คพัง ให้ block ไว้ก่อน
+        return socket.emit("permission_denied", {
+          event: evtName,
+          reason: "page_check_failed",
+        });
+      }
+    }
+
     await cb(uid);
   }
 
@@ -866,19 +995,41 @@ io.on("connection", (socket) => {
 
   socket.on("set_sketch", async ({ boardId, page, sketch }) => {
     try {
-      await requireEditOrDeny(boardId, "set_sketch", async () => {
-        const p = Number.isInteger(page) ? page : 0;
-        const payload =
-          sketch && typeof sketch === "object"
-            ? {
-                lines: Array.isArray(sketch.lines) ? sketch.lines : [],
-                texts: Array.isArray(sketch.texts) ? sketch.texts : [],
-                images: Array.isArray(sketch.images) ? sketch.images : [],
-              }
-            : { lines: [], texts: [], images: [] };
-        await setPageSnapshot(boardId, p, payload);
-        socket.to(boardId).emit("set_sketch", { sketch: payload, page: p });
-      });
+      const p = Number.isInteger(page) ? page : 0;
+
+      await requireEditOrDeny(
+        boardId,
+        "set_sketch",
+        async (uid) => {
+          const raw = sketch && typeof sketch === "object" ? sketch : {};
+
+          // ดึง meta ออกมา
+          const pageTitle =
+            typeof raw.page_title === "string" ? raw.page_title : null;
+
+          let ownerId = null;
+          if (
+            raw.page_owner_id !== undefined &&
+            raw.page_owner_id !== null &&
+            raw.page_owner_id !== ""
+          ) {
+            const n = parseInt(raw.page_owner_id, 10);
+            ownerId = Number.isInteger(n) && n > 0 ? n : null;
+          }
+
+          const payload = {
+            lines: Array.isArray(raw.lines) ? raw.lines : [],
+            texts: Array.isArray(raw.texts) ? raw.texts : [],
+            images: Array.isArray(raw.images) ? raw.images : [],
+            page_title: pageTitle,
+            page_owner_id: ownerId,
+          };
+
+          await setPageSnapshot(boardId, p, payload);
+          socket.to(boardId).emit("set_sketch", { sketch: payload, page: p });
+        },
+        p
+      ); // ส่ง p ไปให้ requireEditOrDeny ใช้เช็ค page owner
     } catch (e) {
       console.error("set_sketch error", e);
     }
@@ -906,9 +1057,28 @@ io.on("connection", (socket) => {
     }
   });
 
+  // === NEW: ส่งรายชื่อสมาชิกในห้องให้ client ===
+  socket.on("get_room_members", async ({ boardId }) => {
+    try {
+      const members = await getRoomMembers(boardId);
+      socket.emit("room_members", { boardId, members });
+    } catch (e) {
+      console.error("get_room_members error", e);
+      socket.emit("room_members", { boardId, members: [] });
+    }
+  });
+
   socket.on("disconnect", () => {
     const uid = Number(socket.data.userId);
-    if (Number.isInteger(uid) && uid > 0) mapRemoveUserSocket(uid, socket.id);
+    if (Number.isInteger(uid) && uid > 0) {
+      mapRemoveUserSocket(uid, socket.id);
+
+      // แจ้งทุกห้องที่ socket เคย join ว่าคนนี้ออกแล้ว
+      for (const roomId of socket.rooms) {
+        if (roomId === socket.id) continue; // ข้าม room ของตัว socket เอง
+        io.to(roomId).emit("member_left", { userId: uid });
+      }
+    }
   });
 });
 
